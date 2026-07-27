@@ -119,34 +119,52 @@ func lifecycleSubject(artifactID string) (core.LifecycleSubjectRef, error) {
 	return subject, nil
 }
 
-// BuildEntryAssignment constructs the lifecycle entry State Assignment,
-// established by a content-free Transition Record Revision (AD-014):
-// PEOS v1.0.0's NewTransitionRecordContent rejects a zero fromAssignment, so
-// no entry Transition Record can carry TransitionRecordContent. Returns the
-// content-free revision's envelope and the entry assignment's envelope.
-func BuildEntryAssignment(in EntryAssignmentInput) (engineering.RevisionEnvelope, engineering.RecordEnvelope, error) {
+// BuildEntryAssignment constructs the Transition Record Artifact, the
+// lifecycle entry State Assignment, established by a content-free
+// Transition Record Revision (AD-014): PEOS v1.0.0's
+// NewTransitionRecordContent rejects a zero fromAssignment, so no entry
+// Transition Record can carry TransitionRecordContent. Returns the
+// artifact's envelope, the content-free revision's envelope, and the entry
+// assignment's envelope.
+func BuildEntryAssignment(in EntryAssignmentInput) (engineering.ArtifactEnvelope, engineering.RevisionEnvelope, engineering.RecordEnvelope, error) {
 	trArtifactID, err := core.NewArtifactID(in.TransitionRecordArtifactID)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("entry transition record artifact id", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("entry transition record artifact id", err)
 	}
 	trArtifact, err := core.NewArtifact(trArtifactID, lifecycle.ArtifactTypeTransitionRecord)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("entry transition record artifact", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("entry transition record artifact", err)
 	}
 	if _, err := lifecycle.NewTransitionRecord(trArtifact); err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("entry transition record", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("entry transition record", err)
 	}
+	artifactPayload, err := json.Marshal(trArtifact)
+	if err != nil {
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("entry transition record artifact marshal", err)
+	}
+	artifactKey, err := engineering.NewArtifactKey(in.TransitionRecordArtifactID)
+	if err != nil {
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
+	}
+	artifactEnv, err := engineering.NewArtifactEnvelope(
+		artifactKey, lifecycle.ArtifactTypeTransitionRecord.String(), artifactPayload,
+		engineering.ComputeDigest(artifactPayload), in.RecordedAt,
+	)
+	if err != nil {
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
+	}
+
 	trRevisionID, err := core.NewArtifactRevisionID(in.TransitionRecordRevisionID)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("entry transition record revision id", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("entry transition record revision id", err)
 	}
 	origin, err := core.NewOrigin(core.OriginKindKnown, "")
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("entry origin", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("entry origin", err)
 	}
 	provenance, err := provenanceFor(in.RecordedAt)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
 	}
 	// No PEOS Content object exists to hash for a content-free revision;
 	// its integrity protects the revision's own recorded identity.
@@ -156,15 +174,15 @@ func BuildEntryAssignment(in EntryAssignmentInput) (engineering.RevisionEnvelope
 		core.IntegrityProtectedScopeMetadata,
 	)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("entry integrity", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("entry integrity", err)
 	}
 	entryRev, err := core.NewArtifactRevision(trArtifactID, trRevisionID, origin, provenance, integrity)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("entry revision", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("entry revision", err)
 	}
 	trRevKey, err := engineering.NewRevisionKey(in.TransitionRecordArtifactID, in.TransitionRecordRevisionID)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
 	}
 	revEnv, err := buildRevisionEnvelope(revisionEnvelopeInput{
 		Key:          trRevKey,
@@ -175,7 +193,7 @@ func BuildEntryAssignment(in EntryAssignmentInput) (engineering.RevisionEnvelope
 		RecordedAt:   in.RecordedAt,
 	})
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
 	}
 
 	assignEnv, err := buildStateAssignment(
@@ -183,36 +201,36 @@ func BuildEntryAssignment(in EntryAssignmentInput) (engineering.RevisionEnvelope
 		in.TransitionRecordArtifactID, in.TransitionRecordRevisionID, in.RecordedAt,
 	)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
 	}
-	return revEnv, assignEnv, nil
+	return artifactEnv, revEnv, assignEnv, nil
 }
 
 // BuildTransition constructs a full Transition Record Revision -- carrying
 // TransitionRecordContent that names the source State Assignment it
 // departed from -- and the resulting State Assignment it establishes
 // (FF-011 §4.9).
-func BuildTransition(in TransitionInput) (engineering.RevisionEnvelope, engineering.RecordEnvelope, error) {
+func BuildTransition(in TransitionInput) (engineering.ArtifactEnvelope, engineering.RevisionEnvelope, engineering.RecordEnvelope, error) {
 	subject, err := lifecycleSubject(in.SubjectArtifactID)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
 	}
 	fromAssignmentID, err := core.NewStateAssignmentID(in.FromAssignmentID)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("from assignment id", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("from assignment id", err)
 	}
 	fromRef, err := core.NewStateAssignmentRef(fromAssignmentID)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("from assignment ref", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("from assignment ref", err)
 	}
 
 	trArtifactID, err := core.NewArtifactID(in.TransitionRecordArtifactID)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition record artifact id", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition record artifact id", err)
 	}
 	trRevisionID, err := core.NewArtifactRevisionID(in.TransitionRecordRevisionID)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition record revision id", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition record revision id", err)
 	}
 
 	// The resulting State Assignment is built first, citing the not-yet-
@@ -221,107 +239,126 @@ func BuildTransition(in TransitionInput) (engineering.RevisionEnvelope, engineer
 	// lifecycle example itself does.
 	resultingEstablishedBy, err := core.NewArtifactRevisionRef(trArtifactID, trRevisionID)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("resulting established-by ref", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("resulting established-by ref", err)
 	}
 	resultingAssignmentID, err := core.NewStateAssignmentID(in.AssignmentID)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("resulting assignment id", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("resulting assignment id", err)
 	}
 	stateID, err := lifecycle.NewStateID(Namespace + ":" + in.State)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("resulting state id", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("resulting state id", err)
 	}
 	effectiveAt, err := core.NewTimestamp(in.EffectiveAt.UTC())
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("resulting effective at", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("resulting effective at", err)
 	}
 	assignmentProvenance, err := provenanceFor(in.RecordedAt)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
 	}
 	resultingAssignment, err := lifecycle.NewStateAssignment(
 		resultingAssignmentID, subject, definitionVersionRef, stateID, effectiveAt, assignmentProvenance, resultingEstablishedBy,
 	)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("resulting state assignment", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("resulting state assignment", err)
 	}
 	resultingRef, err := resultingAssignment.Ref()
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("resulting assignment ref", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("resulting assignment ref", err)
 	}
 
 	transitionID, err := lifecycle.NewTransitionID(Namespace + ":" + in.TransitionKey)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition id", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition id", err)
 	}
 	attemptedAt, err := core.NewTimestamp(in.AttemptedAt.UTC())
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("attempted at", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("attempted at", err)
 	}
 	content, err := lifecycle.NewTransitionRecordContent(
 		subject, definitionVersionRef, transitionID, fromRef, attemptedAt, lifecycle.TransitionOutcomeSucceeded,
 	)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition record content", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition record content", err)
 	}
 	content, err = content.WithToState(stateID)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition content with to-state", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition content with to-state", err)
 	}
 	completedAt, err := core.NewTimestamp(in.CompletedAt.UTC())
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition completed at", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition completed at", err)
 	}
 	content, err = content.WithCompletedAt(completedAt)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition content with completed-at", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition content with completed-at", err)
 	}
 	content, err = content.WithResultingAssignment(resultingRef)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition content with resulting assignment", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition content with resulting assignment", err)
 	}
 	content, err = content.WithAuthority(LocalAuthorityRef)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition content with authority", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition content with authority", err)
 	}
 
 	contentPayload, err := json.Marshal(content)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition content marshal", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition content marshal", err)
 	}
 	contentDigest := engineering.ComputeDigest(contentPayload)
 	integrity, err := contentAddressedIntegrity(contentDigest)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition integrity", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition integrity", err)
 	}
 	origin, err := core.NewOrigin(core.OriginKindKnown, "")
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition origin", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition origin", err)
 	}
 	revisionProvenance, err := provenanceFor(in.RecordedAt)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
 	}
 	coreRev, err := core.NewArtifactRevision(trArtifactID, trRevisionID, origin, revisionProvenance, integrity)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition core revision", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition core revision", err)
 	}
 	trArtifact, err := core.NewArtifact(trArtifactID, lifecycle.ArtifactTypeTransitionRecord)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition record artifact", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition record artifact", err)
 	}
 	transitionRecord, err := lifecycle.NewTransitionRecord(trArtifact)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition record", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition record", err)
+	}
+	artifactPayload, err := json.Marshal(trArtifact)
+	if err != nil {
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition record artifact marshal", err)
+	}
+	artifactKey, err := engineering.NewArtifactKey(in.TransitionRecordArtifactID)
+	if err != nil {
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
+	}
+	// Idempotent across every transition that shares this Transition
+	// Record Artifact: the payload depends only on (artifactID,
+	// artifactType), so re-registering it here on each transition is a
+	// no-op Put once the first one has landed.
+	artifactEnv, err := engineering.NewArtifactEnvelope(
+		artifactKey, lifecycle.ArtifactTypeTransitionRecord.String(), artifactPayload,
+		engineering.ComputeDigest(artifactPayload), in.RecordedAt,
+	)
+	if err != nil {
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
 	}
 	trRevision, err := lifecycle.NewTransitionRecordRevision(transitionRecord, coreRev, content)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition record revision", err)
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, wrapPEOS("transition record revision", err)
 	}
 
 	revKey, err := engineering.NewRevisionKey(in.TransitionRecordArtifactID, in.TransitionRecordRevisionID)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
 	}
 	revEnv, err := buildRevisionEnvelope(revisionEnvelopeInput{
 		Key:           revKey,
@@ -333,14 +370,14 @@ func BuildTransition(in TransitionInput) (engineering.RevisionEnvelope, engineer
 		RecordedAt:    in.RecordedAt,
 	})
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
 	}
 
 	assignEnv, err := recordEnvelopeFromStateAssignment(resultingAssignment, in.AssignmentID, in.SubjectArtifactID, in.RecordedAt)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
+		return engineering.ArtifactEnvelope{}, engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
 	}
-	return revEnv, assignEnv, nil
+	return artifactEnv, revEnv, assignEnv, nil
 }
 
 // buildStateAssignment constructs a State Assignment established by a bare

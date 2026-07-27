@@ -68,13 +68,13 @@ func (Recorder) RecordClaim(in engineering.ClaimInput) (engineering.RecordEnvelo
 
 // RecordEntryAssignment constructs the lifecycle entry State Assignment,
 // established by a content-free Transition Record Revision (AD-014).
-func (Recorder) RecordEntryAssignment(in engineering.EntryAssignmentInput) (engineering.RevisionEnvelope, engineering.RecordEnvelope, error) {
+func (Recorder) RecordEntryAssignment(in engineering.EntryAssignmentInput) (engineering.ArtifactEnvelope, engineering.RevisionEnvelope, engineering.RecordEnvelope, error) {
 	return BuildEntryAssignment(in)
 }
 
 // RecordTransition constructs a full Transition Record Revision and the
 // State Assignment it establishes.
-func (Recorder) RecordTransition(in engineering.TransitionInput) (engineering.RevisionEnvelope, engineering.RecordEnvelope, error) {
+func (Recorder) RecordTransition(in engineering.TransitionInput) (engineering.ArtifactEnvelope, engineering.RevisionEnvelope, engineering.RecordEnvelope, error) {
 	return BuildTransition(in)
 }
 

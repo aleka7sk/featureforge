@@ -20,7 +20,7 @@ type EngineeringRecorder interface {
 	RecordValidationPlan(in engineering.PlanInput) (engineering.ArtifactEnvelope, engineering.RevisionEnvelope, error)
 	RecordExecution(in engineering.ExecutionInput) (engineering.RecordEnvelope, error)
 	RecordClaim(in engineering.ClaimInput) (engineering.RecordEnvelope, error)
-	RecordEntryAssignment(in engineering.EntryAssignmentInput) (engineering.RevisionEnvelope, engineering.RecordEnvelope, error)
-	RecordTransition(in engineering.TransitionInput) (engineering.RevisionEnvelope, engineering.RecordEnvelope, error)
+	RecordEntryAssignment(in engineering.EntryAssignmentInput) (engineering.ArtifactEnvelope, engineering.RevisionEnvelope, engineering.RecordEnvelope, error)
+	RecordTransition(in engineering.TransitionInput) (engineering.ArtifactEnvelope, engineering.RevisionEnvelope, engineering.RecordEnvelope, error)
 	VerifyContentDigest(rev engineering.RevisionEnvelope, content engineering.CapabilitySpecificationContent) error
 }

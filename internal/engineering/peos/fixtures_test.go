@@ -35,8 +35,9 @@ type testFixtures struct {
 	claim          engineering.RecordEnvelope
 	correctedClaim engineering.RecordEnvelope
 
-	entryTransitionRevision engineering.RevisionEnvelope
-	entryAssignment         engineering.RecordEnvelope
+	transitionRecordArtifact engineering.ArtifactEnvelope
+	entryTransitionRevision  engineering.RevisionEnvelope
+	entryAssignment          engineering.RecordEnvelope
 
 	transitionRevision  engineering.RevisionEnvelope
 	resultingAssignment engineering.RecordEnvelope
@@ -160,16 +161,17 @@ func buildFixtures(t *testing.T) testFixtures {
 	}
 	f.correctedClaim = correctedEnv
 
-	entryRevEnv, entryAssignEnv, err := BuildEntryAssignment(EntryAssignmentInput{
+	trArtEnv, entryRevEnv, entryAssignEnv, err := BuildEntryAssignment(EntryAssignmentInput{
 		AssignmentID: "SA-1", SubjectArtifactID: "CAP-1", State: "drafting", EffectiveAt: when,
 		TransitionRecordArtifactID: "TR-1", TransitionRecordRevisionID: "TR-1-REV-0", RecordedAt: when,
 	})
 	if err != nil {
 		t.Fatalf("BuildEntryAssignment: %v", err)
 	}
+	f.transitionRecordArtifact = trArtEnv
 	f.entryTransitionRevision, f.entryAssignment = entryRevEnv, entryAssignEnv
 
-	transRevEnv, resultingEnv, err := BuildTransition(TransitionInput{
+	_, transRevEnv, resultingEnv, err := BuildTransition(TransitionInput{
 		AssignmentID: "SA-2", SubjectArtifactID: "CAP-1", State: "under-validation", EffectiveAt: when,
 		TransitionRecordArtifactID: "TR-1", TransitionRecordRevisionID: "TR-1-REV-1",
 		TransitionKey: "begin-validation", FromAssignmentID: "SA-1",
