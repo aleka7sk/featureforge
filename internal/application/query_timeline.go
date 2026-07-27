@@ -1,0 +1,317 @@
+package application
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"time"
+
+	"github.com/aleka7sk/featureforge/internal/domain"
+	"github.com/aleka7sk/featureforge/internal/engineering"
+)
+
+// EventKind is the closed set of timeline event kinds (FF-010 §9.1).
+type EventKind string
+
+const (
+	EventProjectCreated        EventKind = "project.created"
+	EventFeatureCreated        EventKind = "feature.created"
+	EventCapabilityCreated     EventKind = "capability.created"
+	EventCapabilityRevised     EventKind = "capability.revised"
+	EventCapabilityAccepted    EventKind = "capability.accepted"
+	EventCapabilityWithdrawn   EventKind = "capability.withdrawn"
+	EventRequirementRevised    EventKind = "requirement.revised"
+	EventDecisionRecorded      EventKind = "decision.recorded"
+	EventPlanRevised           EventKind = "plan.revised"
+	EventExecutionRecorded     EventKind = "execution.recorded"
+	EventEvidenceRecorded      EventKind = "evidence.recorded"
+	EventClaimRecorded         EventKind = "claim.recorded"
+	EventClaimCorrected        EventKind = "claim.corrected"
+	EventLifecycleTransitioned EventKind = "lifecycle.transitioned"
+)
+
+// kindRank orders events sharing one instant into causal order
+// (FF-010 §9.3).
+var kindRank = map[EventKind]int{
+	EventProjectCreated:        0,
+	EventFeatureCreated:        1,
+	EventCapabilityCreated:     2,
+	EventCapabilityRevised:     3,
+	EventCapabilityAccepted:    4,
+	EventCapabilityWithdrawn:   4,
+	EventRequirementRevised:    5,
+	EventDecisionRecorded:      6,
+	EventPlanRevised:           7,
+	EventExecutionRecorded:     8,
+	EventEvidenceRecorded:      9,
+	EventClaimRecorded:         10,
+	EventClaimCorrected:        10,
+	EventLifecycleTransitioned: 11,
+}
+
+// TimelineEvent is one entry in a feature's engineering timeline
+// (FF-010 §9).
+type TimelineEvent struct {
+	EventID        string
+	FeatureCardID  domain.FeatureCardID
+	Kind           EventKind
+	OccurredAt     time.Time
+	HasOccurredAt  bool
+	Actor          string
+	Label          string
+	Summary        string
+	SourceIdentity string
+	References     []string
+	Corrected      string
+	Rationale      string
+}
+
+// TimelineResult is a computed timeline: dated events in deterministic
+// order, plus events whose source carries no timestamp (FF-010 §9.4).
+type TimelineResult struct {
+	Dated   []TimelineEvent
+	Undated []TimelineEvent
+}
+
+// TimelineInput names every record family a timeline draws from. No
+// requirement-to-capability (or evidence-to-execution) index exists in the
+// M.3 repository set (FF-009 §5), so the caller -- which created these
+// records and already knows their identities -- supplies them explicitly.
+type TimelineInput struct {
+	Project                domain.Project
+	FeatureCard            domain.FeatureCard
+	CapabilityArtifactID   string
+	RequirementArtifactIDs []string
+	DecisionIDs            []string
+	PlanArtifactID         string
+	ExecutionIDs           []string
+	EvidenceArtifactIDs    []string
+	ClaimIDs               []string
+}
+
+// GetFeatureTimeline computes a feature's complete engineering timeline
+// (FF-010 §9). It is read-only and deterministic: repeated calls on
+// unchanged data return byte-identical results. No source value is mutated.
+func GetFeatureTimeline(ctx context.Context, repos Repositories, in TimelineInput) (TimelineResult, error) {
+	var events []TimelineEvent
+
+	events = append(events, TimelineEvent{
+		EventID: string(EventProjectCreated) + ":" + in.Project.ID().String(),
+		Kind:    EventProjectCreated, OccurredAt: in.Project.CreatedAt(), HasOccurredAt: true,
+		Label: "Project created", Summary: in.Project.Name(), SourceIdentity: in.Project.ID().String(),
+		Rationale: "project creation timestamp",
+	})
+
+	events = append(events, TimelineEvent{
+		EventID:       string(EventFeatureCreated) + ":" + in.FeatureCard.ID().String(),
+		FeatureCardID: in.FeatureCard.ID(), Kind: EventFeatureCreated,
+		OccurredAt: in.FeatureCard.CreatedAt(), HasOccurredAt: true,
+		Label: "Feature card created", Summary: in.FeatureCard.Title(), SourceIdentity: in.FeatureCard.ID().String(),
+		Rationale: "feature card creation timestamp",
+	})
+
+	if in.CapabilityArtifactID != "" {
+		artEnv, found, err := repos.Artifacts.Get(ctx, engineering.ArtifactKey{ArtifactID: in.CapabilityArtifactID})
+		if err != nil {
+			return TimelineResult{}, err
+		}
+		if found {
+			events = append(events, timelineFromArtifact(in.FeatureCard.ID(), EventCapabilityCreated, "Capability specification created", artEnv))
+		}
+
+		revisions, err := repos.Revisions.ListByArtifact(ctx, in.CapabilityArtifactID)
+		if err != nil {
+			return TimelineResult{}, err
+		}
+		for _, rev := range revisions {
+			order, foundOrder, err := repos.RevisionOrder.Get(ctx, rev.Key)
+			if err != nil {
+				return TimelineResult{}, err
+			}
+			summary := "capability revision"
+			if foundOrder {
+				summary = fmt.Sprintf("sequence %d", order.Sequence)
+			}
+			events = append(events, timelineFromRevision(in.FeatureCard.ID(), EventCapabilityRevised, "Capability revision recorded", summary, rev))
+
+			acceptance, err := repos.RevisionAcceptance.ListByRevision(ctx, rev.Key)
+			if err != nil {
+				return TimelineResult{}, err
+			}
+			for _, a := range acceptance {
+				kind := EventCapabilityAccepted
+				label := "Capability revision accepted"
+				if a.State == engineering.AcceptanceStateWithdrawn {
+					kind = EventCapabilityWithdrawn
+					label = "Capability revision withdrawn"
+				}
+				events = append(events, TimelineEvent{
+					EventID: string(kind) + ":" + a.RecordID, FeatureCardID: in.FeatureCard.ID(), Kind: kind,
+					OccurredAt: a.EffectiveAt, HasOccurredAt: true, Actor: a.Actor, Label: label,
+					Summary: string(a.State), SourceIdentity: a.RecordID, References: []string{rev.Key.String()},
+					Rationale: "acceptance journal entry",
+				})
+			}
+		}
+	}
+
+	for _, reqID := range in.RequirementArtifactIDs {
+		revisions, err := repos.Revisions.ListByArtifact(ctx, reqID)
+		if err != nil {
+			return TimelineResult{}, err
+		}
+		for _, rev := range revisions {
+			events = append(events, timelineFromRevision(in.FeatureCard.ID(), EventRequirementRevised, "Requirement recorded", reqID, rev))
+		}
+	}
+
+	for _, decID := range in.DecisionIDs {
+		key, err := engineering.NewRecordKey(engineering.RecordKindDecision, decID)
+		if err != nil {
+			return TimelineResult{}, err
+		}
+		rec, found, err := repos.Records.Get(ctx, key)
+		if err != nil {
+			return TimelineResult{}, err
+		}
+		if found {
+			events = append(events, timelineFromRecord(in.FeatureCard.ID(), EventDecisionRecorded, "Decision recorded", "", rec))
+		}
+	}
+
+	if in.PlanArtifactID != "" {
+		revisions, err := repos.Revisions.ListByArtifact(ctx, in.PlanArtifactID)
+		if err != nil {
+			return TimelineResult{}, err
+		}
+		for _, rev := range revisions {
+			events = append(events, timelineFromRevision(in.FeatureCard.ID(), EventPlanRevised, "Validation plan revision recorded", "", rev))
+		}
+	}
+
+	for _, execID := range in.ExecutionIDs {
+		key, err := engineering.NewRecordKey(engineering.RecordKindExecution, execID)
+		if err != nil {
+			return TimelineResult{}, err
+		}
+		rec, found, err := repos.Records.Get(ctx, key)
+		if err != nil {
+			return TimelineResult{}, err
+		}
+		if found {
+			events = append(events, timelineFromRecord(in.FeatureCard.ID(), EventExecutionRecorded, "Validation activity executed", rec.Outcome, rec))
+		}
+	}
+
+	for _, evID := range in.EvidenceArtifactIDs {
+		revisions, err := repos.Revisions.ListByArtifact(ctx, evID)
+		if err != nil {
+			return TimelineResult{}, err
+		}
+		for _, rev := range revisions {
+			events = append(events, timelineFromRevision(in.FeatureCard.ID(), EventEvidenceRecorded, "Evidence recorded", "", rev))
+		}
+	}
+
+	for _, claimID := range in.ClaimIDs {
+		key, err := engineering.NewRecordKey(engineering.RecordKindClaim, claimID)
+		if err != nil {
+			return TimelineResult{}, err
+		}
+		rec, found, err := repos.Records.Get(ctx, key)
+		if err != nil {
+			return TimelineResult{}, err
+		}
+		if !found {
+			continue
+		}
+		kind := EventClaimRecorded
+		label := "Claim recorded"
+		corrected := ""
+		if rec.HasCorrection() {
+			kind = EventClaimCorrected
+			label = "Claim recorded, correcting an earlier claim"
+			corrected = rec.CorrectionTargetID
+			if _, found, err := repos.Records.Get(ctx, engineering.RecordKey{Kind: engineering.RecordKindClaim, ID: corrected}); err != nil {
+				return TimelineResult{}, err
+			} else if !found {
+				return TimelineResult{}, fmt.Errorf("%w: claim %s corrects %s, which does not exist", ErrTimelineSourceInvalid, claimID, corrected)
+			}
+		}
+		ev := timelineFromRecord(in.FeatureCard.ID(), kind, label, rec.Outcome, rec)
+		ev.Corrected = corrected
+		events = append(events, ev)
+	}
+
+	if in.CapabilityArtifactID != "" {
+		assignments, err := repos.Records.ListByKindAndSubject(ctx, engineering.RecordKindStateAssignment, engineering.ArtifactSubjectKey(in.CapabilityArtifactID))
+		if err != nil {
+			return TimelineResult{}, err
+		}
+		for _, a := range assignments {
+			events = append(events, timelineFromRecord(in.FeatureCard.ID(), EventLifecycleTransitioned, "Lifecycle state -> "+a.StateID, a.StateID, a))
+		}
+	}
+
+	return sortTimeline(events), nil
+}
+
+func timelineFromArtifact(cardID domain.FeatureCardID, kind EventKind, label string, env engineering.ArtifactEnvelope) TimelineEvent {
+	return TimelineEvent{
+		EventID: string(kind) + ":" + env.Key.String(), FeatureCardID: cardID, Kind: kind,
+		OccurredAt: env.RecordedAt, HasOccurredAt: true, Label: label, Summary: env.ArtifactType,
+		SourceIdentity: env.Key.String(), Rationale: "artifact recorded-at time",
+	}
+}
+
+func timelineFromRevision(cardID domain.FeatureCardID, kind EventKind, label, summary string, env engineering.RevisionEnvelope) TimelineEvent {
+	occurredAt := env.RecordedAt
+	hasOccurredAt := true
+	if env.HasProvenanceTime {
+		occurredAt, hasOccurredAt = env.ProvenanceRecordedAt, true
+	}
+	if summary == "" {
+		summary = string(env.RevisionFamily)
+	}
+	actor := env.ProvenanceActor
+	return TimelineEvent{
+		EventID: string(kind) + ":" + env.Key.String(), FeatureCardID: cardID, Kind: kind,
+		OccurredAt: occurredAt, HasOccurredAt: hasOccurredAt, Actor: actor, Label: label, Summary: summary,
+		SourceIdentity: env.Key.String(), Rationale: "revision provenance recorded-at time",
+	}
+}
+
+func timelineFromRecord(cardID domain.FeatureCardID, kind EventKind, label, summary string, env engineering.RecordEnvelope) TimelineEvent {
+	return TimelineEvent{
+		EventID: string(kind) + ":" + env.Key.String(), FeatureCardID: cardID, Kind: kind,
+		OccurredAt: env.OccurredAt, HasOccurredAt: env.HasOccurredAt, Label: label, Summary: summary,
+		SourceIdentity: env.Key.String(), References: []string{env.SubjectKey}, Rationale: "record's own occurred-at time",
+	}
+}
+
+// sortTimeline partitions events into dated and undated groups and orders
+// the dated group by (OccurredAt, KindRank, SourceIdentity) -- a total
+// order (FF-010 §9.3, §9.4). No source value passed in is mutated; a fresh
+// slice is returned.
+func sortTimeline(events []TimelineEvent) TimelineResult {
+	var dated, undated []TimelineEvent
+	for _, e := range events {
+		if e.HasOccurredAt {
+			dated = append(dated, e)
+		} else {
+			undated = append(undated, e)
+		}
+	}
+	sort.SliceStable(dated, func(i, j int) bool {
+		a, b := dated[i], dated[j]
+		if !a.OccurredAt.Equal(b.OccurredAt) {
+			return a.OccurredAt.Before(b.OccurredAt)
+		}
+		if kindRank[a.Kind] != kindRank[b.Kind] {
+			return kindRank[a.Kind] < kindRank[b.Kind]
+		}
+		return a.SourceIdentity < b.SourceIdentity
+	})
+	sort.Slice(undated, func(i, j int) bool { return undated[i].SourceIdentity < undated[j].SourceIdentity })
+	return TimelineResult{Dated: dated, Undated: undated}
+}

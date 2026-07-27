@@ -336,7 +336,7 @@ func BuildTransition(in TransitionInput) (engineering.RevisionEnvelope, engineer
 		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
 	}
 
-	assignEnv, err := recordEnvelopeFromStateAssignment(resultingAssignment, in.RecordedAt)
+	assignEnv, err := recordEnvelopeFromStateAssignment(resultingAssignment, in.AssignmentID, in.SubjectArtifactID, in.RecordedAt)
 	if err != nil {
 		return engineering.RevisionEnvelope{}, engineering.RecordEnvelope{}, err
 	}
@@ -375,30 +375,30 @@ func buildStateAssignment(assignmentID, subjectArtifactID, state string, effecti
 	if err != nil {
 		return engineering.RecordEnvelope{}, wrapPEOS("state assignment", err)
 	}
-	return recordEnvelopeFromStateAssignment(assignment, recordedAt)
+	return recordEnvelopeFromStateAssignment(assignment, assignmentID, subjectArtifactID, recordedAt)
 }
 
-func recordEnvelopeFromStateAssignment(assignment lifecycle.StateAssignment, recordedAt time.Time) (engineering.RecordEnvelope, error) {
+// recordEnvelopeFromStateAssignment projects assignment's key and subject
+// from the plain input strings the caller already has -- assignmentID and
+// subjectArtifactID -- rather than from assignment.Ref() or
+// assignment.Subject(), whose PEOS MarshalJSON forms internal/application
+// could never independently reconstruct (it cannot import PEOS). Both
+// engineering/peos (here, at write time) and internal/application (via
+// engineering.ArtifactSubjectKey, at query time) derive the same key from
+// the same plain data.
+func recordEnvelopeFromStateAssignment(assignment lifecycle.StateAssignment, assignmentID, subjectArtifactID string, recordedAt time.Time) (engineering.RecordEnvelope, error) {
 	payload, err := json.Marshal(assignment)
 	if err != nil {
 		return engineering.RecordEnvelope{}, wrapPEOS("state assignment marshal", err)
 	}
-	subjectKey, err := projectRef(assignment.Subject())
-	if err != nil {
-		return engineering.RecordEnvelope{}, err
-	}
-	assignID, err := assignment.Ref()
-	if err != nil {
-		return engineering.RecordEnvelope{}, wrapPEOS("state assignment ref", err)
-	}
-	key, err := engineering.NewRecordKey(engineering.RecordKindStateAssignment, assignIDString(assignID))
+	key, err := engineering.NewRecordKey(engineering.RecordKindStateAssignment, assignmentID)
 	if err != nil {
 		return engineering.RecordEnvelope{}, err
 	}
 	effectiveAt, hasEffectiveAt := projectTimestamp(assignment.EffectiveAt(), true)
 	return engineering.NewRecordEnvelope(engineering.RecordEnvelopeInput{
 		Key:           key,
-		SubjectKey:    subjectKey,
+		SubjectKey:    engineering.ArtifactSubjectKey(subjectArtifactID),
 		OccurredAt:    effectiveAt,
 		HasOccurredAt: hasEffectiveAt,
 		StateID:       assignment.State().String(),
@@ -406,14 +406,6 @@ func recordEnvelopeFromStateAssignment(assignment lifecycle.StateAssignment, rec
 		PayloadDigest: engineering.ComputeDigest(payload),
 		RecordedAt:    recordedAt,
 	})
-}
-
-func assignIDString(ref core.StateAssignmentRef) string {
-	b, err := ref.MarshalJSON()
-	if err != nil {
-		return ""
-	}
-	return string(b)
 }
 
 func mustArtifactID(value string) core.ArtifactID {

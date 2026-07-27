@@ -128,14 +128,8 @@ func BuildDecision(in DecisionInput) (engineering.RecordEnvelope, error) {
 	if err != nil {
 		return engineering.RecordEnvelope{}, wrapPEOS("decision marshal", err)
 	}
-	subjectKey, err := projectRef(subject)
-	if err != nil {
-		return engineering.RecordEnvelope{}, err
-	}
-	evidenceKey, err := projectRef(evidenceRef)
-	if err != nil {
-		return engineering.RecordEnvelope{}, err
-	}
+	subjectKey := engineering.ArtifactRevisionSubjectKey(in.SubjectArtifactID, in.SubjectRevisionID)
+	evidenceKey := engineering.EvidenceKey(in.EvidenceArtifactID, in.EvidenceRevisionID)
 	occurredAt, hasOccurredAt := projectTimestamp(provenance.RecordedAt())
 
 	key, err := engineering.NewRecordKey(engineering.RecordKindDecision, in.DecisionID)

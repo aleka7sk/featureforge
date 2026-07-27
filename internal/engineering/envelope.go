@@ -223,3 +223,14 @@ func (e RecordEnvelope) Equal(other RecordEnvelope) bool {
 
 // HasCorrection reports whether e carries a correction reference.
 func (e RecordEnvelope) HasCorrection() bool { return e.CorrectionKind != "" }
+
+// CorrectionKind's three closed values, projected exactly as PEOS's own
+// core.CorrectionKind.String() renders them ("peos:" + the PEOS-002
+// vocabulary value) -- this package does not construct PEOS vocabulary
+// values itself, but must compare against their known wire form to
+// interpret a RecordEnvelope's projected CorrectionKind field.
+const (
+	CorrectionKindCorrect    = "peos:correct"
+	CorrectionKindReplace    = "peos:replace"
+	CorrectionKindInvalidate = "peos:invalidate"
+)

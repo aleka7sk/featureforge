@@ -98,10 +98,7 @@ func TestProjectionFidelity_Decision(t *testing.T) {
 	if len(subjects) != 1 {
 		t.Fatalf("expected exactly one subject, got %d", len(subjects))
 	}
-	wantSubjectKey, err := projectRef(subjects[0])
-	if err != nil {
-		t.Fatal(err)
-	}
+	wantSubjectKey := engineering.ArtifactRevisionSubjectKey("CAP-1", "CAP-1-REV-1")
 	if f.decision.SubjectKey != wantSubjectKey {
 		t.Errorf("SubjectKey = %s, want %s", f.decision.SubjectKey, wantSubjectKey)
 	}
@@ -127,10 +124,7 @@ func TestProjectionFidelity_ExecutionRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantSubjectKey, err := projectRef(er.Subject())
-	if err != nil {
-		t.Fatal(err)
-	}
+	wantSubjectKey := engineering.ArtifactRevisionSubjectKey("CAP-1", "CAP-1-REV-1")
 	if f.execution.SubjectKey != wantSubjectKey {
 		t.Errorf("SubjectKey = %s, want %s", f.execution.SubjectKey, wantSubjectKey)
 	}
@@ -144,10 +138,7 @@ func TestProjectionFidelity_ExecutionRecord(t *testing.T) {
 	if len(produced) != 1 {
 		t.Fatalf("expected exactly one produced evidence reference, got %d", len(produced))
 	}
-	wantEvidenceKey, err := projectRef(produced[0])
-	if err != nil {
-		t.Fatal(err)
-	}
+	wantEvidenceKey := engineering.EvidenceKey("EV-1", "EV-1-REV-1")
 	if len(f.execution.EvidenceKeys) != 1 || f.execution.EvidenceKeys[0] != wantEvidenceKey {
 		t.Errorf("EvidenceKeys = %v, want [%s]", f.execution.EvidenceKeys, wantEvidenceKey)
 	}
@@ -159,10 +150,7 @@ func TestProjectionFidelity_Claim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantSubjectKey, err := projectRef(claim.Subject())
-	if err != nil {
-		t.Fatal(err)
-	}
+	wantSubjectKey := engineering.ArtifactRevisionSubjectKey("CAP-1", "CAP-1-REV-1")
 	if f.claim.SubjectKey != wantSubjectKey {
 		t.Errorf("SubjectKey = %s, want %s", f.claim.SubjectKey, wantSubjectKey)
 	}
@@ -176,7 +164,11 @@ func TestProjectionFidelity_Claim(t *testing.T) {
 	if len(criteria) != 1 {
 		t.Fatalf("expected exactly one criterion, got %d", len(criteria))
 	}
-	wantCriterionKey, err := projectRef(criteria[0])
+	reqRevKey, err := engineering.NewRevisionKey("REQ-1", "REQ-1-REV-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCriterionKey, err := engineering.RequirementCriterionKey(reqRevKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,10 +210,7 @@ func TestProjectionFidelity_StateAssignment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantSubjectKey, err := projectRef(assignment.Subject())
-	if err != nil {
-		t.Fatal(err)
-	}
+	wantSubjectKey := engineering.ArtifactSubjectKey("CAP-1")
 	if f.resultingAssignment.SubjectKey != wantSubjectKey {
 		t.Errorf("SubjectKey = %s, want %s", f.resultingAssignment.SubjectKey, wantSubjectKey)
 	}

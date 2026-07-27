@@ -268,14 +268,8 @@ func BuildExecution(in ExecutionInput) (engineering.RecordEnvelope, error) {
 	if err != nil {
 		return engineering.RecordEnvelope{}, wrapPEOS("execution marshal", err)
 	}
-	subjectKey, err := projectRef(subject)
-	if err != nil {
-		return engineering.RecordEnvelope{}, err
-	}
-	evidenceKey, err := projectRef(evidenceRef)
-	if err != nil {
-		return engineering.RecordEnvelope{}, err
-	}
+	subjectKey := engineering.ArtifactRevisionSubjectKey(in.SubjectArtifactID, in.SubjectRevisionID)
+	evidenceKey := engineering.EvidenceKey(in.EvidenceArtifactID, in.EvidenceRevisionID)
 	key, err := engineering.NewRecordKey(engineering.RecordKindExecution, in.ExecutionID)
 	if err != nil {
 		return engineering.RecordEnvelope{}, err
@@ -436,22 +430,17 @@ func BuildClaim(in ClaimInput) (engineering.RecordEnvelope, error) {
 	if err != nil {
 		return engineering.RecordEnvelope{}, wrapPEOS("claim marshal", err)
 	}
-	subjectKey, err := projectRef(subject)
+	subjectKey := engineering.ArtifactRevisionSubjectKey(in.SubjectArtifactID, in.SubjectRevisionID)
+	requirementRevisionKey, err := engineering.NewRevisionKey(in.RequirementArtifactID, in.RequirementRevisionID)
 	if err != nil {
 		return engineering.RecordEnvelope{}, err
 	}
-	criterionKey, err := projectRef(crit)
+	criterionKey, err := engineering.RequirementCriterionKey(requirementRevisionKey)
 	if err != nil {
 		return engineering.RecordEnvelope{}, err
 	}
-	evidenceKey, err := projectRef(evidenceRef)
-	if err != nil {
-		return engineering.RecordEnvelope{}, err
-	}
-	executionKey, err := projectRef(execRef)
-	if err != nil {
-		return engineering.RecordEnvelope{}, err
-	}
+	evidenceKey := engineering.EvidenceKey(in.EvidenceArtifactID, in.EvidenceRevisionID)
+	executionKey := engineering.ExecutionKey(in.ExecutionID)
 	key, err := engineering.NewRecordKey(engineering.RecordKindClaim, in.ClaimID)
 	if err != nil {
 		return engineering.RecordEnvelope{}, err

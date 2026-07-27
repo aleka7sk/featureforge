@@ -33,23 +33,6 @@ func projectTimestamp(ts core.Timestamp, ok bool) (time.Time, bool) {
 	return ts.Time(), true
 }
 
-// jsonMarshaler is any PEOS reference type whose MarshalJSON output is a
-// stable, unique rendering of its identity -- suitable as a projected key.
-type jsonMarshaler interface {
-	MarshalJSON() ([]byte, error)
-}
-
-// projectRef renders any PEOS reference value (a union Ref, an evidence
-// citation, a record reference, ...) to a stable string via its own
-// MarshalJSON, for use as a projected envelope field.
-func projectRef(v jsonMarshaler) (string, error) {
-	b, err := v.MarshalJSON()
-	if err != nil {
-		return "", wrapPEOS("project ref", err)
-	}
-	return string(b), nil
-}
-
 // projectScope renders a core.Scope as "kind|expression" (FF-009 §3.3).
 func projectScope(s core.Scope) string {
 	if s.IsZero() {
