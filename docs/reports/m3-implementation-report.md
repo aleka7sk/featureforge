@@ -14,7 +14,7 @@ persistence, application commands and queries, architecture tests, and the
 canonical end-to-end scenario. The scenario runs against the real PEOS
 v1.0.0 SDK — no PEOS type is mocked or stubbed anywhere in the test suite.
 
-195 tests pass across seven packages. `go build ./...`, `go vet ./...`,
+154 tests pass across seven packages. `go build ./...`, `go vet ./...`,
 `go test ./... -count=1`, and `go test ./... -race -count=1` are all clean.
 
 ## 2. Packages implemented
@@ -86,7 +86,7 @@ Beyond what PEOS itself enforces:
 
 ## 6. Tests
 
-195 tests across seven packages, including:
+154 tests across seven packages, including:
 
 - Domain: no derived state, no setters (reflection-based).
 - Engineering: canonical JSON field order, digest sensitivity, envelope
