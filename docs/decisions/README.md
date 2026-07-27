@@ -553,11 +553,56 @@ answers "do the requirements hold". FF-003 §4 is corrected to match. See
 
 ---
 
+## AD-019 — `EstablishRequirement` also writes revision-order metadata and an immediate acceptance entry
+
+Status: Accepted
+Date: 2026-07-28
+Phase: M.3
+Supersedes: nothing; closes a gap between FF-004 §3.2 and FF-010 §3
+
+**Context.** FF-004 §2 states every specification revision has a FeatureForge
+sequence and an acceptance state, and §3.2 states requirement revisions
+"follow the same ordering contract" as capability revisions —
+`ResolveEffectiveRequirements` calls the identical `ResolveCurrentRevision`
+used for capabilities. But FF-010 §3's command table lists
+`EstablishRequirement`'s engineering act as only "Requirement artifact +
+revision", naming neither order metadata nor an acceptance entry. Building
+the canonical scenario against the real commands surfaced this: every call to
+`ResolveEffectiveRequirements` failed with `ErrRevisionOrderMissing`, because
+no command ever wrote a requirement's order metadata or accepted it.
+
+**Decision.** `EstablishRequirementCommand.Execute` now also writes
+sequence-`next` `RevisionOrderMetadata` and appends one `accepted`
+`RevisionAcceptanceRecord`, in the same transaction, exactly as
+`EstablishCapabilitySpecificationCommand` already does for a capability's
+founding revision. No new command is introduced, and no repository contract
+changes; this closes a gap in one existing command's write set.
+
+**Alternatives.** Adding a separate `AcceptRequirement` command rejected —
+FF-010 §3 fixes the count at ten commands, and this scenario never revises or
+withdraws a requirement, so a second deliberate step has no observable
+behavior to justify it here. Exempting requirement revisions from the
+ordering contract in `ResolveCurrentRevision` rejected — it contradicts
+FF-004 §3.2's explicit text and would require branching that function's
+logic by artifact family, which no other part of the design does. Leaving the
+gap and having the scenario driver write order/acceptance directly through
+the repositories rejected — that would let one composition site (the
+scenario driver) bypass a command's transactional guarantee that every write
+a command makes either all commits or all rolls back together.
+
+**Consequences.** A requirement's current revision resolves the same way a
+capability's does, with the same rationale shape. If a future phase adds
+requirement revision or withdrawal, the acceptance journal is already in
+place to carry it. See
+[FF-010 §3](../spec/010-application-contracts.md#3-commands) and
+[FF-004 §3.2](../spec/004-current-state-resolution.md#32-effective-requirements).
+
+---
+
 ## Open questions
 
-None. Every material architecture decision for M.1 and M.2 is resolved, and M.3
-has no architecture decision left to make. Questions deferred to a later phase,
-with the phase that owns them:
+None. Every material architecture decision for M.1, M.2, and M.3 is resolved.
+Questions deferred to a later phase, with the phase that owns them:
 
 | Question | Owned by |
 |---|---|

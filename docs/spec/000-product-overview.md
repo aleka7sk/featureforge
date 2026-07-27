@@ -126,6 +126,12 @@ history is ever updated or deleted.
 | [FF-005](005-validation-scenario.md) | What exactly gets validated, and how is it corrected? |
 | [FF-006](006-timeline-read-model.md) | How is history presented to a human? |
 | [FF-007](007-delivery-roadmap.md) | In what order is this built? |
+| [FF-008](008-package-architecture.md) | How is the implementation packaged, and what may import what? |
+| [FF-009](009-in-memory-persistence.md) | How is engineering state persisted in memory? |
+| [FF-010](010-application-contracts.md) | What are the exact application commands, queries, and algorithms? |
+| [FF-011](011-canonical-scenario.md) | What are the exact fixture identities and PEOS value inventory? |
+| [FF-012](012-test-specification.md) | What must the test suite prove? |
+| [FF-013](013-m3-implementation-packet.md) | What must M.3 build, and in what commit order? |
 | [Decision log](../decisions/README.md) | What was decided, and why? |
 | [Glossary](../glossary.md) | What does this word mean here? |
 

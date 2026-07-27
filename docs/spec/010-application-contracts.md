@@ -90,7 +90,7 @@ differ from M.1's use-case list the rename is noted.
 | `EstablishCapabilitySpecification` | `CreateCapabilitySpecification` | Artifact + founding revision + content + order metadata + card link |
 | `ReviseCapabilitySpecification` | `CreateCapabilityRevision` | Revision + content + order metadata |
 | `AcceptCapabilityRevision` | `AcceptCapabilityRevision` | Acceptance journal entry |
-| `EstablishRequirement` | `AddRequirement` | Requirement artifact + revision |
+| `EstablishRequirement` | `AddRequirement` | Requirement artifact + revision + order metadata + acceptance entry (AD-019) |
 | `RecordArchitectureDecision` | `RecordDecision` | Decision + basis |
 | `EstablishValidationPlan` | `CreateValidationPlan` | Plan artifact + plan revision |
 | `RecordValidationRun` | `RecordValidationExecution` | Evidence artifact + revision, then execution record |

@@ -57,6 +57,48 @@ func (c EstablishRequirementCommand) Execute(ctx context.Context, uow UnitOfWork
 		if err := r.Revisions.Put(ctx, revisionEnv); err != nil {
 			return err
 		}
+
+		// Requirement revisions follow the same current-revision resolution
+		// policy as capability revisions (FF-004 §3.2: "the same ordering
+		// contract"), which requires both order metadata and an accepted
+		// journal entry for every stored revision (FF-004 §2 rules 5-6).
+		// FF-010 §3's command table lists EstablishRequirement's engineering
+		// act as only "Requirement artifact + revision", omitting both --
+		// a gap against FF-004 §3.2's own requirement, not a deliberate
+		// narrowing. This command closes it the same way
+		// EstablishCapabilitySpecification closes the equivalent gap for a
+		// capability's founding revision: write sequence-1-or-next order
+		// metadata and an immediate "accepted" journal entry, since no
+		// separate accept-requirement command exists and this scenario
+		// never revises or withdraws a requirement.
+		existing, err := r.RevisionOrder.ListByArtifact(ctx, c.ArtifactID)
+		if err != nil {
+			return err
+		}
+		next := 1
+		for _, o := range existing {
+			if o.Sequence >= next {
+				next = o.Sequence + 1
+			}
+		}
+		order, err := engineering.NewRevisionOrderMetadata(revisionEnv.Key, next, now)
+		if err != nil {
+			return err
+		}
+		if err := r.RevisionOrder.Put(ctx, order); err != nil {
+			return err
+		}
+		acceptance, err := engineering.NewRevisionAcceptanceRecord(
+			"ACC-"+c.ArtifactID+"-"+c.RevisionID, revisionEnv.Key, engineering.AcceptanceStateAccepted, now,
+			"featureforge:local-user", "requirement established",
+		)
+		if err != nil {
+			return err
+		}
+		if err := r.RevisionAcceptance.Append(ctx, acceptance); err != nil {
+			return err
+		}
+
 		result = EstablishRequirementResult{ArtifactKey: artifactEnv.Key, RevisionKey: revisionEnv.Key}
 		return nil
 	})

@@ -13,9 +13,10 @@ corrections, and history. It does not implement the capability itself.
 
 ## Status
 
-Phase **M.1 — Product Definition and Acceptance Contract**: complete.
-No implementation code exists yet. See the
-[delivery roadmap](docs/spec/007-delivery-roadmap.md).
+Phase **M.3 — In-Memory Vertical Slice**: complete. The canonical scenario
+(FF-011) runs end to end against a real PEOS v1.0.0 SDK and an in-memory
+store. See the [M.3 implementation report](docs/reports/m3-implementation-report.md)
+and the [delivery roadmap](docs/spec/007-delivery-roadmap.md).
 
 ## Documentation
 
@@ -31,6 +32,12 @@ Start with the [product overview](docs/spec/000-product-overview.md).
 | [FF-005 Validation Scenario](docs/spec/005-validation-scenario.md) | What gets validated, and how is it corrected? |
 | [FF-006 Timeline Read Model](docs/spec/006-timeline-read-model.md) | How is history presented to a human? |
 | [FF-007 Delivery Roadmap](docs/spec/007-delivery-roadmap.md) | In what order is this built? |
+| [FF-008 Package Architecture](docs/spec/008-package-architecture.md) | How is the implementation packaged, and what may import what? |
+| [FF-009 In-Memory Persistence](docs/spec/009-in-memory-persistence.md) | How is engineering state persisted in memory? |
+| [FF-010 Application Contracts](docs/spec/010-application-contracts.md) | What are the exact application commands, queries, and algorithms? |
+| [FF-011 Canonical Scenario](docs/spec/011-canonical-scenario.md) | What are the exact fixture identities and PEOS value inventory? |
+| [FF-012 Test Specification](docs/spec/012-test-specification.md) | What must the test suite prove? |
+| [FF-013 M.3 Implementation Packet](docs/spec/013-m3-implementation-packet.md) | What must M.3 build, and in what commit order? |
 | [Decision log](docs/decisions/README.md) | What was decided, and why? |
 | [Glossary](docs/glossary.md) | What does this word mean here? |
 
