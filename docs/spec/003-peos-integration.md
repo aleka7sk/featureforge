@@ -93,7 +93,15 @@ Scope is held down as follows:
 - **One** Lifecycle Definition, with **one** Definition Version, fixed in code as
   FeatureForge configuration and recorded once at project setup.
 - Four states: `featureforge:drafting`, `featureforge:specified`,
-  `featureforge:validating`, `featureforge:validated`.
+  `featureforge:under-validation`, `featureforge:assessed`.
+
+  > **Corrected in M.2 by [AD-018](../decisions/README.md#ad-018--the-lifecycle-state-validated-is-renamed-assessed-and-redefined).**
+  > This document originally named the last two states `validating` and
+  > `validated`, defining `validated` as "a satisfied claim stands". That made
+  > lifecycle a second, staler copy of release readiness — the duplication the
+  > two concepts were separated to avoid. `assessed` means validation was
+  > executed and assessed, and says nothing about the outcome: a capability can
+  > be `assessed` and still `not-ready`.
 - The Lifecycle Subject is the capability **Artifact** (identity level), not a
   revision — the capability progresses, not any single revision of it.
 - The scenario exercises the transitions it needs and no more.
@@ -223,8 +231,8 @@ is a computed query with a rationale, defined in
 | `featureforge:capability-lifecycle` | Lifecycle subject type | Declared on the Definition Version |
 | `featureforge:drafting` | Lifecycle State | Initial state |
 | `featureforge:specified` | Lifecycle State | Revision accepted, requirements recorded |
-| `featureforge:validating` | Lifecycle State | Plan exists, execution under way |
-| `featureforge:validated` | Lifecycle State | A satisfied claim stands |
+| `featureforge:under-validation` | Lifecycle State | Plan exists, execution under way |
+| `featureforge:assessed` | Lifecycle State | Validation was executed and assessed (outcome-independent) |
 | `featureforge:local-user` | Actor identifier | The single configured actor, in namespace `featureforge` |
 
 Every value above is declared in one place — a single constants file in

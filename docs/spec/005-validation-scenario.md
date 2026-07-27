@@ -254,7 +254,7 @@ After the full scenario:
 | Applicable decision | The audio-attachment and latency decision, with basis |
 | Current claims | C-1 `satisfied`, C-4 `not-satisfied` (correcting C-2), C-3 `satisfied` |
 | Release readiness | `not-ready` — R-2 is not satisfied |
-| Lifecycle state | `featureforge:validating` |
+| Lifecycle state | `featureforge:under-validation` (renamed by [AD-018](../decisions/README.md#ad-018--the-lifecycle-state-validated-is-renamed-assessed-and-redefined)) |
 | Timeline | Every act above, in order, with actors, timestamps, and the correction link |
 | History integrity | Revision 1 and claim C-2 both fully inspectable; nothing updated, nothing deleted |
 

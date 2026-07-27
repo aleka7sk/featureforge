@@ -363,15 +363,212 @@ code. See [FF-001 §4](../spec/001-poc-acceptance-contract.md#4-ai-boundary) and
 
 ---
 
+## AD-013 — Three envelope types, not one universal envelope; no RelationEnvelope in M.3
+
+Status: Accepted
+Date: 2026-07-28
+Phase: M.2
+
+**Context.** AD-005 requires adapters to persist PEOS values without importing
+PEOS, which needs a FeatureForge-owned envelope. The shape was open.
+
+**Decision.** Three envelopes — `ArtifactEnvelope`, `RevisionEnvelope`,
+`RecordEnvelope` — plus `CapabilitySpecificationContent`, `RevisionOrderMetadata`,
+and `RevisionAcceptanceRecord`. No `RelationEnvelope` in M.3.
+
+**Alternatives.** One universal envelope with a closed `RecordKind` rejected —
+artifacts, revisions, and records have different identity and lookup semantics,
+so one envelope forces the widest key shape on all three and a repository can no
+longer state its uniqueness constraint in its own signature. A four-envelope set
+including `RelationEnvelope` rejected — M.1 established that `relation.Relation`
+is unused in M.3, and relations have no normative PEOS identity, so they need a
+composite `(type, from, to, scope)` key that `RecordEnvelope` cannot express.
+Adding it now would be a placeholder for a construct the scenario never creates.
+
+**Consequences.** Each repository states its own key and conflict rule, which is
+exactly what M.4 needs to write SQL. Adding relations later means adding a fourth
+envelope, not reshaping three. See
+[FF-009 §2](../spec/009-in-memory-persistence.md#2-one-envelope-or-several).
+
+---
+
+## AD-014 — The lifecycle entry assignment is established by a content-free Transition Record Revision
+
+Status: Accepted
+Date: 2026-07-28
+Phase: M.2
+
+**Context.** PEOS-003 states a Subject "enters a lifecycle through an entry
+Transition **from an unassigned condition**". But `lifecycle.NewTransitionRecordContent`
+takes a mandatory `fromAssignment` and, verified against v1.0.0, **rejects a zero
+one** with *"source state assignment must not be zero"*. The SDK therefore cannot
+express an entry Transition Record: the first assignment needs a source
+assignment that by definition does not exist.
+
+**Decision.** The entry State Assignment is established by a plain
+`core.ArtifactRevision` of the Transition Record Artifact carrying **no**
+`TransitionRecordContent`. Every later transition uses a full
+`TransitionRecordRevision` whose `fromAssignment` is the previous assignment.
+
+**Alternatives.** Fabricating a synthetic "unassigned" source assignment rejected
+— it would invent a state occupancy that never happened, and PEOS-003 says a
+Subject must not be treated as occupying a State merely because it exists.
+Dropping lifecycle from M.3 rejected — M.1 requires lifecycle state resolution
+and a lifecycle timeline event. Modifying PEOS rejected absolutely.
+
+**Verified support.** `lifecycle.NewStateAssignment` accepts `establishedBy` as a
+bare `core.ArtifactRevisionRef` and documents that it performs no lookup. The
+PEOS lifecycle example itself relies on this, citing `TR-9001/REV-0` as the
+establishing revision of its source assignment without constructing it.
+
+**Consequences.** Conformant — PEOS-002 permits an ordinary Artifact Revision of
+a Transition Record Artifact, and PEOS-003's requirement that initial assignment
+be "recorded by its Transition Record" is met by a revision of that record. **No
+PEOS change is made or required.** The gap is reported to the PEOS backlog as an
+M.7 consumer finding. `TestTransitionContentRejectsZeroFromAssignment` pins the
+limitation, so a future SDK version that lifts it makes this decision revisitable
+rather than invisible. See
+[FF-010 §8](../spec/010-application-contracts.md#the-entry-transition-problem-and-its-resolution).
+
+---
+
+## AD-015 — Acceptance is an append-only journal; there is no stored acceptance field
+
+Status: Accepted
+Date: 2026-07-28
+Phase: M.2
+
+**Context.** AD-004 separated revision acceptance from lifecycle state. M.2 had
+to choose the representation, with three candidates on the table.
+
+**Decision.** `RevisionOrderMetadata` carries the sequence **only**. Acceptance is
+an append-only `RevisionAcceptanceRecord` journal; a revision's state is the
+state of its latest entry ordered by `(EffectiveAt, RecordID)`. A revision with
+no entry is `draft` by absence.
+
+**Alternatives.** An `Accepted` boolean on order metadata rejected — order
+metadata is insert-only, so a mutable flag on it contradicts that, and a boolean
+cannot carry the actor, time, and reason the timeline requires, so a journal
+would exist anyway and the flag would duplicate its head. PEOS lifecycle State
+Assignment as acceptance rejected on three grounds: *cardinality* — the lifecycle
+subject is the capability Artifact, so there is one lifecycle state per
+capability while acceptance is per revision; *cost* — every assignment needs an
+establishing Transition Record Revision, so accepting a revision would cost three
+extra PEOS values; *meaning* — "under-validation" says nothing about which
+revision text is authoritative.
+
+**Consequences.** One truth in one place. This confirms AD-004 rather than
+revising it, and makes it precise. See
+[FF-010 §5](../spec/010-application-contracts.md#5-acceptance-semantics--fully-resolved).
+
+---
+
+## AD-016 — Release readiness has four statuses; precedence is not-ready first
+
+Status: Accepted
+Date: 2026-07-28
+Phase: M.2
+Supersedes: the status list and precedence in FF-004 §3.6
+
+**Context.** M.1 listed five readiness statuses — `ready`, `not-ready`,
+`incomplete`, `inconclusive`, `undetermined` — with precedence
+`not-ready > inconclusive > incomplete > ready`. The M.2 brief proposed four
+statuses with `indeterminate` first.
+
+**Decision.** Four statuses: `ready`, `not-ready`, `indeterminate`, `incomplete`.
+Precedence: **`not-ready` > `indeterminate` > `incomplete` > `ready`**.
+`inconclusive` and `undetermined` merge into `indeterminate`; "no effective
+requirements" becomes `incomplete`; "current revision unresolvable" becomes an
+**error**, not a status.
+
+**Alternatives.** `indeterminate` first, as the brief proposed, rejected for two
+reasons. *First*, structural failures — digest mismatch, ambiguous revision,
+dangling reference, correction cycle — are errors, not statuses, so
+`indeterminate` covers only semantic indeterminacy where the computation
+succeeded and the answer is genuinely unclear. *Second*, given that narrowing, a
+definitive `not-satisfied` is stronger information than an inconclusive: if R2 is
+proven unsatisfied while R3 is inconclusive, the capability is not ready, and
+reporting `indeterminate` would mask a certain negative behind an uncertain one.
+Keeping M.1's five statuses rejected — `undetermined` and `inconclusive` were
+never distinguishable in practice.
+
+**Consequences.** A negative signal is never masked by a weaker one. FF-004 §3.6
+is corrected to match. See
+[FF-010 §7](../spec/010-application-contracts.md#7-release-readiness).
+
+---
+
+## AD-017 — FeatureForge rejects self-correction, because PEOS v1.0.0 does not
+
+Status: Accepted
+Date: 2026-07-28
+Phase: M.2
+
+**Context.** The correction model assumes a claim cannot correct itself. Verified
+against v1.0.0: `Claim.WithCorrection` **accepts** a correction reference whose
+target is the claim's own identity, returning no error.
+
+**Decision.** `CorrectValidationClaim` rejects a correction whose target equals
+the new claim's identity, with `ErrCorrectionSelfReference`, before any PEOS
+construction. The correction-chain query also rejects it on read, so a payload
+written by any other means cannot poison resolution.
+
+**Alternatives.** Relying on the SDK rejected — it does not. Detecting it only as
+a cycle at read time rejected — the write should fail at the boundary where the
+user can still fix it, and a self-loop is a distinguishable mistake from a
+multi-node cycle.
+
+**Consequences.** Validation happens in both places, which is deliberate: write-side
+for the actionable error, read-side so resolution is total over any stored graph.
+See [FF-009 §8](../spec/009-in-memory-persistence.md#correction).
+
+---
+
+## AD-018 — The lifecycle state `validated` is renamed `assessed` and redefined
+
+Status: Accepted
+Date: 2026-07-28
+Phase: M.2
+Supersedes: the lifecycle state set in FF-003 §4
+
+**Context.** M.1 defined four lifecycle states ending in `featureforge:validated`,
+meaning "a satisfied claim stands". That is release readiness expressed as a
+lifecycle state — the exact duplication that lifecycle and readiness were
+separated to avoid.
+
+**Decision.** The state set is `drafting`, `specified`, `under-validation`,
+`assessed`. `assessed` means validation has been executed and assessed; it says
+nothing about the outcome. **A capability can be `assessed` and still
+`not-ready`**, and a test asserts that pair.
+
+**Alternatives.** Keeping `validated` rejected — its definition made lifecycle a
+second, staler copy of readiness, so the two would inevitably disagree. Dropping
+lifecycle rejected — M.1 requires it. Deriving lifecycle state from claims
+rejected — that would make it a derived view stored as authoritative engineering
+state, which AD-006 and PEOS-006 both forbid.
+
+**Consequences.** Lifecycle answers "how far has this progressed"; readiness
+answers "do the requirements hold". FF-003 §4 is corrected to match. See
+[FF-010 §8](../spec/010-application-contracts.md#8-lifecycle-state).
+
+---
+
 ## Open questions
 
-None. Every material architecture decision for M.1 is resolved. Questions
-deferred to a later phase, with the phase that owns them:
+None. Every material architecture decision for M.1 and M.2 is resolved, and M.3
+has no architecture decision left to make. Questions deferred to a later phase,
+with the phase that owns them:
 
 | Question | Owned by |
 |---|---|
-| Exact canonical JSON serialization rules for specification content | M.2 |
-| Repository contract signatures and error taxonomy | M.2 |
 | PostgreSQL schema and index design | M.4 |
 | Whether any query needs materialization | M.4, and only with measured evidence |
+| Whether `RelationEnvelope` is ever required | Deferred until a relation is |
+| Random identity generation at the transport edge | M.5 |
 | Which patterns Belcanto reuses or redesigns | M.7 freeze artifacts |
+
+Resolved since M.1: canonical JSON serialization rules
+([FF-009 §4.1](../spec/009-in-memory-persistence.md#41-capabilityspecificationcontent))
+and repository contracts with the error taxonomy
+([FF-009 §5](../spec/009-in-memory-persistence.md#5-repository-contracts),
+[§8](../spec/009-in-memory-persistence.md#8-error-model)).

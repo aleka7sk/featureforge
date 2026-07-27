@@ -82,6 +82,20 @@ that M.3 writes code without making architecture decisions.
 **Model.** Claude Opus.
 **Mode.** Architecture specification and implementation packet preparation.
 
+**Status: complete.** Delivered [FF-008](008-package-architecture.md),
+[FF-009](009-in-memory-persistence.md), [FF-010](010-application-contracts.md),
+[FF-011](011-canonical-scenario.md), [FF-012](012-test-specification.md), and
+[FF-013](013-m3-implementation-packet.md), plus AD-013 through AD-018.
+
+Every constructor flow in FF-011 was executed against PEOS v1.0.0 during M.2 and
+compiles; ten verified SDK facts are recorded in
+[FF-011 §1](011-canonical-scenario.md#1-verified-sdk-facts). Three of them
+changed the specification: the SDK accepts a self-correction (AD-017), it cannot
+express an entry lifecycle Transition (AD-014), and a Validation Claim requires
+at least one evidence reference. Two accepted M.1 statements were corrected as
+contradictions: the lifecycle state set (AD-018) and the readiness status set
+and precedence (AD-016).
+
 ---
 
 ## M.3 — In-Memory Vertical Slice Implementation
@@ -91,12 +105,23 @@ HTTP and no database.
 
 **Deliverables.**
 - `go.mod` declaring `github.com/aleka7sk/PEOS v1.0.0` with no `replace`
-  directive — this is the first phase that may add it;
-- domain, application, integration, and in-memory infrastructure packages;
-- the architecture tests from [FF-002 §4](002-domain-boundaries.md#enforcement);
+  directive — this is the first phase that may add it, and it is the **only**
+  dependency M.3 adds;
+- domain, engineering, integration, application, and in-memory infrastructure
+  packages, per the file tree in
+  [FF-013 §1](013-m3-implementation-packet.md#1-file-tree);
+- the architecture tests from
+  [FF-012 §12](012-test-specification.md#12-architecture-tests);
 - the full canonical scenario as an executable test, ending `not-ready`;
-- persistence contract tests against the in-memory adapter;
-- ordering, current-state, correction, and timeline tests.
+- persistence contract tests against the in-memory adapter, written as a shared
+  suite M.4 reuses verbatim;
+- ordering, current-state, correction, readiness, lifecycle, and timeline tests.
+
+M.3 follows the ordered checklist in
+[FF-013 §2](013-m3-implementation-packet.md#2-ordered-implementation-checklist)
+and the commit policy in
+[FF-013 §4](013-m3-implementation-packet.md#4-m3-commit-policy) — six commits,
+one per phase, each leaving the tree green.
 
 **Entrance criteria.** M.2 exit criteria met.
 
@@ -111,7 +136,13 @@ HTTP and no database.
   exactly;
 - the PEOS module is unmodified.
 
-**Model.** Claude Opus. **Mode.** Implementation against a fixed packet.
+**Model.** Claude Sonnet. **Mode.** Direct implementation from the approved M.1
+and M.2 specifications.
+
+M.1 provisionally recommended Opus here. M.2 revises that to Sonnet: with
+FF-008..FF-013 in place the architecture work is finished and M.3 is transcription
+plus disciplined testing. Escalate to Opus only if a step reveals a genuine
+architecture gap — and in that case record the decision before writing code.
 
 ---
 
@@ -257,7 +288,7 @@ FeatureForge but not inheriting its code.
 |---|---|---|---|
 | M.1 | Product definition and acceptance contract | Opus | Product definition and architecture decision |
 | M.2 | Architecture and vertical slice specification | Opus | Architecture specification and packet preparation |
-| M.3 | In-memory vertical slice | Opus | Implementation against a fixed packet |
+| M.3 | In-memory vertical slice | **Sonnet** | Direct implementation from the approved specification |
 | M.4 | PostgreSQL persistence | Opus | Implementation and storage verification |
 | M.5 | HTTP API and minimal UI | Opus / Sonnet for UI | Transport and interface implementation |
 | M.6 | AI context-pack demonstration | Opus | Bounded capability implementation |

@@ -148,9 +148,44 @@ sequence. A computed answer, never a stored field.
 **Effective Requirements** — the current revision of every requirement linked to
 a capability, excluding withdrawn ones. Computed.
 
+**Acceptance Journal** — see above. Its head is the *only* place a revision's
+acceptance state exists; there is no stored acceptance field
+([AD-015](decisions/README.md#ad-015--acceptance-is-an-append-only-journal-there-is-no-stored-acceptance-field)).
+
+**Canonical JSON** — FeatureForge's deterministic serialization of structured
+content: declared field order, no insignificant whitespace, HTML escaping
+disabled, empty lists emitted as `[]`. The input to every digest, and the basis
+of both content equality and payload conflict detection.
+
+**Codec** — the operations in `internal/engineering/peos` that build PEOS values
+from validated product input, encode them to canonical JSON, decode stored JSON
+back into exact PEOS types, and project query metadata into envelopes.
+
+**Digest** — lowercase-hex SHA-256 of a canonical JSON value. Bound into a PEOS
+revision's `IntegrityIdentity` as `sha256:<hex>`, which is what makes the link
+between a PEOS revision and its FeatureForge content verifiable rather than
+merely referential.
+
+**Engineering Record Envelope** — a FeatureForge-owned persistence and
+projection carrier holding a key, a kind, an authoritative canonical-JSON
+payload, its digest, and typed projections. Three variants: `ArtifactEnvelope`,
+`RevisionEnvelope`, `RecordEnvelope`. It exists so no persistence adapter imports
+PEOS ([AD-005](decisions/README.md#ad-005--only-the-integration-layer-imports-peos-adapters-store-opaque-payloads),
+[AD-013](decisions/README.md#ad-013--three-envelope-types-not-one-universal-envelope-no-relationenvelope-in-m3)).
+
 **Engineering State** — the immutable, provenance-bearing record of what was
 specified, required, decided, validated, and claimed. Modelled with PEOS values,
 insert-only.
+
+**EngineeringRecorder** — the port declared in `internal/application` and
+implemented by `internal/engineering/peos`, expressed entirely in `domain` and
+`engineering` types. It is how the application layer causes PEOS values to be
+constructed without naming a PEOS type.
+
+**Entry Assignment** — the first lifecycle State Assignment for a subject,
+established by a Transition Record Revision that carries no transition content,
+because PEOS v1.0.0 cannot express an entry Transition from an unassigned
+condition ([AD-014](decisions/README.md#ad-014--the-lifecycle-entry-assignment-is-established-by-a-content-free-transition-record-revision)).
 
 **FeatureCard** — the operational entry point for one capability. Mutable title
 and summary; one optional link to a capability Artifact; **no derived state**.
@@ -169,12 +204,23 @@ rule applied, the records considered, and the records rejected with reasons.
 Displayed in the UI, not merely logged.
 
 **Release Readiness** — a computed outcome over requirement coverage and current
-claims: `ready`, `not-ready`, `incomplete`, `inconclusive`, or `undetermined`.
+claims: `ready`, `not-ready`, `indeterminate`, or `incomplete`.
 Product-only terminology; never a PEOS value
 ([AD-008](decisions/README.md#ad-008--release-readiness-is-a-computed-query-not-a-claim)).
 
 **Revision Sequence** — the product-owned dense integer ordering of an Artifact's
 revisions, unique within the Artifact, starting at 1, assigned transactionally.
+Carried by `RevisionOrderMetadata`, which carries ordering **only**.
+
+**Correction Head** — the claim that no other claim corrects, replaces, or
+invalidates. Selecting it is how the applicable claim is found; timestamps are
+never used to select
+([FF-010 §6](spec/010-application-contracts.md#6-correction-resolution-algorithm)).
+
+**Projection** — a typed field copied out of an envelope's authoritative payload
+so queries can run without decoding it, and therefore without importing PEOS. A
+projection is never authoritative; disagreement with its payload is a codec bug,
+caught by a projection-fidelity test.
 
 **Specification Content** — the FeatureForge-owned structured content of one
 capability revision: title, problem statement, user outcome, functional

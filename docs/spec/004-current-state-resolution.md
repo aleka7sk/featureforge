@@ -253,18 +253,25 @@ Outcome, from a closed set:
 |---|---|
 | `ready` | Every effective requirement has a current claim whose outcome is `satisfied`, whose subject is the current capability revision, and whose criteria include that requirement's current revision |
 | `not-ready` | At least one effective requirement has a current claim whose outcome is `not-satisfied` |
-| `incomplete` | At least one effective requirement has no current claim, and none is `not-satisfied` |
-| `inconclusive` | At least one current claim's outcome is `inconclusive`, and none is `not-satisfied` |
-| `undetermined` | The current revision cannot be resolved, or there are no effective requirements |
+| `indeterminate` | At least one current claim's outcome is `inconclusive`, or its supporting execution outcome is `interrupted` or `indeterminate` |
+| `incomplete` | At least one effective requirement has no current claim, or there are no effective requirements at all |
 
-Precedence when several apply: `not-ready` > `inconclusive` > `incomplete` >
-`ready`. A negative signal is never masked by a positive one.
+Precedence when several apply: `not-ready` > `indeterminate` > `incomplete` >
+`ready`. A negative signal is never masked by a weaker one.
+
+> **Corrected in M.2 by [AD-016](../decisions/README.md#ad-016--release-readiness-has-four-statuses-precedence-is-not-ready-first).**
+> This document originally listed five statuses, including both `inconclusive`
+> and `undetermined`, which were never distinguishable in practice. They merge
+> into `indeterminate`. "No effective requirements" becomes `incomplete`, and
+> "the current revision cannot be resolved" becomes an **error**
+> (`ErrEngineeringStateIndeterminate`), not a status — a structural failure means
+> the computation is impossible, not that its answer is uncertain.
 
 Two obligations are discharged here explicitly:
 
 - A claim supported only by an execution record whose outcome is `interrupted` or
   `indeterminate` does **not** contribute to `ready`. It is reported as
-  `inconclusive`, with the execution record named. This discharges PEOS-006's
+  `indeterminate`, with the execution record named. This discharges PEOS-006's
   requirement that an indeterminate or interrupted outcome never be silently
   treated as completed.
 - A claim whose subject is an *earlier* capability revision does **not** satisfy

@@ -92,7 +92,8 @@ nor PEOS values. They are stated here so no phase mistakes them for either.
 | Record | What it is | Mutability |
 |---|---|---|
 | **Specification Content** | The structured product content of one capability revision — title, problem, outcome, behaviour, constraints, acceptance criteria, dependencies, open questions. Keyed by an exact Artifact Revision reference. Defined in [FF-003 §5](003-peos-integration.md#5-revision-content-ownership). | Insert-only, never edited |
-| **Revision Sequence** | The product-owned integer ordering and acceptance state of a capability revision. Defined in [FF-004 §2](004-current-state-resolution.md#2-the-revision-ordering-contract). | Sequence insert-only; acceptance state is the one permitted product-owned transition, and every transition is journalled |
+| **Revision Sequence** | The product-owned integer ordering of a capability revision. Defined in [FF-004 §2](004-current-state-resolution.md#2-the-revision-ordering-contract). | Insert-only |
+| **Acceptance Journal** | The append-only record of revision acceptance transitions, carrying actor, time, and reason. A revision's acceptance state is its journal head — there is no stored acceptance field ([AD-015](../decisions/README.md#ad-015--acceptance-is-an-append-only-journal-there-is-no-stored-acceptance-field)). | Append-only |
 | **Timeline / current-state read models** | Computed views over PEOS values and the two records above. Defined in [FF-004](004-current-state-resolution.md) and [FF-006](006-timeline-read-model.md). | Derived, rebuildable, never authoritative |
 
 ## 4. Package layering
