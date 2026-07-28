@@ -1,0 +1,151 @@
+/* FeatureForge minimal UI (FF-021 §9): a restrained, single stylesheet.
+   No design system, no branding -- only the primitives each screen needs:
+   page shell, navigation, panel, form field, button, status badge, error
+   notice, timeline item, readiness/state section, rationale block. */
+
+:root {
+  color-scheme: light;
+  --text: #1a1a1a;
+  --muted: #55606b;
+  --bg: #ffffff;
+  --panel-bg: #f6f7f8;
+  --border: #c7ccd1;
+  --link: #0b4f9e;
+  --focus: #0b4f9e;
+  --ok-bg: #e3f3e6; --ok-text: #1e5c2a; --ok-border: #8fbf98;
+  --warn-bg: #fdf1de; --warn-text: #7a4a00; --warn-border: #e0b56b;
+  --bad-bg: #fbe6e6; --bad-text: #8a1f1f; --bad-border: #e3a3a3;
+  --neutral-bg: #eceff1; --neutral-text: #3a4750; --neutral-border: #c2c9d0;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  line-height: 1.5;
+}
+
+a { color: var(--link); }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.shell-header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.shell-header .brand { font-weight: 700; text-decoration: none; color: var(--text); }
+.shell-header nav a { margin-right: 1rem; }
+.shell-footer {
+  margin-top: 3rem;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+main {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem;
+}
+
+h1 { margin-top: 0; }
+
+.panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 0.5rem 0.5rem; border-bottom: 1px solid var(--border); }
+
+.empty-state { color: var(--muted); font-style: italic; }
+
+form.command-form { display: grid; gap: 0.75rem; max-width: 32rem; }
+.field { display: grid; gap: 0.25rem; }
+.field label { font-weight: 600; }
+.field input, .field textarea, .field select {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+}
+.field .hint { color: var(--muted); font-size: 0.875rem; }
+.field[data-invalid="true"] input,
+.field[data-invalid="true"] textarea { border-color: var(--bad-border); }
+
+button, .button {
+  display: inline-block;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--link);
+  border-radius: 4px;
+  background: var(--link);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+button.secondary, .button.secondary {
+  background: transparent;
+  color: var(--link);
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--neutral-border);
+  background: var(--neutral-bg);
+  color: var(--neutral-text);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.status-badge.status-ready, .status-badge.status-satisfied, .status-badge.status-accepted {
+  background: var(--ok-bg); color: var(--ok-text); border-color: var(--ok-border);
+}
+.status-badge.status-not-ready, .status-badge.status-not-satisfied, .status-badge.status-withdrawn {
+  background: var(--bad-bg); color: var(--bad-text); border-color: var(--bad-border);
+}
+.status-badge.status-indeterminate, .status-badge.status-incomplete, .status-badge.status-inconclusive {
+  background: var(--warn-bg); color: var(--warn-text); border-color: var(--warn-border);
+}
+
+.rationale {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.75rem;
+  background: #fff;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+}
+
+.error-notice {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--bad-border);
+  background: var(--bad-bg);
+  color: var(--bad-text);
+  border-radius: 6px;
+  margin-bottom: 1rem;
+}
+
+.timeline-list { list-style: none; margin: 0; padding: 0; }
+.timeline-item {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.timeline-item .kind { font-weight: 600; }
+.timeline-item .when { color: var(--muted); font-size: 0.875rem; }
+
+.superseded { opacity: 0.85; }
+.superseded .status-badge { text-decoration: line-through; text-decoration-color: var(--muted); }

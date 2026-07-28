@@ -1,0 +1,68 @@
+{{/* Shared visual primitives (FF-021 §9), each defined once and reused by
+     every page template. "shared-head", "nav", and "footer" form the page
+     shell; "status-badge", "rationale", and "error-notice" are the
+     recurring content primitives -- rationale is built first and used
+     everywhere a derived answer appears, per FF-015 §16 step 8. */}}
+
+{{define "shared-head"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.PageTitle}} — FeatureForge</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+{{end}}
+
+{{define "nav"}}
+<header class="shell-header">
+  <a class="brand" href="/">FeatureForge</a>
+  <nav aria-label="Primary">
+    <a href="/">Projects</a>
+  </nav>
+</header>
+{{end}}
+
+{{define "footer"}}
+<footer class="shell-footer">
+  <p>FeatureForge — a bounded reference consumer of PEOS. No accounts, no collaboration, one local user.</p>
+</footer>
+</body>
+</html>
+{{end}}
+
+{{/* status-badge renders a readiness/lifecycle/acceptance status string.
+     FF-001 §3.2: "A colour alone is not an explanation" -- this primitive
+     never appears without an adjacent rationale block; enforcing that is
+     each page template's responsibility, not this primitive's. */}}
+{{define "status-badge"}}
+<span class="status-badge status-{{.}}">{{.}}</span>
+{{end}}
+
+{{/* rationale renders a Rule string plus optional supporting detail. Used
+     wherever a derived answer is shown (current revision, lifecycle,
+     readiness, decisions). */}}
+{{define "rationale"}}
+{{if .}}
+<p class="rationale"><strong>Why:</strong> {{.}}</p>
+{{end}}
+{{end}}
+
+{{/* error-notice renders one form-level or page-level error, associated
+     with the form via aria-describedby from the caller. */}}
+{{define "error-notice"}}
+{{if .}}
+<div class="error-notice" role="alert" id="form-error">
+  <p>{{.}}</p>
+</div>
+{{end}}
+{{end}}
+
+{{/* empty-state renders a plain, explicit "nothing here yet" message --
+     never a blank panel (FF-021 §4: "absent optional data produces an
+     explicit empty state"). */}}
+{{define "empty-state"}}
+<p class="empty-state">{{.}}</p>
+{{end}}

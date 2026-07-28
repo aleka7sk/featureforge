@@ -1,0 +1,10 @@
+{{define "error"}}
+{{template "shared-head" .}}
+{{template "nav" .}}
+<main id="main-content">
+  <h1>{{.Heading}}</h1>
+  <p>{{.Message}}</p>
+  <p><a href="/">Return to Projects</a></p>
+</main>
+{{template "footer" .}}
+{{end}}

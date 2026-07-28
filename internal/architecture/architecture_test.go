@@ -531,6 +531,11 @@ func TestNoTimeNowOutsideClock(t *testing.T) {
 		// prohibition rather than deleting it -- this guard predates the
 		// transport package and did not anticipate it.
 		filepath.Join(ModuleRoot(), "internal", "transport", "http", "middleware.go"): true,
+		// internal/ui/middleware.go measures request duration for the same
+		// reason (FF-021 §2, mirroring internal/transport/http's own
+		// middleware exactly): HTTP observability on the UI's own request
+		// log line, not an engineering-record timestamp.
+		filepath.Join(ModuleRoot(), "internal", "ui", "middleware.go"): true,
 	}
 	err := walkGoFiles(filepath.Join(ModuleRoot(), "internal"), func(path string, file *ast.File) error {
 		if allowedFiles[path] || strings.HasSuffix(path, "_test.go") {

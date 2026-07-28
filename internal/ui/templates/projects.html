@@ -1,0 +1,28 @@
+{{define "projects"}}
+{{template "shared-head" .}}
+{{template "nav" .}}
+<main id="main-content">
+  <h1>Projects</h1>
+  <section class="panel" aria-labelledby="projects-heading">
+    <h2 id="projects-heading">All projects</h2>
+    {{if .Projects}}
+    <table>
+      <thead>
+        <tr><th scope="col">Name</th><th scope="col">Created</th></tr>
+      </thead>
+      <tbody>
+        {{range .Projects}}
+        <tr>
+          <td><a href="/projects/{{.ProjectID}}">{{.Name}}</a></td>
+          <td>{{.CreatedAt.Format "2006-01-02"}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    {{template "empty-state" "No projects yet."}}
+    {{end}}
+  </section>
+</main>
+{{template "footer" .}}
+{{end}}
