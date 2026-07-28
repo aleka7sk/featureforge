@@ -302,6 +302,47 @@ func assertCanonicalEndState(
 	if !sawCorrection {
 		t.Error("timeline does not link CLM-4's correction back to CLM-2")
 	}
+
+	// 13. Requirement discovery via subject projection (AD-025, FF-016).
+	// Steps 5 and 10 above resolved readiness from
+	// scenario.RequirementArtifactIDs, a list the test already knows. This
+	// step proves the identical population -- including REQ-4, which has no
+	// plan activity and no claim -- is obtainable from nothing but the
+	// capability artifact ID, with no prior knowledge of requirement
+	// identities. A claim-derived or plan-derived discovery technique would
+	// silently omit REQ-4; this is the counterexample AD-025 exists to
+	// prevent, and the reason it must be checked here rather than assumed.
+	discovered := doQuery(t, uow, func(r application.Repositories) ([]string, error) {
+		return application.DiscoverRequirementArtifactIDs(ctx, r, scenario.CapabilityArtifactID)
+	})
+	wantDiscovered := []string{"REQ-1", "REQ-2", "REQ-3", "REQ-4"}
+	if len(discovered) != len(wantDiscovered) {
+		t.Fatalf("discovered requirements = %v, want exactly %v", discovered, wantDiscovered)
+	}
+	for i, want := range wantDiscovered {
+		if discovered[i] != want {
+			t.Errorf("discovered[%d] = %q, want %q", i, discovered[i], want)
+		}
+	}
+
+	discoveredEffective := doQuery(t, uow, func(r application.Repositories) ([]application.EffectiveRequirement, error) {
+		return application.ResolveEffectiveRequirements(ctx, r, discovered)
+	})
+	discoveredReadiness := doQuery(t, uow, func(r application.Repositories) (application.ReadinessResult, error) {
+		return application.ResolveReadiness(ctx, r, currentRevision.Revision, discoveredEffective)
+	})
+	if discoveredReadiness.Status != application.ReadinessNotReady {
+		t.Errorf("readiness from discovered requirements = %s, want %s", discoveredReadiness.Status, application.ReadinessNotReady)
+	}
+	sawReq4IncompleteViaDiscovery := false
+	for _, per := range discoveredReadiness.PerRequirement {
+		if per.RequirementArtifactID == "REQ-4" && !per.HasClaim {
+			sawReq4IncompleteViaDiscovery = true
+		}
+	}
+	if !sawReq4IncompleteViaDiscovery {
+		t.Error("expected REQ-4, found via discovery rather than a caller-supplied list, to be reported with no applicable claim")
+	}
 }
 
 // TestCanonicalScenarioInsertionOrderIndependence runs the scenario twice,

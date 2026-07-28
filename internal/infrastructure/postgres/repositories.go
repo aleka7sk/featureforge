@@ -342,18 +342,27 @@ func (r artifactRepo) Get(ctx context.Context, key engineering.ArtifactKey) (eng
 
 type revisionRepo struct{ tx pgx.Tx }
 
+// revisionSelect is the one column list every revision_envelopes read uses,
+// mirroring the record side's recordSelect rather than inlining the same
+// list at each call site.
+const revisionSelect = `
+    SELECT artifact_id, revision_id, revision_family, artifact_type, integrity_value,
+           provenance_actor, provenance_recorded_at, content_digest, subject_key,
+           payload, payload_digest, recorded_at
+    FROM revision_envelopes`
+
 func (r revisionRepo) Put(ctx context.Context, env engineering.RevisionEnvelope) error {
 	contentDigest := env.ContentDigest.String()
 	tag, err := r.tx.Exec(ctx, `
         INSERT INTO revision_envelopes (
             artifact_id, revision_id, revision_family, artifact_type, integrity_value,
-            provenance_actor, provenance_recorded_at, content_digest,
+            provenance_actor, provenance_recorded_at, content_digest, subject_key,
             payload, payload_digest, recorded_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         ON CONFLICT (artifact_id, revision_id) DO NOTHING`,
 		env.Key.ArtifactID, env.Key.RevisionID, string(env.RevisionFamily), env.ArtifactType, env.IntegrityValue,
 		nullableString(actorIfPresent(env)), nullableTime(env.ProvenanceRecordedAt, env.HasProvenanceTime),
-		nullableString(contentDigest),
+		nullableString(contentDigest), nullableString(env.SubjectKey),
 		env.Payload, env.PayloadDigest.String(), env.RecordedAt.UTC())
 	if err != nil {
 		return err
@@ -379,11 +388,8 @@ func actorIfPresent(env engineering.RevisionEnvelope) string {
 }
 
 func (r revisionRepo) Get(ctx context.Context, key engineering.RevisionKey) (engineering.RevisionEnvelope, bool, error) {
-	rows, err := r.tx.Query(ctx, `
-        SELECT artifact_id, revision_id, revision_family, artifact_type, integrity_value,
-               provenance_actor, provenance_recorded_at, content_digest,
-               payload, payload_digest, recorded_at
-        FROM revision_envelopes WHERE artifact_id = $1 AND revision_id = $2`,
+	rows, err := r.tx.Query(ctx,
+		revisionSelect+` WHERE artifact_id = $1 AND revision_id = $2`,
 		key.ArtifactID, key.RevisionID)
 	if err != nil {
 		return engineering.RevisionEnvelope{}, false, err
@@ -400,12 +406,36 @@ func (r revisionRepo) Get(ctx context.Context, key engineering.RevisionKey) (eng
 }
 
 func (r revisionRepo) ListByArtifact(ctx context.Context, artifactID string) ([]engineering.RevisionEnvelope, error) {
-	rows, err := r.tx.Query(ctx, `
-        SELECT artifact_id, revision_id, revision_family, artifact_type, integrity_value,
-               provenance_actor, provenance_recorded_at, content_digest,
-               payload, payload_digest, recorded_at
-        FROM revision_envelopes WHERE artifact_id = $1
-        ORDER BY artifact_id, revision_id`, artifactID)
+	rows, err := r.tx.Query(ctx,
+		revisionSelect+` WHERE artifact_id = $1 ORDER BY artifact_id, revision_id`, artifactID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []engineering.RevisionEnvelope{}
+	for rows.Next() {
+		env, err := scanRevision(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, env)
+	}
+	return out, rows.Err()
+}
+
+// ListByFamilyAndSubject issues the projection-only query AD-025 and
+// FF-016 §4 specify: exact equality on revision_family and subject_key, no
+// PEOS decoding, ordered like every other revision listing (AD-025,
+// FF-016 §13 step 5). An empty subjectKey matches nothing -- it does not
+// enumerate subject-less revisions.
+func (r revisionRepo) ListByFamilyAndSubject(ctx context.Context, family engineering.RevisionFamily, subjectKey string) ([]engineering.RevisionEnvelope, error) {
+	if subjectKey == "" {
+		return []engineering.RevisionEnvelope{}, nil
+	}
+	rows, err := r.tx.Query(ctx,
+		revisionSelect+` WHERE revision_family = $1 AND subject_key = $2 ORDER BY artifact_id, revision_id`,
+		string(family), subjectKey)
 	if err != nil {
 		return nil, err
 	}
@@ -424,12 +454,12 @@ func (r revisionRepo) ListByArtifact(ctx context.Context, artifactID string) ([]
 
 func scanRevision(rows pgx.Rows) (engineering.RevisionEnvelope, error) {
 	var artifactID, revisionID, family, artifactType, integrity, digest string
-	var actor, contentDigest *string
+	var actor, contentDigest, subjectKey *string
 	var provenanceAt *time.Time
 	var payload []byte
 	var recordedAt time.Time
 	if err := rows.Scan(&artifactID, &revisionID, &family, &artifactType, &integrity,
-		&actor, &provenanceAt, &contentDigest, &payload, &digest, &recordedAt); err != nil {
+		&actor, &provenanceAt, &contentDigest, &subjectKey, &payload, &digest, &recordedAt); err != nil {
 		return engineering.RevisionEnvelope{}, err
 	}
 	key, err := engineering.NewRevisionKey(artifactID, revisionID)
@@ -443,6 +473,7 @@ func scanRevision(rows pgx.Rows) (engineering.RevisionEnvelope, error) {
 	if err != nil {
 		return engineering.RevisionEnvelope{}, err
 	}
+	subjectValue, _ := stringOrEmpty(subjectKey)
 	payloadDigest, err := parseDigest(digest)
 	if err != nil {
 		return engineering.RevisionEnvelope{}, err
@@ -457,6 +488,7 @@ func scanRevision(rows pgx.Rows) (engineering.RevisionEnvelope, error) {
 		ProvenanceRecordedAt: provenanceValue.UTC(),
 		HasProvenanceTime:    hasProvenance,
 		ContentDigest:        contentParsed,
+		SubjectKey:           subjectValue,
 		Payload:              payload,
 		PayloadDigest:        payloadDigest,
 		RecordedAt:           recordedAt.UTC(),

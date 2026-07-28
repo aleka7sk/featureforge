@@ -110,6 +110,7 @@ func BuildRequirement(in RequirementInput) (engineering.ArtifactEnvelope, engine
 		Core:          coreRev,
 		Payload:       reqRev,
 		ContentDigest: contentDigest,
+		SubjectKey:    engineering.ArtifactSubjectKey(in.SubjectArtifactID),
 		RecordedAt:    in.RecordedAt,
 	})
 	if err != nil {

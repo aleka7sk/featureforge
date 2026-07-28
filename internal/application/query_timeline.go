@@ -73,10 +73,17 @@ type TimelineResult struct {
 	Undated []TimelineEvent
 }
 
-// TimelineInput names every record family a timeline draws from. No
-// requirement-to-capability (or evidence-to-execution) index exists in the
-// M.3 repository set (FF-009 §5), so the caller -- which created these
-// records and already knows their identities -- supplies them explicitly.
+// TimelineInput names every record family a timeline draws from, supplied
+// by the caller rather than derived here. DecisionIDs, ExecutionIDs,
+// EvidenceArtifactIDs, and ClaimIDs were already discoverable by composing
+// existing repository listings (m5-contract-investigation.md §4 Option G).
+// RequirementArtifactIDs and PlanArtifactID were not: no requirement-to-
+// capability index existed in the M.3 repository set (FF-009 §5). AD-025
+// and FF-016 close that gap by projecting a subject onto RevisionEnvelope; a
+// caller that does not already know the requirement or validation-plan
+// population can now obtain it via DiscoverRequirementArtifactIDs and
+// DiscoverValidationPlanArtifactIDs before constructing this struct, whose
+// shape and caller-supplied contract are otherwise unchanged.
 type TimelineInput struct {
 	Project                domain.Project
 	FeatureCard            domain.FeatureCard
@@ -87,6 +94,15 @@ type TimelineInput struct {
 	ExecutionIDs           []string
 	EvidenceArtifactIDs    []string
 	ClaimIDs               []string
+}
+
+// DiscoverValidationPlanArtifactIDs finds every validation plan whose
+// projected subject -- the plan's PEOS Scope, projected the same way a
+// requirement's Subject is (FF-016 §3.2) -- is capabilityArtifactID,
+// returning their artifact IDs (AD-025, FF-016 §9). It is the
+// TimelineInput.PlanArtifactID counterpart to DiscoverRequirementArtifactIDs.
+func DiscoverValidationPlanArtifactIDs(ctx context.Context, repos Repositories, capabilityArtifactID string) ([]string, error) {
+	return discoverArtifactIDsBySubject(ctx, repos, engineering.RevisionFamilyValidationPlan, capabilityArtifactID)
 }
 
 // GetFeatureTimeline computes a feature's complete engineering timeline

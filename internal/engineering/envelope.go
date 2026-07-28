@@ -79,9 +79,18 @@ type RevisionEnvelope struct {
 	HasProvenanceActor   bool
 	HasProvenanceTime    bool
 	ContentDigest        Digest
-	Payload              []byte
-	PayloadDigest        Digest
-	RecordedAt           time.Time
+	// SubjectKey answers "which capability Artifact is this revision about?"
+	// (AD-025, FF-016 §3). It is empty for RevisionFamilyCapability and
+	// RevisionFamilyEvidence, which have no capability they are about, and
+	// carries an ArtifactSubjectKey value for RevisionFamilyRequirement,
+	// RevisionFamilyValidationPlan, and RevisionFamilyTransitionRecord.
+	// Absence is a positive statement of the model, not a missing value
+	// (FF-016 §3.3); it is not compared by Equal, like every other
+	// projection on this envelope.
+	SubjectKey    string
+	Payload       []byte
+	PayloadDigest Digest
+	RecordedAt    time.Time
 }
 
 // RevisionEnvelopeInput carries the projected fields for NewRevisionEnvelope.
@@ -95,6 +104,7 @@ type RevisionEnvelopeInput struct {
 	ProvenanceRecordedAt time.Time
 	HasProvenanceTime    bool
 	ContentDigest        Digest
+	SubjectKey           string
 	Payload              []byte
 	PayloadDigest        Digest
 	RecordedAt           time.Time
@@ -117,6 +127,15 @@ func NewRevisionEnvelope(in RevisionEnvelopeInput) (RevisionEnvelope, error) {
 	if in.IntegrityValue == "" {
 		return RevisionEnvelope{}, fmt.Errorf("%w: revision envelope requires an integrity value", ErrInvalidEnvelope)
 	}
+	if in.SubjectKey != "" {
+		switch in.RevisionFamily {
+		case RevisionFamilyCapability, RevisionFamilyEvidence:
+			return RevisionEnvelope{}, fmt.Errorf("%w: revision family %q has no subject, but a subject key was given", ErrInvalidEnvelope, in.RevisionFamily)
+		}
+		if _, _, _, err := ParseSubjectKey(in.SubjectKey); err != nil {
+			return RevisionEnvelope{}, fmt.Errorf("%w: revision envelope subject key is malformed: %v", ErrInvalidEnvelope, err)
+		}
+	}
 	if err := validatePayload(in.Payload, in.PayloadDigest); err != nil {
 		return RevisionEnvelope{}, err
 	}
@@ -131,6 +150,7 @@ func NewRevisionEnvelope(in RevisionEnvelopeInput) (RevisionEnvelope, error) {
 		ProvenanceRecordedAt: in.ProvenanceRecordedAt,
 		HasProvenanceTime:    in.HasProvenanceTime,
 		ContentDigest:        in.ContentDigest,
+		SubjectKey:           in.SubjectKey,
 		Payload:              append([]byte(nil), in.Payload...),
 		PayloadDigest:        in.PayloadDigest,
 		RecordedAt:           in.RecordedAt,

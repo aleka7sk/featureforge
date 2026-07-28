@@ -1,6 +1,6 @@
 # FF-016 — Revision Subject Discovery
 
-Status: Proposed (Phase M.5, prerequisite change)
+Status: Implemented (Phase M.5, prerequisite change)
 Governs: the `RevisionEnvelope.SubjectKey` projection, the
 `RevisionEnvelopeRepository.ListByFamilyAndSubject` operation, their semantics
 in both persistence adapters, and the implementation order for landing them.
@@ -13,8 +13,12 @@ PEOS-000 through PEOS-009 remain authoritative for every PEOS concept.
 `docs/spec/` governs FeatureForge. This document adds no PEOS concept, renames
 none, and redefines none. PEOS v1.0.0 is used unchanged.
 
-**Nothing in this document is implemented.** It specifies a change; §13 orders
-the work. Until §13 completes, the capability described here does not exist.
+**Implemented.** §13's twelve steps landed exactly as specified, in one atomic
+commit, verified by `gofmt`, `go build ./...`, `go test ./... -count=1`,
+`go test ./... -race -count=1`, and `make postgres-test` all passing, plus the
+step-by-step verification each step below now records. The capability
+described here exists and is exercised by both adapters' shared contract
+suite and by the canonical FF-011 scenario.
 
 ## 1. Why this document exists
 
@@ -441,6 +445,14 @@ passes with the new migration present.
 editing, that is evidence the change is larger than specified and step 8 stops
 for review.
 
+**As implemented.** `internal/architecture/architecture_test.go` is
+byte-for-byte unchanged. `TestNoUpdateOrDeleteOnEngineeringTables` was
+deliberately violated by temporarily appending
+`UPDATE revision_envelopes SET subject_key = subject_key;` to migration
+`0002_revision_subject_key.sql`, confirmed to fail with the expected message,
+then reverted and confirmed passing again — proving the existing guard covers
+the new migration file, not merely the old one.
+
 ### Step 9 — Application query integration
 
 **Affects.** `internal/application/query_state.go`,
@@ -459,10 +471,22 @@ population.** Decisions, executions, claims, and evidence remain discoverable
 by the existing means the contract investigation identified; no change is made
 for them.
 
+**As implemented.** Two exported functions, `DiscoverRequirementArtifactIDs`
+and `DiscoverValidationPlanArtifactIDs`, both backed by a shared
+`discoverArtifactIDsBySubject` helper that calls `ListByFamilyAndSubject` and
+returns deduplicated artifact IDs in ascending order. Neither
+`EngineeringStateInput` nor `TimelineInput` changed shape: both keep their
+caller-supplied `RequirementArtifactIDs` / `PlanArtifactID` fields exactly as
+before, and a caller lacking them now calls the new discovery functions first
+to obtain them, matching §6.2 of the contract investigation ("the transport
+simply becomes able to populate them"). The outdated "FF-009 §5 defines no
+requirement-to-capability index" doc comments on both structs were corrected
+to describe the current state without overclaiming a broader index.
+
 **Tests.** Step 10.
 
 **Done when.** A caller holding only a capability artifact ID can obtain the
-complete requirement population.
+complete requirement population. Confirmed by the Step 10 proof.
 
 ### Step 10 — Canonical FF-011 readiness proof, including uncovered `REQ-4`
 
@@ -482,6 +506,15 @@ It must run on **both** adapters.
 
 **Done when.** It passes on memory and PostgreSQL, and deleting `REQ-4` from
 the expected set makes it fail.
+
+**As implemented.** Added inside `assertCanonicalEndState`, the assertion body
+already shared by `TestCanonicalScenario` (memory) and
+`TestCanonicalScenarioPostgres` (PostgreSQL), so one test body proves both
+adapters rather than two bodies that could drift. Confirmed passing on both
+adapters via `make postgres-test`. Confirmed failing for the expected reason —
+`discovered requirements = [REQ-1 REQ-2 REQ-3 REQ-4], want exactly [REQ-1
+REQ-2 REQ-3]` — with `REQ-4` deliberately removed from the expected set, then
+reverted.
 
 ### Step 11 — Documentation consistency verification
 

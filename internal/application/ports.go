@@ -45,10 +45,18 @@ type ArtifactEnvelopeRepository interface {
 
 // RevisionEnvelopeRepository persists RevisionEnvelopes. ListByArtifact
 // returns entries ordered by key ascending (FF-009 §5).
+//
+// ListByFamilyAndSubject returns every revision of family whose SubjectKey
+// equals subjectKey exactly, ordered by RevisionKey.String() ascending, like
+// ListByArtifact (AD-025, FF-016 §4). Revisions with no subject (§3.3) never
+// match a non-empty subjectKey, and a non-matching or empty result is an
+// empty slice with a nil error, never ErrNotFound. It never decodes a PEOS
+// payload; it reads only the projected SubjectKey.
 type RevisionEnvelopeRepository interface {
 	Put(ctx context.Context, env engineering.RevisionEnvelope) error
 	Get(ctx context.Context, key engineering.RevisionKey) (engineering.RevisionEnvelope, bool, error)
 	ListByArtifact(ctx context.Context, artifactID string) ([]engineering.RevisionEnvelope, error)
+	ListByFamilyAndSubject(ctx context.Context, family engineering.RevisionFamily, subjectKey string) ([]engineering.RevisionEnvelope, error)
 }
 
 // StructuredContentRepository persists CapabilitySpecificationContent,

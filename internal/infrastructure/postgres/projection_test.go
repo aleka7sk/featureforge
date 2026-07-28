@@ -140,6 +140,100 @@ func TestPayloadIsStoredByteIdentical(t *testing.T) {
 	}
 }
 
+// TestRevisionSubjectKeyColumnProjection is the AD-025 / FF-016 sibling of
+// TestTypedColumnsAgreeWithAuthoritativePayload: it extends the same
+// raw-SQL-versus-adapter comparison to the new subject_key column.
+func TestRevisionSubjectKeyColumnProjection(t *testing.T) {
+	dsn := requireDSN(t)
+	pool := newIsolatedPool(t, dsn)
+	uow := postgres.NewUnitOfWork(pool)
+	recorder := peos.NewRecorder()
+	clock := application.NewFixedClock(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC))
+	ctx := context.Background()
+
+	seedCapability(t, uow, recorder, clock)
+	if _, err := (application.EstablishRequirementCommand{
+		ArtifactID: "REQ-1", RevisionID: "REQ-1-REV-1",
+		Statement: "Published homework SHALL be visible to the student.", SubjectArtifactID: "CAP-1",
+	}).Execute(ctx, uow, recorder, clock); err != nil {
+		t.Fatalf("establish requirement: %v", err)
+	}
+
+	// A requirement revision projects a non-null subject_key equal to what
+	// engineering.ArtifactSubjectKey derives from the same identity.
+	var reqSubject *string
+	if err := pool.QueryRow(ctx,
+		`SELECT subject_key FROM revision_envelopes WHERE artifact_id = 'REQ-1' AND revision_id = 'REQ-1-REV-1'`).
+		Scan(&reqSubject); err != nil {
+		t.Fatalf("reading raw subject_key column: %v", err)
+	}
+	if reqSubject == nil {
+		t.Fatal("requirement revision's subject_key column is NULL, want a projected value")
+	}
+	wantSubject := engineering.ArtifactSubjectKey("CAP-1")
+	if *reqSubject != wantSubject {
+		t.Errorf("subject_key column = %q, want %q", *reqSubject, wantSubject)
+	}
+
+	// A capability revision -- a family with no subject -- projects SQL
+	// NULL, which the adapter must read back as an empty string, never as
+	// an error and never as a sentinel value.
+	var capSubject *string
+	if err := pool.QueryRow(ctx,
+		`SELECT subject_key FROM revision_envelopes WHERE artifact_id = 'CAP-1' AND revision_id = 'CAP-1-REV-1'`).
+		Scan(&capSubject); err != nil {
+		t.Fatalf("reading raw subject_key column: %v", err)
+	}
+	if capSubject != nil {
+		t.Errorf("capability revision's subject_key column = %q, want NULL", *capSubject)
+	}
+
+	// The adapter reproduces both projections exactly, and ListByFamilyAndSubject
+	// finds the requirement revision through the same column.
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		reqKey, err := engineering.NewRevisionKey("REQ-1", "REQ-1-REV-1")
+		if err != nil {
+			return err
+		}
+		reqEnv, found, err := r.Revisions.Get(ctx, reqKey)
+		if err != nil {
+			return err
+		}
+		if !found {
+			t.Fatal("REQ-1 revision not found through the adapter")
+		}
+		if reqEnv.SubjectKey != wantSubject {
+			t.Errorf("adapter SubjectKey = %q, raw column = %q", reqEnv.SubjectKey, *reqSubject)
+		}
+
+		capKey, err := engineering.NewRevisionKey("CAP-1", "CAP-1-REV-1")
+		if err != nil {
+			return err
+		}
+		capEnv, found, err := r.Revisions.Get(ctx, capKey)
+		if err != nil {
+			return err
+		}
+		if !found {
+			t.Fatal("CAP-1 revision not found through the adapter")
+		}
+		if capEnv.SubjectKey != "" {
+			t.Errorf("capability revision adapter SubjectKey = %q, want empty (NULL column)", capEnv.SubjectKey)
+		}
+
+		byFamilyAndSubject, err := r.Revisions.ListByFamilyAndSubject(ctx, engineering.RevisionFamilyRequirement, wantSubject)
+		if err != nil {
+			return err
+		}
+		if len(byFamilyAndSubject) != 1 || byFamilyAndSubject[0].Key != reqKey {
+			t.Errorf("ListByFamilyAndSubject = %v, want exactly [REQ-1/REQ-1-REV-1]", byFamilyAndSubject)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func seedEvidence(t *testing.T, uow application.UnitOfWork, recorder application.EngineeringRecorder, clock application.Clock, evidenceID string) {
 	t.Helper()
 	ctx := context.Background()

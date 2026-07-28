@@ -190,6 +190,7 @@ func BuildEntryAssignment(in EntryAssignmentInput) (engineering.ArtifactEnvelope
 		ArtifactType: lifecycle.ArtifactTypeTransitionRecord,
 		Core:         entryRev,
 		Payload:      entryRev,
+		SubjectKey:   engineering.ArtifactSubjectKey(in.SubjectArtifactID),
 		RecordedAt:   in.RecordedAt,
 	})
 	if err != nil {
@@ -367,6 +368,7 @@ func BuildTransition(in TransitionInput) (engineering.ArtifactEnvelope, engineer
 		Core:          coreRev,
 		Payload:       trRevision,
 		ContentDigest: contentDigest,
+		SubjectKey:    engineering.ArtifactSubjectKey(in.SubjectArtifactID),
 		RecordedAt:    in.RecordedAt,
 	})
 	if err != nil {

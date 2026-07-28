@@ -57,6 +57,11 @@ func RunRepositoryContractSuite(t *testing.T, newUOW func() application.UnitOfWo
 	t.Run("RecordEnvelopePutRequiresResolvableSubject", func(t *testing.T) { testRecordRequiresSubject(t, newUOW()) })
 	t.Run("RecordEnvelopePutRejectsMalformedSubjectKey", func(t *testing.T) { testRecordRejectsMalformedSubject(t, newUOW()) })
 	t.Run("AcceptanceRecordIDIsUnique", func(t *testing.T) { testAcceptanceRecordIDIsUnique(t, newUOW()) })
+
+	// AD-025, FF-016: revision subject discovery.
+	t.Run("RevisionListByFamilyAndSubject", func(t *testing.T) { testRevisionListByFamilyAndSubject(t, newUOW()) })
+	t.Run("RevisionSubjectKeyIsOptional", func(t *testing.T) { testRevisionSubjectKeyIsOptional(t, newUOW()) })
+	t.Run("RevisionRejectsMalformedSubjectKey", func(t *testing.T) { testRevisionRejectsMalformedSubjectKey(t, newUOW()) })
 }
 
 func fixedContractTime() time.Time { return time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC) }
@@ -670,6 +675,177 @@ func testAcceptanceRecordIDIsUnique(t *testing.T, uow application.UnitOfWork) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// --- AD-025, FF-016: revision subject discovery ---
+
+// testRevisionListByFamilyAndSubject asserts ListByFamilyAndSubject returns
+// exactly the revisions matching both family and subject, in ascending
+// RevisionKey.String() order, an empty slice (never an error) on no match,
+// and never a subject-less revision, regardless of which subject is queried.
+func testRevisionListByFamilyAndSubject(t *testing.T, uow application.UnitOfWork) {
+	subjectA := engineering.ArtifactSubjectKey("CAP-SUBJ-A")
+	subjectB := engineering.ArtifactSubjectKey("CAP-SUBJ-B")
+
+	writes := []struct {
+		artifactID, revisionID string
+		family                 engineering.RevisionFamily
+		subject                string
+	}{
+		{"REQ-SUBJ-1", "REV-1", engineering.RevisionFamilyRequirement, subjectA},
+		{"REQ-SUBJ-2", "REV-1", engineering.RevisionFamilyRequirement, subjectA},
+		{"REQ-SUBJ-3", "REV-1", engineering.RevisionFamilyRequirement, subjectB},
+		{"VP-SUBJ-1", "REV-1", engineering.RevisionFamilyValidationPlan, subjectA},
+		{"CAP-SUBJ-NOSUBJECT", "REV-1", engineering.RevisionFamilyCapability, ""},
+	}
+	err := uow.Do(context.Background(), func(r application.Repositories) error {
+		for _, w := range writes {
+			if err := r.Artifacts.Put(context.Background(), mustArtifactEnvelope(t, w.artifactID)); err != nil {
+				return err
+			}
+			key, err := engineering.NewRevisionKey(w.artifactID, w.revisionID)
+			if err != nil {
+				return err
+			}
+			if err := r.Revisions.Put(context.Background(), mustRevisionEnvelopeWithSubject(t, key, w.family, w.subject)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = uow.Do(context.Background(), func(r application.Repositories) error {
+		got, err := r.Revisions.ListByFamilyAndSubject(context.Background(), engineering.RevisionFamilyRequirement, subjectA)
+		if err != nil {
+			return err
+		}
+		wantKeys := []string{"REQ-SUBJ-1/REV-1", "REQ-SUBJ-2/REV-1"}
+		if len(got) != len(wantKeys) {
+			t.Fatalf("got %d revisions, want %d: %v", len(got), len(wantKeys), got)
+		}
+		for i, want := range wantKeys {
+			if got[i].Key.String() != want {
+				t.Errorf("index %d: key = %s, want %s (ascending order)", i, got[i].Key.String(), want)
+			}
+			if got[i].SubjectKey != subjectA {
+				t.Errorf("index %d: subject = %q, want %q", i, got[i].SubjectKey, subjectA)
+			}
+		}
+
+		// A different family with the same subject is excluded.
+		planOnly, err := r.Revisions.ListByFamilyAndSubject(context.Background(), engineering.RevisionFamilyValidationPlan, subjectA)
+		if err != nil {
+			return err
+		}
+		if len(planOnly) != 1 || planOnly[0].Key.String() != "VP-SUBJ-1/REV-1" {
+			t.Errorf("validation plan query = %v, want exactly VP-SUBJ-1/REV-1", planOnly)
+		}
+
+		// No match: an empty slice, not ErrNotFound.
+		none, err := r.Revisions.ListByFamilyAndSubject(context.Background(),
+			engineering.RevisionFamilyRequirement, engineering.ArtifactSubjectKey("CAP-SUBJ-GHOST"))
+		if err != nil {
+			return err
+		}
+		if len(none) != 0 {
+			t.Errorf("no-match query returned %d results, want 0", len(none))
+		}
+
+		// A subject-less revision never appears under any subject query.
+		for _, subject := range []string{subjectA, subjectB} {
+			capResults, err := r.Revisions.ListByFamilyAndSubject(context.Background(), engineering.RevisionFamilyCapability, subject)
+			if err != nil {
+				return err
+			}
+			if len(capResults) != 0 {
+				t.Errorf("capability family query for subject %q returned %d results, want 0 (capability revisions have no subject)", subject, len(capResults))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// testRevisionSubjectKeyIsOptional asserts a capability revision with no
+// subject round-trips with an empty SubjectKey and is excluded from every
+// subject query (AD-025, FF-016 §3.3, §3.4).
+func testRevisionSubjectKeyIsOptional(t *testing.T, uow application.UnitOfWork) {
+	key, err := engineering.NewRevisionKey("CAP-NOSUBJ", "REV-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = uow.Do(context.Background(), func(r application.Repositories) error {
+		if err := r.Artifacts.Put(context.Background(), mustArtifactEnvelope(t, "CAP-NOSUBJ")); err != nil {
+			return err
+		}
+		return r.Revisions.Put(context.Background(), mustRevisionEnvelopeWithSubject(t, key, engineering.RevisionFamilyCapability, ""))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = uow.Do(context.Background(), func(r application.Repositories) error {
+		got, found, err := r.Revisions.Get(context.Background(), key)
+		if err != nil {
+			return err
+		}
+		if !found {
+			t.Fatal("expected the revision to be found")
+		}
+		if got.SubjectKey != "" {
+			t.Errorf("SubjectKey = %q, want empty", got.SubjectKey)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// testRevisionRejectsMalformedSubjectKey asserts NewRevisionEnvelope rejects
+// a SubjectKey that does not parse via ParseSubjectKey, identically for
+// every adapter -- the rejection happens in the shared constructor, before
+// any adapter is reached, so no adapter ever sees a malformed value
+// (AD-025, FF-016 §3.6).
+func testRevisionRejectsMalformedSubjectKey(t *testing.T, uow application.UnitOfWork) {
+	key, err := engineering.NewRevisionKey("REQ-MALFORMED", "REV-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte(`{"x":1}`)
+	_, err = engineering.NewRevisionEnvelope(engineering.RevisionEnvelopeInput{
+		Key: key, RevisionFamily: engineering.RevisionFamilyRequirement,
+		ArtifactType: "featureforge:requirement", IntegrityValue: "sha256:abc",
+		SubjectKey: "nonsense:CAP-1",
+		Payload:    payload, PayloadDigest: engineering.ComputeDigest(payload), RecordedAt: fixedContractTime(),
+	})
+	if !errors.Is(err, engineering.ErrInvalidEnvelope) {
+		t.Errorf("err = %v, want ErrInvalidEnvelope", err)
+	}
+}
+
+// mustRevisionEnvelopeWithSubject builds a valid RevisionEnvelope for the
+// given family and subject, for the AD-025 / FF-016 subtests above that need
+// to control both rather than always using RevisionFamilyCapability with no
+// subject, as mustRevisionEnvelope does.
+func mustRevisionEnvelopeWithSubject(t *testing.T, key engineering.RevisionKey, family engineering.RevisionFamily, subjectKey string) engineering.RevisionEnvelope {
+	t.Helper()
+	payload := []byte(`{"revision_id":"` + key.RevisionID + `"}`)
+	env, err := engineering.NewRevisionEnvelope(engineering.RevisionEnvelopeInput{
+		Key: key, RevisionFamily: family,
+		ArtifactType: "featureforge:test-artifact", IntegrityValue: "sha256:abc",
+		SubjectKey: subjectKey,
+		Payload:    payload, PayloadDigest: engineering.ComputeDigest(payload), RecordedAt: fixedContractTime(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return env
 }
 
 func mustFeatureCardID(t *testing.T, s string) domain.FeatureCardID {

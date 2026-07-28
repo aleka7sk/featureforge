@@ -268,7 +268,7 @@ rationale. The feature-overview screen (FF-001 §3.2) is very nearly a direct
 rendering of it, which is evidence the application layer was decomposed along
 the right seams.
 
-**One gap, investigated and decided — implementation pending.**
+**One gap, investigated, decided, and now closed.**
 `EngineeringStateInput` and `TimelineInput` require the caller to supply
 requirement and decision identifier lists. In M.3 and M.4 the caller was the
 scenario driver, which knew them by construction; an HTTP client holding only a
@@ -293,15 +293,17 @@ resolved this into two halves with different answers:
   readiness would report a falsely complete result.
 
 **The resolution is specified by [AD-025](../decisions/README.md#ad-025) and
-[FF-016](016-revision-subject-discovery.md). The FF-016 implementation must
-land before the affected M.5 queries are implemented.**
+[FF-016](016-revision-subject-discovery.md). FF-016 has landed.**
 
-The architecture decision is accepted; the repository capability
-(`ListByFamilyAndSubject`, and the `RevisionEnvelope.SubjectKey` projection it
-searches) **does not yet exist**. Until FF-016 §13 completes, any endpoint
-requiring a complete requirement or validation-plan population cannot be
-implemented correctly, and no partial workaround may be substituted. §16 orders
-the work accordingly.
+The repository capability (`ListByFamilyAndSubject`, and the
+`RevisionEnvelope.SubjectKey` projection it searches) now exists in both
+adapters, proven by the shared contract suite and the canonical FF-011
+scenario, and `internal/application` exposes `DiscoverRequirementArtifactIDs`
+and `DiscoverValidationPlanArtifactIDs` for a caller that does not already
+know the population. This closes the one prerequisite the M.5 queries needed.
+It is **not** the general HTTP API or UI implementation: no route, handler, or
+UI screen exists yet. §16 still orders that work, now unblocked at the step
+this section names.
 
 ### 6.3 Methods
 
@@ -595,11 +597,12 @@ so the API must be fixed first. FF-007 anticipates exactly this ordering.
    capability → requirement → decision → plan → run → claim → correction →
    lifecycle), so the scenario becomes drivable incrementally.
 5. **Query endpoints.** Endpoints needing only decisions, executions, claims,
-   or evidence can be built immediately using existing operations (§6.2).
-   Endpoints needing a complete requirement or validation-plan population are
-   **blocked on FF-016 §13**, which must land first — it is a prerequisite, not
-   a parallel track. No partial or claim-derived substitute may be used while
-   waiting; AD-025 records why that produces a false result.
+   or evidence can be built using existing operations (§6.2). Endpoints
+   needing a complete requirement or validation-plan population, which were
+   **blocked on FF-016 §13**, are unblocked: FF-016 has landed, and
+   `DiscoverRequirementArtifactIDs` / `DiscoverValidationPlanArtifactIDs` are
+   available for a handler to call. No partial or claim-derived substitute may
+   be used; AD-025 records why that produces a false result.
 6. **`cmd/featureforge`**: configuration, adapter selection, migration on
    start, graceful shutdown.
 7. **Scenario-through-HTTP test**, on both adapters. Phase A is complete when
@@ -630,7 +633,7 @@ CLAUDE.md's "do not make architecture decisions silently".
 | **AD-022** | Intent-oriented HTTP API rather than resource-CRUD, following FF-010 §3's non-CRUD command decomposition (§5) |
 | **AD-023** | Narrowing the blanket `net/http`/template prohibition into named-holder import tests, extending architecture coverage to `cmd/` (§4.3) |
 | **AD-024** | Identity generation at the transport edge: client-supplied by default, server-generated only when omitted, no UUID dependency (§10) |
-| **AD-025** | **Accepted — implementation pending.** Revision subject discovery: an optional `SubjectKey` projection on `RevisionEnvelope` and `RevisionEnvelopeRepository.ListByFamilyAndSubject` (§6.2) |
+| **AD-025** | **Accepted and implemented.** Revision subject discovery: an optional `SubjectKey` projection on `RevisionEnvelope` and `RevisionEnvelopeRepository.ListByFamilyAndSubject` (§6.2) |
 
 **On AD-025.** It was reserved conditionally when this plan was written —
 "only if required" — and the condition was tested rather than assumed. The
@@ -638,8 +641,10 @@ investigation established that it *is* required, and simultaneously that it is
 **narrower** than this plan anticipated: decisions, executions, claims, and
 evidence need no change at all, so AD-025 covers only requirements and
 validation plans. It is accepted and specified in
-[FF-016](016-revision-subject-discovery.md); its implementation has not begun,
-and is a prerequisite for §16 step 5.
+[FF-016](016-revision-subject-discovery.md); its implementation has landed,
+clearing the prerequisite for §16 step 5. Revision subject discovery itself is
+implemented — the general HTTP API and UI work §16 orders is not, and remains
+future work.
 
 AD-022, AD-023, and AD-024 remain proposed and undecided.
 

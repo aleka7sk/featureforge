@@ -2,17 +2,59 @@ package application
 
 import (
 	"context"
+	"sort"
 
 	"github.com/aleka7sk/featureforge/internal/engineering"
 )
 
 // EngineeringStateInput names the records GetFeatureEngineeringState draws
-// from, for the same reason TimelineInput does (FF-009 §5 defines no
-// requirement-to-capability index).
+// from. RequirementArtifactIDs and DecisionIDs are caller-supplied, not
+// derived by this query. A caller that does not already know the
+// requirement population can now obtain it via
+// DiscoverRequirementArtifactIDs (AD-025, FF-016 §5) rather than being
+// unable to find it at all, which is what this comment described before
+// FF-016 projected a subject onto RevisionEnvelope.
 type EngineeringStateInput struct {
 	CapabilityArtifactID   string
 	RequirementArtifactIDs []string
 	DecisionIDs            []string
+}
+
+// discoverArtifactIDsBySubject collects the distinct artifact IDs of every
+// revision of family whose projected subject is capabilityArtifactID,
+// ascending -- never map iteration order (FF-009 §5). It is the shared
+// mechanism behind DiscoverRequirementArtifactIDs and
+// DiscoverValidationPlanArtifactIDs (AD-025, FF-016 §9). Completeness comes
+// from ListByFamilyAndSubject (FF-016 §4); this function adds only artifact
+// ID deduplication and ordering.
+func discoverArtifactIDsBySubject(ctx context.Context, repos Repositories, family engineering.RevisionFamily, capabilityArtifactID string) ([]string, error) {
+	revisions, err := repos.Revisions.ListByFamilyAndSubject(ctx, family, engineering.ArtifactSubjectKey(capabilityArtifactID))
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(revisions))
+	for _, rev := range revisions {
+		if seen[rev.Key.ArtifactID] {
+			continue
+		}
+		seen[rev.Key.ArtifactID] = true
+		out = append(out, rev.Key.ArtifactID)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// DiscoverRequirementArtifactIDs finds every requirement whose projected
+// subject is capabilityArtifactID, returning their artifact IDs. This is
+// what clears the M.5 blocker the contract investigation identified: a
+// caller holding only a capability artifact ID, with no prior knowledge of
+// which requirements govern it, can obtain the complete population
+// (AD-025, FF-016 §9) -- including a requirement with no plan activity and
+// no claim, which a claim-derived or plan-derived population would silently
+// omit (FF-011 REQ-4, the counterexample AD-025 records).
+func DiscoverRequirementArtifactIDs(ctx context.Context, repos Repositories, capabilityArtifactID string) ([]string, error) {
+	return discoverArtifactIDsBySubject(ctx, repos, engineering.RevisionFamilyRequirement, capabilityArtifactID)
 }
 
 // ApplicableDecision is one decision found to name the capability as a

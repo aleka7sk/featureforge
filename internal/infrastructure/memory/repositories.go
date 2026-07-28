@@ -223,6 +223,35 @@ func (r revisionRepo) ListByArtifact(_ context.Context, artifactID string) ([]en
 	return out, nil
 }
 
+// ListByFamilyAndSubject scans committed and overlay revisions directly,
+// rather than delegating to ListByArtifact or any per-family listing, because
+// no ListByFamily exists and none is added speculatively (AD-025, FF-016
+// §13 step 3). An empty subjectKey matches nothing, matching the interface
+// contract that empty means "no subject queried" rather than "list every
+// subject-less revision".
+func (r revisionRepo) ListByFamilyAndSubject(_ context.Context, family engineering.RevisionFamily, subjectKey string) ([]engineering.RevisionEnvelope, error) {
+	if subjectKey == "" {
+		return []engineering.RevisionEnvelope{}, nil
+	}
+	seen := map[engineering.RevisionKey]engineering.RevisionEnvelope{}
+	for k, v := range r.txn.store.committed.revisions {
+		if v.RevisionFamily == family && v.SubjectKey == subjectKey {
+			seen[k] = v
+		}
+	}
+	for k, v := range r.txn.overlay.revisions {
+		if v.RevisionFamily == family && v.SubjectKey == subjectKey {
+			seen[k] = v
+		}
+	}
+	out := make([]engineering.RevisionEnvelope, 0, len(seen))
+	for _, v := range seen {
+		out = append(out, v)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key.String() < out[j].Key.String() })
+	return out, nil
+}
+
 func mustArtifactKey(rk engineering.RevisionKey) engineering.ArtifactKey {
 	return engineering.ArtifactKey{ArtifactID: rk.ArtifactID}
 }

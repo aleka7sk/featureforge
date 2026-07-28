@@ -97,7 +97,12 @@ type revisionEnvelopeInput struct {
 	Core          core.ArtifactRevision
 	Payload       any
 	ContentDigest engineering.Digest
-	RecordedAt    time.Time
+	// SubjectKey answers "which capability is this revision about?"
+	// (AD-025, FF-016 §3). Left empty for families with no subject
+	// (capability, evidence); every other call site sets it via
+	// engineering.ArtifactSubjectKey.
+	SubjectKey string
+	RecordedAt time.Time
 }
 
 // buildRevisionEnvelope marshals in.Payload and projects identity,
@@ -122,6 +127,7 @@ func buildRevisionEnvelope(in revisionEnvelopeInput) (engineering.RevisionEnvelo
 		ProvenanceRecordedAt: recordedAt,
 		HasProvenanceTime:    hasRecordedAt,
 		ContentDigest:        in.ContentDigest,
+		SubjectKey:           in.SubjectKey,
 		Payload:              payload,
 		PayloadDigest:        engineering.ComputeDigest(payload),
 		RecordedAt:           in.RecordedAt,

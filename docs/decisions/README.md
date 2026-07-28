@@ -751,7 +751,7 @@ of it. See [FF-014](../spec/014-postgresql-persistence.md).
 
 Status: Accepted
 Date: 2026-07-28
-Phase: M.5 (prerequisite change; specified, not yet implemented)
+Phase: M.5 (prerequisite change; implemented)
 
 **Context.** `RecordEnvelope` projects `SubjectKey`, and
 `RecordEnvelopeRepository.ListByKindAndSubject` searches on it, so decisions,
@@ -947,6 +947,27 @@ and nothing else. A future proposal to reopen an unrelated M.4 contract must
 produce its own evidence of comparable weight; it may not cite this decision as
 precedent for a lower bar.
 
+**Implementation evidence.** The change landed exactly as specified, in one
+atomic commit following the two documentation commits that recorded this
+decision. `RevisionEnvelope.SubjectKey` and the matching input field, the
+`ListByFamilyAndSubject` method, migration `0002_revision_subject_key.sql`,
+both adapters, three shared contract subtests
+(`RevisionListByFamilyAndSubject`, `RevisionSubjectKeyIsOptional`,
+`RevisionRejectsMalformedSubjectKey`), and a PostgreSQL-specific column
+projection test all match FF-016 §13 without deviation. No existing
+architecture test required a change; `TestNoUpdateOrDeleteOnEngineeringTables`
+was deliberately violated with a temporary `UPDATE revision_envelopes`
+statement in the new migration file to confirm it still catches a backfill
+attempt in the new file specifically, then reverted. `internal/scenario`
+gained a discovery-based proof: `REQ-4` — no plan activity, no claim — is
+recovered by `ListByFamilyAndSubject` alone and still drives readiness to
+`not-ready`, on both adapters; deleting `REQ-4` from the test's expected set
+was confirmed to fail it for the expected reason before being reverted.
+`internal/application` gained `DiscoverRequirementArtifactIDs` and
+`DiscoverValidationPlanArtifactIDs`; `EngineeringStateInput` and
+`TimelineInput` keep their exact shape, as this decision's Consequences
+section anticipated — no signature besides the new repository method changed.
+
 See [FF-016](../spec/016-revision-subject-discovery.md) for the binding
 contract and the implementation order.
 
@@ -980,8 +1001,9 @@ materialization question is deliberately *not* closed — M.4 added no
 materialized projection and no index beyond what correctness requires, which
 is the answer AD-006 asks for until there is evidence to the contrary.
 
-Decided in M.5 planning, not yet implemented: revision subject projection and
-discovery (AD-025, [FF-016](../spec/016-revision-subject-discovery.md)). The
-decision is accepted; the implementation is a prerequisite for the M.5 queries
-that need a complete requirement or validation-plan population, and must land
-before them.
+Resolved in M.5 planning and implemented ahead of the general M.5 HTTP work:
+revision subject projection and discovery (AD-025,
+[FF-016](../spec/016-revision-subject-discovery.md)). This clears the
+prerequisite the M.5 queries needed for a complete requirement or
+validation-plan population; the HTTP API and UI implementation §16 of FF-015
+orders is separate work and remains open.

@@ -154,6 +154,7 @@ func BuildValidationPlan(in PlanInput) (engineering.ArtifactEnvelope, engineerin
 		Core:          coreRev,
 		Payload:       planRev,
 		ContentDigest: contentDigest,
+		SubjectKey:    engineering.ArtifactSubjectKey(in.ScopeArtifactID),
 		RecordedAt:    in.RecordedAt,
 	})
 	if err != nil {

@@ -67,6 +67,67 @@ func TestEnvelopeValidation(t *testing.T) {
 			t.Errorf("err = %v, want ErrUnsupportedPayloadKind", err)
 		}
 	})
+	t.Run("empty subject key accepted for every family", func(t *testing.T) {
+		for _, family := range []RevisionFamily{
+			RevisionFamilyCapability, RevisionFamilyRequirement, RevisionFamilyValidationPlan,
+			RevisionFamilyTransitionRecord, RevisionFamilyEvidence,
+		} {
+			revKey, _ := NewRevisionKey("CAP-1", "REV-1")
+			_, err := NewRevisionEnvelope(RevisionEnvelopeInput{
+				Key: revKey, RevisionFamily: family,
+				ArtifactType: "featureforge:product-capability", IntegrityValue: "sha256:x",
+				Payload: payload, PayloadDigest: digest, RecordedAt: fixedRecordedAt(),
+			})
+			if err != nil {
+				t.Errorf("family %s: unexpected error with empty subject key: %v", family, err)
+			}
+		}
+	})
+	t.Run("valid subject key accepted for families that define one", func(t *testing.T) {
+		for _, family := range []RevisionFamily{
+			RevisionFamilyRequirement, RevisionFamilyValidationPlan, RevisionFamilyTransitionRecord,
+		} {
+			revKey, _ := NewRevisionKey("REQ-1", "REV-1")
+			env, err := NewRevisionEnvelope(RevisionEnvelopeInput{
+				Key: revKey, RevisionFamily: family,
+				ArtifactType: "featureforge:requirement", IntegrityValue: "sha256:x",
+				SubjectKey: ArtifactSubjectKey("CAP-1"),
+				Payload:    payload, PayloadDigest: digest, RecordedAt: fixedRecordedAt(),
+			})
+			if err != nil {
+				t.Errorf("family %s: unexpected error with a valid subject key: %v", family, err)
+			}
+			if env.SubjectKey != ArtifactSubjectKey("CAP-1") {
+				t.Errorf("family %s: SubjectKey = %q, want %q", family, env.SubjectKey, ArtifactSubjectKey("CAP-1"))
+			}
+		}
+	})
+	t.Run("subject key rejected for capability and evidence", func(t *testing.T) {
+		for _, family := range []RevisionFamily{RevisionFamilyCapability, RevisionFamilyEvidence} {
+			revKey, _ := NewRevisionKey("CAP-1", "REV-1")
+			_, err := NewRevisionEnvelope(RevisionEnvelopeInput{
+				Key: revKey, RevisionFamily: family,
+				ArtifactType: "featureforge:product-capability", IntegrityValue: "sha256:x",
+				SubjectKey: ArtifactSubjectKey("CAP-1"),
+				Payload:    payload, PayloadDigest: digest, RecordedAt: fixedRecordedAt(),
+			})
+			if !errors.Is(err, ErrInvalidEnvelope) {
+				t.Errorf("family %s: err = %v, want ErrInvalidEnvelope", family, err)
+			}
+		}
+	})
+	t.Run("malformed subject key rejected", func(t *testing.T) {
+		revKey, _ := NewRevisionKey("REQ-1", "REV-1")
+		_, err := NewRevisionEnvelope(RevisionEnvelopeInput{
+			Key: revKey, RevisionFamily: RevisionFamilyRequirement,
+			ArtifactType: "featureforge:requirement", IntegrityValue: "sha256:x",
+			SubjectKey: "nonsense:CAP-1",
+			Payload:    payload, PayloadDigest: digest, RecordedAt: fixedRecordedAt(),
+		})
+		if !errors.Is(err, ErrInvalidEnvelope) {
+			t.Errorf("err = %v, want ErrInvalidEnvelope", err)
+		}
+	})
 }
 
 func TestEnvelopeEqualityIsKeyPlusPayload(t *testing.T) {
@@ -94,6 +155,37 @@ func TestEnvelopeEqualityIsKeyPlusPayload(t *testing.T) {
 	}
 	if a.Equal(c) {
 		t.Error("envelopes with different keys must not be Equal")
+	}
+}
+
+// TestRevisionEnvelopeEqualityIgnoresSubjectKey asserts SubjectKey, like
+// every other projection on RevisionEnvelope, is not part of Equal -- only
+// the key and the byte-identical payload are (FF-016 §3, mirroring
+// TestEnvelopeEqualityIsKeyPlusPayload's ArtifactEnvelope coverage).
+func TestRevisionEnvelopeEqualityIgnoresSubjectKey(t *testing.T) {
+	revKey, _ := NewRevisionKey("REQ-1", "REV-1")
+	payload, digest := validPayload(t)
+
+	a, err := NewRevisionEnvelope(RevisionEnvelopeInput{
+		Key: revKey, RevisionFamily: RevisionFamilyRequirement,
+		ArtifactType: "featureforge:requirement", IntegrityValue: "sha256:x",
+		SubjectKey: ArtifactSubjectKey("CAP-1"),
+		Payload:    payload, PayloadDigest: digest, RecordedAt: fixedRecordedAt(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := NewRevisionEnvelope(RevisionEnvelopeInput{
+		Key: revKey, RevisionFamily: RevisionFamilyRequirement,
+		ArtifactType: "featureforge:requirement", IntegrityValue: "sha256:x",
+		SubjectKey: ArtifactSubjectKey("CAP-2"),
+		Payload:    payload, PayloadDigest: digest, RecordedAt: fixedRecordedAt(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.Equal(b) {
+		t.Error("revision envelopes with equal keys and identical payloads must be Equal regardless of differing SubjectKey")
 	}
 }
 
