@@ -5,13 +5,7 @@
   <h1>{{.Title}}</h1>
   {{if .Description}}<p>{{.Description}}</p>{{end}}
 
-  <nav aria-label="Feature sections" class="panel">
-    <a href="/features/{{.FeatureCardID}}/revisions">Revisions</a> ·
-    <a href="/features/{{.FeatureCardID}}/requirements">Requirements</a> ·
-    <a href="/features/{{.FeatureCardID}}/decisions">Decisions</a> ·
-    <a href="/features/{{.FeatureCardID}}/validation">Validation</a> ·
-    <a href="/features/{{.FeatureCardID}}/timeline">Timeline</a>
-  </nav>
+  {{template "feature-nav" .FeatureCardID}}
 
   <section class="panel" aria-labelledby="spec-heading">
     <h2 id="spec-heading">Capability specification</h2>

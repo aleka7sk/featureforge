@@ -3,7 +3,7 @@
 {{template "nav" .}}
 <main id="main-content">
   <h1>Revisions</h1>
-  <p><a href="/features/{{.FeatureCardID}}">&larr; Back to overview</a></p>
+  {{template "feature-nav" .FeatureCardID}}
 
   <section class="panel" aria-labelledby="current-heading">
     <h2 id="current-heading">Current revision</h2>

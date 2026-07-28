@@ -3,7 +3,7 @@
 {{template "nav" .}}
 <main id="main-content">
   <h1>Decisions</h1>
-  <p><a href="/features/{{.FeatureCardID}}">&larr; Back to overview</a></p>
+  {{template "feature-nav" .FeatureCardID}}
 
   {{template "error-notice" .FormError}}
 

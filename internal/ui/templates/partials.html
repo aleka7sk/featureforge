@@ -33,6 +33,22 @@
 </html>
 {{end}}
 
+{{/* feature-nav is every feature-scoped screen's cross-links (FF-001 §3:
+     a person must be able to move between a feature's sections without
+     detouring back to the overview first). Takes a bare FeatureCardID
+     string, so every screen calls it the same way: {{template
+     "feature-nav" .FeatureCardID}}. */}}
+{{define "feature-nav"}}
+<nav aria-label="Feature sections" class="panel">
+  <a href="/features/{{.}}">Overview</a> ·
+  <a href="/features/{{.}}/revisions">Revisions</a> ·
+  <a href="/features/{{.}}/requirements">Requirements</a> ·
+  <a href="/features/{{.}}/decisions">Decisions</a> ·
+  <a href="/features/{{.}}/validation">Validation</a> ·
+  <a href="/features/{{.}}/timeline">Timeline</a>
+</nav>
+{{end}}
+
 {{/* status-badge renders a readiness/lifecycle/acceptance status string.
      FF-001 §3.2: "A colour alone is not an explanation" -- this primitive
      never appears without an adjacent rationale block; enforcing that is

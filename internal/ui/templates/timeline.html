@@ -3,7 +3,7 @@
 {{template "nav" .}}
 <main id="main-content">
   <h1>Timeline</h1>
-  <p><a href="/features/{{.FeatureCardID}}">&larr; Back to overview</a></p>
+  {{template "feature-nav" .FeatureCardID}}
 
   <form method="get" action="/features/{{.FeatureCardID}}/timeline" class="panel">
     <div class="field">

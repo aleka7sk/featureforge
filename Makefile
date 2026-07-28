@@ -40,7 +40,7 @@ postgres-down:
 # runs every PostgreSQL-backed test, and tears the database down again.
 postgres-test: postgres-up
 	FEATUREFORGE_POSTGRES_TEST_DSN="$(POSTGRES_TEST_DSN)" \
-		go test ./internal/infrastructure/postgres/... ./internal/scenario/... ./internal/transport/http/... -count=1 -v; \
+		go test ./internal/infrastructure/postgres/... ./internal/scenario/... ./internal/transport/http/... ./internal/ui/... -count=1 -v; \
 		status=$$?; $(COMPOSE) down -v; exit $$status
 
 # The single command that verifies the whole milestone.
