@@ -49,6 +49,21 @@ func TestCanonicalScenario(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scenario.Run: %v", err)
 	}
+	assertCanonicalEndState(t, ctx, uow, rec, result)
+}
+
+// assertCanonicalEndState checks every FF-011 §9 expected end state against
+// whatever adapter backs uow. It is shared by the in-memory and PostgreSQL
+// scenario tests so that "both adapters produce the same engineering answers"
+// is one assertion body run twice, not two bodies that could drift apart.
+func assertCanonicalEndState(
+	t *testing.T,
+	ctx context.Context,
+	uow application.UnitOfWork,
+	rec peos.Recorder,
+	result scenario.Result,
+) {
+	t.Helper()
 
 	// 1. Project and feature card exist.
 	project := doQuery(t, uow, func(r application.Repositories) (bool, error) {
@@ -309,6 +324,15 @@ func TestCanonicalScenarioInsertionOrderIndependence(t *testing.T) {
 	if _, err := scenario.RunPermuted(ctx, uowB, recB, clockB); err != nil {
 		t.Fatalf("scenario.RunPermuted: %v", err)
 	}
+
+	assertSameResolvedState(t, ctx, uowA, uowB)
+}
+
+// assertSameResolvedState compares every resolved answer between two stores
+// that received the same engineering acts in different orders. Shared by the
+// in-memory and PostgreSQL insertion-order tests.
+func assertSameResolvedState(t *testing.T, ctx context.Context, uowA, uowB application.UnitOfWork) {
+	t.Helper()
 
 	currentA := doQuery(t, uowA, func(r application.Repositories) (application.CurrentRevisionResult, error) {
 		return application.ResolveCurrentRevision(ctx, r, scenario.CapabilityArtifactID)

@@ -251,6 +251,10 @@ func (c CorrectValidationClaimCommand) Execute(ctx context.Context, uow UnitOfWo
 	}
 
 	timestamp := requireTimeOrClock(c.Timestamp, clock)
+	// Captured once, before Do: a UnitOfWork may re-run its callback after a
+	// serialization failure, and reading the clock inside would record a
+	// different time on each attempt (AD-020).
+	now := clock.Now()
 	var env engineering.RecordEnvelope
 	err := uow.Do(ctx, func(r Repositories) error {
 		targetKey, err := engineering.NewRecordKey(engineering.RecordKindClaim, c.CorrectionTarget)
@@ -269,7 +273,7 @@ func (c CorrectValidationClaimCommand) Execute(ctx context.Context, uow UnitOfWo
 			RequirementArtifactID: c.RequirementArtifactID, RequirementRevisionID: c.RequirementRevisionID,
 			Outcome: c.Outcome, Method: c.Method,
 			EvidenceArtifactID: c.EvidenceArtifactID, EvidenceRevisionID: c.EvidenceRevisionID,
-			ExecutionID: c.ExecutionID, Reasoning: c.Reasoning, Timestamp: timestamp, RecordedAt: clock.Now(),
+			ExecutionID: c.ExecutionID, Reasoning: c.Reasoning, Timestamp: timestamp, RecordedAt: now,
 			HasCorrection: true, CorrectionKind: c.CorrectionKind, CorrectionTarget: c.CorrectionTarget,
 		}
 		if err := validateClaimInput(in); err != nil {

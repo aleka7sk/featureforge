@@ -1,4 +1,14 @@
-package memory
+// Package contracttest holds the single shared definition of what any
+// FeatureForge persistence adapter must do. Both the in-memory and the
+// PostgreSQL adapters run this identical suite against their own
+// application.UnitOfWork, which is what makes "the domain is independent of
+// persistence technology" a tested claim rather than an assertion.
+//
+// It lives in its own package, rather than in either adapter, so neither
+// adapter has to import the other purely to borrow test infrastructure. It is
+// non-test code (not _test.go) for the same reason: a _test.go file is not
+// importable from another package.
+package contracttest
 
 import (
 	"context"
@@ -12,9 +22,14 @@ import (
 )
 
 // RunRepositoryContractSuite exercises every FF-009 persistence and
-// transaction requirement against newUOW's adapter. It is non-test code
-// (not _test.go) specifically so M.4's PostgreSQL adapter can import and
-// run this identical suite (FF-013 §1).
+// transaction requirement, plus the AD-021 integrity invariants, against
+// newUOW's adapter.
+//
+// newUOW is called fresh for every subtest and deliberately takes no
+// *testing.T: each subtest runs in its own goroutine with its own T, and
+// calling t.Fatal on an outer, closed-over T from inside a subtest goroutine
+// is a Go testing bug. An adapter whose setup can fail should panic instead --
+// the testing framework attributes a panic to the subtest that caused it.
 func RunRepositoryContractSuite(t *testing.T, newUOW func() application.UnitOfWork) {
 	t.Helper()
 
@@ -35,6 +50,13 @@ func RunRepositoryContractSuite(t *testing.T, newUOW func() application.UnitOfWo
 	t.Run("AcceptanceJournalHistory", func(t *testing.T) { testAcceptanceJournalHistory(t, newUOW()) })
 	t.Run("RevisionOrderHistory", func(t *testing.T) { testRevisionOrderHistory(t, newUOW()) })
 	t.Run("SequenceUniquenessEnforced", func(t *testing.T) { testSequenceUniquenessEnforced(t, newUOW()) })
+
+	// AD-021: invariants the specifications declare and both adapters must
+	// now enforce identically.
+	t.Run("FeatureCardPutRequiresExistingProject", func(t *testing.T) { testFeatureCardRequiresProject(t, newUOW()) })
+	t.Run("RecordEnvelopePutRequiresResolvableSubject", func(t *testing.T) { testRecordRequiresSubject(t, newUOW()) })
+	t.Run("RecordEnvelopePutRejectsMalformedSubjectKey", func(t *testing.T) { testRecordRejectsMalformedSubject(t, newUOW()) })
+	t.Run("AcceptanceRecordIDIsUnique", func(t *testing.T) { testAcceptanceRecordIDIsUnique(t, newUOW()) })
 }
 
 func fixedContractTime() time.Time { return time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC) }
@@ -529,4 +551,164 @@ func testSequenceUniquenessEnforced(t *testing.T, uow application.UnitOfWork) {
 	if !errors.Is(err, application.ErrRevisionSequenceConflict) {
 		t.Errorf("err = %v, want ErrRevisionSequenceConflict", err)
 	}
+}
+
+// --- AD-021: spec-declared invariants enforced identically by both adapters ---
+
+// testFeatureCardRequiresProject asserts a FeatureCard cannot be written into
+// a project that does not exist.
+func testFeatureCardRequiresProject(t *testing.T, uow application.UnitOfWork) {
+	card, err := domain.NewFeatureCard(
+		mustFeatureCardID(t, "FC-ORPHAN"), mustProjectID(t, "PRJ-GHOST"),
+		"Orphaned card", "", fixedContractTime(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = uow.Do(context.Background(), func(r application.Repositories) error {
+		return r.FeatureCards.Put(context.Background(), card)
+	})
+	if !errors.Is(err, application.ErrReferencedValueMissing) {
+		t.Errorf("err = %v, want ErrReferencedValueMissing", err)
+	}
+}
+
+// testRecordRequiresSubject asserts a RecordEnvelope cannot name a subject
+// that was never established -- for both subject forms.
+func testRecordRequiresSubject(t *testing.T, uow application.UnitOfWork) {
+	for _, tc := range []struct {
+		name       string
+		subjectKey string
+	}{
+		{"artifact subject", engineering.ArtifactSubjectKey("CAP-GHOST")},
+		{"artifact revision subject", engineering.ArtifactRevisionSubjectKey("CAP-GHOST", "REV-1")},
+	} {
+		env := mustRecordEnvelope(t, engineering.RecordKindClaim, "CLM-"+tc.name, tc.subjectKey)
+		err := uow.Do(context.Background(), func(r application.Repositories) error {
+			return r.Records.Put(context.Background(), env)
+		})
+		if !errors.Is(err, application.ErrReferencedValueMissing) {
+			t.Errorf("%s: err = %v, want ErrReferencedValueMissing", tc.name, err)
+		}
+	}
+}
+
+// testRecordRejectsMalformedSubject asserts a SubjectKey naming neither
+// supported form is rejected rather than silently stored unverifiable.
+func testRecordRejectsMalformedSubject(t *testing.T, uow application.UnitOfWork) {
+	env := mustRecordEnvelope(t, engineering.RecordKindClaim, "CLM-MALFORMED", "nonsense:CAP-1")
+	err := uow.Do(context.Background(), func(r application.Repositories) error {
+		return r.Records.Put(context.Background(), env)
+	})
+	if !errors.Is(err, engineering.ErrInvalidEnvelope) {
+		t.Errorf("err = %v, want ErrInvalidEnvelope", err)
+	}
+}
+
+// testAcceptanceRecordIDIsUnique asserts Append is create-only on RecordID:
+// re-appending an identical record is a no-op, and reusing an existing
+// RecordID for a different record conflicts. FF-009 4.3 declares RecordID
+// unique and FF-006 2 derives a timeline event's identity from it, so a
+// duplicate would collide two timeline events onto one event ID.
+func testAcceptanceRecordIDIsUnique(t *testing.T, uow application.UnitOfWork) {
+	revKey, err := engineering.NewRevisionKey("CAP-UNIQ", "REV-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = uow.Do(context.Background(), func(r application.Repositories) error {
+		if err := r.Artifacts.Put(context.Background(), mustArtifactEnvelope(t, "CAP-UNIQ")); err != nil {
+			return err
+		}
+		if err := r.Revisions.Put(context.Background(), mustRevisionEnvelope(t, revKey)); err != nil {
+			return err
+		}
+		rec, err := engineering.NewRevisionAcceptanceRecord("ACC-UNIQ", revKey, engineering.AcceptanceStateAccepted, fixedContractTime(), "featureforge:local-user", "")
+		if err != nil {
+			return err
+		}
+		return r.RevisionAcceptance.Append(context.Background(), rec)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Identical re-append is idempotent.
+	err = uow.Do(context.Background(), func(r application.Repositories) error {
+		rec, err := engineering.NewRevisionAcceptanceRecord("ACC-UNIQ", revKey, engineering.AcceptanceStateAccepted, fixedContractTime(), "featureforge:local-user", "")
+		if err != nil {
+			return err
+		}
+		return r.RevisionAcceptance.Append(context.Background(), rec)
+	})
+	if err != nil {
+		t.Errorf("identical re-append should be a no-op, got %v", err)
+	}
+
+	// Same RecordID, different content, conflicts.
+	err = uow.Do(context.Background(), func(r application.Repositories) error {
+		rec, err := engineering.NewRevisionAcceptanceRecord("ACC-UNIQ", revKey, engineering.AcceptanceStateWithdrawn, fixedContractTime(), "featureforge:local-user", "")
+		if err != nil {
+			return err
+		}
+		return r.RevisionAcceptance.Append(context.Background(), rec)
+	})
+	if !errors.Is(err, application.ErrImmutableValueConflict) {
+		t.Errorf("err = %v, want ErrImmutableValueConflict", err)
+	}
+
+	// The journal still holds exactly the one original entry.
+	err = uow.Do(context.Background(), func(r application.Repositories) error {
+		entries, err := r.RevisionAcceptance.ListByRevision(context.Background(), revKey)
+		if err != nil {
+			return err
+		}
+		if len(entries) != 1 {
+			t.Errorf("journal has %d entries, want 1", len(entries))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustFeatureCardID(t *testing.T, s string) domain.FeatureCardID {
+	t.Helper()
+	id, err := domain.NewFeatureCardID(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func mustRevisionEnvelope(t *testing.T, key engineering.RevisionKey) engineering.RevisionEnvelope {
+	t.Helper()
+	payload := []byte(`{"revision_id":"` + key.RevisionID + `"}`)
+	env, err := engineering.NewRevisionEnvelope(engineering.RevisionEnvelopeInput{
+		Key: key, RevisionFamily: engineering.RevisionFamilyCapability,
+		ArtifactType: "featureforge:product-capability", IntegrityValue: "sha256:abc",
+		Payload: payload, PayloadDigest: engineering.ComputeDigest(payload), RecordedAt: fixedContractTime(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return env
+}
+
+func mustRecordEnvelope(t *testing.T, kind engineering.RecordKind, id, subjectKey string) engineering.RecordEnvelope {
+	t.Helper()
+	key, err := engineering.NewRecordKey(kind, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte(`{"id":"` + id + `"}`)
+	env, err := engineering.NewRecordEnvelope(engineering.RecordEnvelopeInput{
+		Key: key, SubjectKey: subjectKey,
+		OccurredAt: fixedContractTime(), HasOccurredAt: true,
+		Payload: payload, PayloadDigest: engineering.ComputeDigest(payload), RecordedAt: fixedContractTime(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return env
 }

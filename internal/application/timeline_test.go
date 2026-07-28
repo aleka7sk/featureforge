@@ -63,7 +63,7 @@ func seedTimelineFixture(t *testing.T, uow application.UnitOfWork) application.T
 }
 
 func TestCanonicalTimelineOrdering(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	in := seedTimelineFixture(t, uow)
 
 	var result application.TimelineResult
@@ -90,7 +90,7 @@ func TestCanonicalTimelineOrdering(t *testing.T) {
 }
 
 func TestTimelineInsertionOrderIndependence(t *testing.T) {
-	uow1 := newStoreAndUOW()
+	uow1 := newStoreWithRecordSubject(t)
 	in1 := seedTimelineFixture(t, uow1)
 	var result1 application.TimelineResult
 	err := uow1.Do(context.Background(), func(r application.Repositories) error {
@@ -102,7 +102,7 @@ func TestTimelineInsertionOrderIndependence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	uow2 := newStoreAndUOW()
+	uow2 := newStoreWithRecordSubject(t)
 	in2 := seedTimelineFixture(t, uow2)
 	var result2 application.TimelineResult
 	err = uow2.Do(context.Background(), func(r application.Repositories) error {
@@ -125,7 +125,7 @@ func TestTimelineInsertionOrderIndependence(t *testing.T) {
 }
 
 func TestEventIDIsDerived(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	in := seedTimelineFixture(t, uow)
 	var result application.TimelineResult
 	err := uow.Do(context.Background(), func(r application.Repositories) error {
@@ -145,7 +145,7 @@ func TestEventIDIsDerived(t *testing.T) {
 }
 
 func TestUndatedGroupIsSeparate(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	in := seedTimelineFixture(t, uow)
 	// Add a decision record with no OccurredAt.
 	err := uow.Do(context.Background(), func(r application.Repositories) error {
@@ -188,7 +188,7 @@ func TestUndatedGroupIsSeparate(t *testing.T) {
 }
 
 func TestCorrectedClaimRendersLink(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	in := seedTimelineFixture(t, uow)
 	original := mustClaimEnv(t, "CLM-2", "peos:satisfied", nil, "")
 	putClaim(t, uow, original)
@@ -226,7 +226,7 @@ func TestCorrectedClaimRendersLink(t *testing.T) {
 }
 
 func TestDanglingReferenceFails(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	in := seedTimelineFixture(t, uow)
 	ghost := engineering.RecordEnvelope{Key: engineering.RecordKey{Kind: engineering.RecordKindClaim, ID: "CLM-GHOST"}}
 	dangling := mustClaimEnv(t, "CLM-1", "peos:not-satisfied", &ghost, "peos:correct")
@@ -243,7 +243,7 @@ func TestDanglingReferenceFails(t *testing.T) {
 }
 
 func TestInterruptedOutcomeRenderedVerbatim(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	in := seedTimelineFixture(t, uow)
 	putExecution(t, uow, "ER-1", "peos:interrupted")
 	in.ExecutionIDs = []string{"ER-1"}
@@ -272,7 +272,7 @@ func TestInterruptedOutcomeRenderedVerbatim(t *testing.T) {
 }
 
 func TestTimelineIsDeterministic(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	in := seedTimelineFixture(t, uow)
 	var first application.TimelineResult
 	err := uow.Do(context.Background(), func(r application.Repositories) error {

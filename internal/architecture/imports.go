@@ -1,8 +1,8 @@
 // Package architecture provides standard-library-only helpers for
 // inspecting this module's own package import graph, used by the
 // build-failing architecture tests in architecture_test.go (FF-012 §12).
-// It adds no dependency beyond the standard library (FF-013 §3: PEOS is the
-// only module requirement M.3 adds).
+// It adds no dependency beyond the standard library: the boundaries it
+// checks must not themselves be checked by an imported analysis library.
 package architecture
 
 import (
@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // ModulePath is this module's import path, matching go.mod.
@@ -101,11 +102,29 @@ func TransitiveImports(importPath string, all []PackageInfo) map[string]bool {
 	return result
 }
 
+// PEOSModulePath is the PEOS SDK's module path. Only
+// internal/engineering/peos may import it (AD-005).
+const PEOSModulePath = "github.com/aleka7sk/PEOS"
+
+// DriverModulePath is the PostgreSQL driver's module path. Only
+// internal/infrastructure/postgres may import it (AD-020).
+const DriverModulePath = "github.com/jackc/pgx"
+
 // ImportsPEOS reports whether imports (as produced by TransitiveImports)
-// contains any github.com/aleka7sk/PEOS package.
+// contains any PEOS package.
 func ImportsPEOS(imports map[string]bool) bool {
+	return importsModule(imports, PEOSModulePath)
+}
+
+// ImportsDriver reports whether imports contains any PostgreSQL driver
+// package.
+func ImportsDriver(imports map[string]bool) bool {
+	return importsModule(imports, DriverModulePath)
+}
+
+func importsModule(imports map[string]bool, modulePath string) bool {
 	for imp := range imports {
-		if len(imp) >= len("github.com/aleka7sk/PEOS") && imp[:len("github.com/aleka7sk/PEOS")] == "github.com/aleka7sk/PEOS" {
+		if strings.HasPrefix(imp, modulePath) {
 			return true
 		}
 	}

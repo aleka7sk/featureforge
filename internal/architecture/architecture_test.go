@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +29,8 @@ func TestApplicationDoesNotImportPEOS(t *testing.T) {
 // TestInfrastructureDoesNotImportPEOS (FF-012 §12).
 func TestInfrastructureDoesNotImportPEOS(t *testing.T) {
 	assertNoTransitivePEOS(t, ModulePath+"/internal/infrastructure/memory")
+	assertNoTransitivePEOS(t, ModulePath+"/internal/infrastructure/postgres")
+	assertNoTransitivePEOS(t, ModulePath+"/internal/infrastructure/contracttest")
 }
 
 func assertNoTransitivePEOS(t *testing.T, importPath string) {
@@ -60,6 +63,109 @@ func TestOnlyIntegrationPackageImportsPEOS(t *testing.T) {
 	}
 	if len(importers) != 1 || importers[0] != ModulePath+"/internal/engineering/peos" {
 		t.Errorf("packages directly importing PEOS = %v, want exactly [%s]", importers, ModulePath+"/internal/engineering/peos")
+	}
+}
+
+// TestOnlyPostgresInfrastructureImportsDriver (AD-020): exactly one package
+// in the module directly imports the PostgreSQL driver, so "PostgreSQL is a
+// replaceable adapter" is structurally true rather than merely intended.
+func TestOnlyPostgresInfrastructureImportsDriver(t *testing.T) {
+	all, err := InternalPackages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var importers []string
+	for _, p := range all {
+		for _, imp := range p.Imports {
+			if strings.HasPrefix(imp, DriverModulePath) {
+				importers = append(importers, p.ImportPath)
+				break
+			}
+		}
+	}
+	want := ModulePath + "/internal/infrastructure/postgres"
+	if len(importers) != 1 || importers[0] != want {
+		t.Errorf("packages directly importing the driver = %v, want exactly [%s]", importers, want)
+	}
+}
+
+// TestDomainAndApplicationDoNotImportDriver (AD-020): the layers that carry
+// domain meaning must not depend, even transitively, on a database driver.
+func TestDomainAndApplicationDoNotImportDriver(t *testing.T) {
+	all, err := InternalPackages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pkg := range []string{
+		ModulePath + "/internal/domain",
+		ModulePath + "/internal/engineering",
+		ModulePath + "/internal/application",
+	} {
+		imports := TransitiveImports(pkg, all)
+		if ImportsDriver(imports) {
+			t.Errorf("%s transitively imports the PostgreSQL driver; its import set is %v", pkg, sortedKeys(imports))
+		}
+	}
+}
+
+// TestAdaptersDoNotImportEachOther (AD-020): neither persistence adapter may
+// depend on the other. Both may import the shared contract suite, which is
+// exactly why that suite lives in its own package.
+func TestAdaptersDoNotImportEachOther(t *testing.T) {
+	all, err := InternalPackages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	memoryPkg := ModulePath + "/internal/infrastructure/memory"
+	postgresPkg := ModulePath + "/internal/infrastructure/postgres"
+
+	if TransitiveImports(memoryPkg, all)[postgresPkg] {
+		t.Error("the in-memory adapter imports the PostgreSQL adapter")
+	}
+	if TransitiveImports(postgresPkg, all)[memoryPkg] {
+		t.Error("the PostgreSQL adapter imports the in-memory adapter")
+	}
+}
+
+// TestNoUpdateOrDeleteOnEngineeringTables (FF-007 M.4 exit criterion):
+// engineering records are immutable, so no statement anywhere in the
+// PostgreSQL adapter may UPDATE or DELETE one. Correcting a record means
+// writing a new record that references it, never editing history.
+func TestNoUpdateOrDeleteOnEngineeringTables(t *testing.T) {
+	engineeringTables := []string{
+		"artifact_envelopes", "revision_envelopes", "structured_content",
+		"record_envelopes", "revision_order", "revision_acceptance",
+		"projects", "feature_cards",
+	}
+	dir := filepath.Join(ModuleRoot(), "internal", "infrastructure", "postgres")
+
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if ext := filepath.Ext(path); ext != ".go" && ext != ".sql" {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		lower := strings.ToLower(string(content))
+		for _, table := range engineeringTables {
+			for _, verb := range []string{"update " + table, "delete from " + table} {
+				if strings.Contains(lower, verb) {
+					rel, _ := filepath.Rel(ModuleRoot(), path)
+					t.Errorf("%s contains %q; engineering records are immutable", rel, verb)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -347,8 +453,67 @@ func TestNoTimeNowOutsideClock(t *testing.T) {
 	}
 }
 
-// TestGoModHasOnlyPEOSRequirement (FF-012 §12).
-func TestGoModHasOnlyPEOSRequirement(t *testing.T) {
+// TestDoCallbacksAreRetrySafe (AD-020): PostgreSQL's UnitOfWork runs every
+// callback under SERIALIZABLE and re-runs the whole callback from scratch on
+// a serialization failure. That makes retry-safety load-bearing: a callback
+// must not read the clock again inside itself, because two attempts would
+// then record two different times for one engineering act, and the act that
+// eventually commits would carry a timestamp that never corresponded to when
+// it was attempted.
+//
+// Every command already captures Clock.Now() once, before calling Do. This
+// test pins that: no Clock.Now() call may appear lexically inside a function
+// literal passed to a Do call.
+func TestDoCallbacksAreRetrySafe(t *testing.T) {
+	err := walkGoFiles(filepath.Join(ModuleRoot(), "internal"), func(path string, file *ast.File) error {
+		if strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "Do" {
+				return true
+			}
+			for _, arg := range call.Args {
+				lit, ok := arg.(*ast.FuncLit)
+				if !ok {
+					continue
+				}
+				ast.Inspect(lit.Body, func(inner ast.Node) bool {
+					innerCall, ok := inner.(*ast.CallExpr)
+					if !ok {
+						return true
+					}
+					innerSel, ok := innerCall.Fun.(*ast.SelectorExpr)
+					if !ok || innerSel.Sel.Name != "Now" {
+						return true
+					}
+					rel, _ := filepath.Rel(ModuleRoot(), path)
+					t.Errorf("%s calls .Now() inside a UnitOfWork.Do callback; capture the time once before Do, "+
+						"because the callback may be re-run after a serialization failure", rel)
+					return true
+				})
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestGoModHasOnlyApprovedRequirements (FF-012 §12, AD-020): PEOS stays
+// pinned at v1.0.0 with no replace directive, and the only other DIRECT
+// requirement is the one PostgreSQL driver M.4 is permitted to add.
+// Indirect requirements are unconstrained -- they are whatever the driver
+// itself pulls in -- but a new direct one is a dependency decision and must
+// fail the build until it is recorded.
+func TestGoModHasOnlyApprovedRequirements(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(ModuleRoot(), "go.mod"))
 	if err != nil {
 		t.Fatal(err)
@@ -357,13 +522,53 @@ func TestGoModHasOnlyPEOSRequirement(t *testing.T) {
 	if strings.Contains(content, "replace ") {
 		t.Error("go.mod must not contain a replace directive")
 	}
-	requireCount := strings.Count(content, "github.com/aleka7sk/PEOS")
-	if requireCount == 0 {
-		t.Error("go.mod must require github.com/aleka7sk/PEOS")
-	}
 	if !strings.Contains(content, "github.com/aleka7sk/PEOS v1.0.0") {
-		t.Error("go.mod must pin exactly v1.0.0")
+		t.Error("go.mod must require github.com/aleka7sk/PEOS pinned at exactly v1.0.0")
 	}
+
+	allowedDirect := map[string]bool{
+		"github.com/aleka7sk/PEOS": true,
+		"github.com/jackc/pgx/v5":  true,
+	}
+	for _, module := range directRequirements(content) {
+		if !allowedDirect[module] {
+			t.Errorf("go.mod directly requires %s, which no accepted milestone permits; record the decision first", module)
+		}
+	}
+}
+
+// directRequirements returns the module paths go.mod requires directly --
+// every require line not marked "// indirect".
+func directRequirements(goMod string) []string {
+	var out []string
+	inBlock := false
+	for _, line := range strings.Split(goMod, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "require (":
+			inBlock = true
+			continue
+		case inBlock && trimmed == ")":
+			inBlock = false
+			continue
+		}
+		if strings.Contains(trimmed, "// indirect") || trimmed == "" || strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		if inBlock {
+			if fields := strings.Fields(trimmed); len(fields) >= 2 {
+				out = append(out, fields[0])
+			}
+			continue
+		}
+		// A single-line "require path version" outside any block.
+		if after, found := strings.CutPrefix(trimmed, "require "); found {
+			if fields := strings.Fields(after); len(fields) >= 2 {
+				out = append(out, fields[0])
+			}
+		}
+	}
+	return out
 }
 
 // --- shared helpers ---

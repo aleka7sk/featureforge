@@ -132,6 +132,7 @@ history is ever updated or deleted.
 | [FF-011](011-canonical-scenario.md) | What are the exact fixture identities and PEOS value inventory? |
 | [FF-012](012-test-specification.md) | What must the test suite prove? |
 | [FF-013](013-m3-implementation-packet.md) | What must M.3 build, and in what commit order? |
+| [FF-014](014-postgresql-persistence.md) | How is engineering state persisted in PostgreSQL, and why is that an adapter? |
 | [Decision log](../decisions/README.md) | What was decided, and why? |
 | [Glossary](../glossary.md) | What does this word mean here? |
 

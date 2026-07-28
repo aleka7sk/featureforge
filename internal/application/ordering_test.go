@@ -17,6 +17,33 @@ func newStoreAndUOW() *memory.UnitOfWork {
 	return memory.NewUnitOfWork(memory.NewStore())
 }
 
+// newStoreWithRecordSubject returns a fresh store in which the capability
+// artifact and revisions that this package's record-level tests name as their
+// subject already exist.
+//
+// RecordEnvelopeRepository.Put verifies that a record's SubjectKey resolves
+// to a stored artifact or revision (AD-021), so a test that writes a claim,
+// execution, or state assignment must establish its subject first -- exactly
+// as every application command does. Seeding is idempotent, so a test may
+// also call a fixture that re-seeds the same values.
+func newStoreWithRecordSubject(t *testing.T) *memory.UnitOfWork {
+	t.Helper()
+	uow := newStoreAndUOW()
+	err := uow.Do(context.Background(), func(r application.Repositories) error {
+		if err := r.Artifacts.Put(context.Background(), mustArtEnv(t, "CAP-1")); err != nil {
+			return err
+		}
+		if err := r.Revisions.Put(context.Background(), mustRevEnv(t, "CAP-1", "CAP-1-REV-1")); err != nil {
+			return err
+		}
+		return r.Revisions.Put(context.Background(), mustRevEnv(t, "CAP-1", "CAP-1-REV-2"))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return uow
+}
+
 func mustArtEnv(t *testing.T, artifactID string) engineering.ArtifactEnvelope {
 	t.Helper()
 	key, err := engineering.NewArtifactKey(artifactID)

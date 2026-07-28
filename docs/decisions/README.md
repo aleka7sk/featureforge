@@ -599,15 +599,163 @@ place to carry it. See
 
 ---
 
+## AD-020 — PostgreSQL enters as a driver-only infrastructure dependency, with hand-rolled migrations and SERIALIZABLE-with-retry
+
+Status: Accepted
+Date: 2026-07-28
+Phase: M.4
+
+**Context.** M.4 adds a second persistence adapter satisfying the identical
+FF-009 §5–§7 contracts, which requires FeatureForge's first non-PEOS,
+non-stdlib dependency. It also requires a mechanism for concurrent
+revision-sequence assignment that PostgreSQL can enforce without the
+in-memory adapter's whole-store mutex. Reading the command code settled that
+second question: `ReviseCapabilitySpecificationCommand` and
+`EstablishRequirementCommand` both compute the next sequence by *reading*
+existing order metadata and then *writing* `max+1`, inside one `Do` — a
+read-then-write race under real concurrency, not a single-statement one.
+
+**Decision.**
+
+1. `github.com/jackc/pgx/v5`, used natively (`pgxpool.Pool`, `pgx.Tx`), is the
+   only new dependency, confined to `internal/infrastructure/postgres` and
+   its test support. No ORM, no query builder, no migration framework. No pgx
+   type appears in any exported signature.
+2. Migrations are hand-rolled: SQL embedded via `embed.FS`, tracked in a
+   project-owned `schema_migrations` table. One migration in M.4.
+3. Every `Do` callback runs under `SERIALIZABLE`, and `Do` retries the whole
+   callback on `40001`/`40P01` up to a bounded attempt count. This is how two
+   concurrent revisions of one capability both succeed with sequences n and
+   n+1.
+4. Envelope and content payloads are stored as `bytea`, not `jsonb`.
+5. Nested `Do` calls are detected by parsing the calling goroutine's ID out of
+   `runtime.Stack`, tracked on the `UnitOfWork` value — the same technique the
+   in-memory adapter already uses.
+
+**Alternatives.** `pgx/v5/stdlib` rejected — this module's own
+`TestNoHTTPDatabaseUIOrAIPackage` already forbids `database/sql` module-wide,
+and native pgx maps `pgx.Tx` directly onto `Do`. A per-artifact
+`SELECT ... FOR UPDATE` counter row, and `pg_advisory_xact_lock` inside
+`RevisionOrderRepository.Put`, both rejected — the colliding sequence value is
+already computed in application-layer Go by the time `Put` runs, so a lock
+there protects nothing; locking earlier, inside the generic
+`ListByArtifact` read, would change read semantics for every caller including
+pure queries that must not block on unrelated writers. `SERIALIZABLE`-with-retry
+operates at the same boundary the in-memory mutex already does — the whole
+`Do` call — without touching application-layer code. A migration framework
+rejected per the no-persistence-framework constraint and because one file
+needs none. `jsonb` rejected — it reparses and reserialises on write while
+every idempotency, conflict, and digest check here compares exact bytes, and
+no query ever inspects a payload's structure.
+
+*On nested-transaction detection specifically*, four alternatives were
+considered and rejected. Letting a nested call deadlock: it would not — a pool
+hands it a second connection, silently splitting one act across two
+transactions, which is worse than an error. A context marker: `Do`'s
+`func(Repositories) error` callback signature gives `Do` no channel to hand a
+marked context back into the callback, so this is structurally impossible for
+*either* adapter without changing an application-layer contract M.4 has no
+mandate to change. Tracking depth on the pool rather than the `UnitOfWork`:
+same mechanism, less obvious scope. A different mechanism for PostgreSQL only:
+rejected as the worst option — two adapters detecting one condition two ways
+means two behaviours to keep in agreement and a contract suite that no longer
+proves they are equivalent. Reusing the existing technique keeps one
+definition of what a nested transaction is. The cost — parsing an unsupported
+runtime format — is accepted because it is reused rather than newly
+introduced, and because a runtime change fails loudly in the shared suite.
+
+**Consequences.** `go.mod` gains pgx and its transitive dependencies;
+`internal/domain`, `internal/engineering`, and `internal/application` remain
+driver-free, architecture-test-enforced, as does the rule that only
+`internal/infrastructure/postgres` imports it. Every `Do` callback must now be
+safely re-runnable — no second clock read, no randomness — which was already
+true of every command but is now load-bearing and enforced by
+`TestDoCallbacksAreRetrySafe`. That test found one real violation in
+`CorrectValidationClaimCommand` when introduced. See
+[FF-014](../spec/014-postgresql-persistence.md).
+
+---
+
+## AD-021 — Repository contracts enforce spec-declared referential and identity invariants, in both adapters
+
+Status: Accepted
+Date: 2026-07-28
+Phase: M.4
+
+**Context.** Building the PostgreSQL schema surfaced three invariants the
+specifications declare that the in-memory adapter never enforced.
+`FeatureCardRepository.Put` did not verify its `ProjectID` exists.
+`RecordEnvelopeRepository.Put` did not verify its `SubjectKey` resolves to a
+real Artifact or Revision — unlike `RevisionEnvelopeRepository.Put`,
+`StructuredContentRepository.Put`, and `RevisionOrderRepository.Put`, which do
+verify their references. `RevisionAcceptanceRepository.Append` appended
+unconditionally, though FF-009 §4.3 declares `RecordID` unique and FF-006 §2
+derives a timeline event's identity from it. Under the source-of-truth
+priority these are implementation defects, not deliberate narrowings.
+
+**Decision.** Close all three as a contract refinement binding on **both**
+adapters, not a PostgreSQL-only strengthening.
+
+`feature_cards.project_id` is a real foreign key in PostgreSQL and an explicit
+lookup in memory. `Append` is create-only on `RecordID` in both — identical
+re-append is a no-op, a differing one is `ErrImmutableValueConflict` —
+enforced by `UNIQUE (record_id)` in PostgreSQL and a scan in memory.
+
+For a record's subject, `SubjectKey` remains the single stored
+representation: no denormalised `subject_artifact_id` /
+`subject_revision_artifact_id` / `subject_revision_id` columns and no foreign
+key. Both adapters instead parse it through a new shared
+`engineering.ParseSubjectKey` and look the referenced value up — a map lookup
+in memory, a `SELECT` in the same transaction in PostgreSQL. One parser, one
+definition of what a `SubjectKey` means.
+
+`revision_acceptance` keeps a surrogate `bigserial` primary key: it remains an
+internal journal that nothing looks up by identity and no foreign key targets,
+so `record_id`'s uniqueness is an identity invariant, not evidence that the
+journal is an externally referenceable entity.
+
+**`CorrectionTargetID` is deliberately excluded** from this refinement.
+AD-017 already places that check on the write side in
+`CorrectValidationClaimCommand`, which reports the more specific
+`ErrCorrectionTargetMissing`, and requires `ResolveCurrentClaim` to remain
+total over any stored graph — dangling, self-referential, or cyclic included —
+so resolution cannot be poisoned by a payload written by other means. A third
+check at the repository layer would duplicate the command-layer one and make
+that read-side guarantee unreachable and untestable. Implementation confirmed
+this concretely: adding it broke four tests that deliberately store degenerate
+correction graphs to exercise the read-side algorithm.
+
+**Alternatives.** Reproducing the in-memory gaps in PostgreSQL rejected — the
+two adapters would no longer reject the same inputs, which is precisely the
+property this milestone exists to prove. Enforcing only in PostgreSQL via
+foreign keys rejected for the same reason. Materialising `SubjectKey` into
+foreign-key-able columns rejected — it is already the canonical identifier,
+and splitting it would mean maintaining two representations of one
+relationship with no query or performance need to justify it; the
+repository-logic check costs one extra read inside a transaction that is about
+to write anyway, and keeps the storage model close to the domain model.
+
+**Consequences.** Four application query tests, which wrote records naming a
+subject that was never established, now seed that subject first — scoped,
+expected fallout from strengthening a contract, and arguably more honest
+fixtures. `TestAssignLifecycleStateCommand` likewise now establishes the
+capability whose lifecycle it assigns. The `RecordID` change needed no fixture
+changes. `internal/engineering` gains `ParseSubjectKey`, the inverse of the
+existing `ArtifactSubjectKey`/`ArtifactRevisionSubjectKey` constructors, and
+the shared contract suite gains four subtests so both adapters are held to all
+of it. See [FF-014](../spec/014-postgresql-persistence.md).
+
+---
+
 ## Open questions
 
-None. Every material architecture decision for M.1, M.2, and M.3 is resolved.
+None. Every material architecture decision for M.1 through M.4 is resolved.
 Questions deferred to a later phase, with the phase that owns them:
 
 | Question | Owned by |
 |---|---|
-| PostgreSQL schema and index design | M.4 |
-| Whether any query needs materialization | M.4, and only with measured evidence |
+| Whether any query needs materialization | Still open — only with measured evidence, and none has been gathered |
+| Connection-pool sizing, timeouts, and retry tuning under load | M.5, with measurement |
 | Whether `RelationEnvelope` is ever required | Deferred until a relation is |
 | Random identity generation at the transport edge | M.5 |
 | Which patterns Belcanto reuses or redesigns | M.7 freeze artifacts |
@@ -617,3 +765,9 @@ Resolved since M.1: canonical JSON serialization rules
 and repository contracts with the error taxonomy
 ([FF-009 §5](../spec/009-in-memory-persistence.md#5-repository-contracts),
 [§8](../spec/009-in-memory-persistence.md#8-error-model)).
+
+Resolved in M.4: PostgreSQL schema and index design
+([FF-014 §3](../spec/014-postgresql-persistence.md), AD-020, AD-021). The
+materialization question is deliberately *not* closed — M.4 added no
+materialized projection and no index beyond what correctness requires, which
+is the answer AD-006 asks for until there is evidence to the contrary.

@@ -61,7 +61,7 @@ func resolveClaim(t *testing.T, uow application.UnitOfWork) (application.Current
 }
 
 func TestSingleClaimIsHead(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	claim := mustClaimEnv(t, "CLM-1", "peos:satisfied", nil, "")
 	putClaim(t, uow, claim)
 	result, err := resolveClaim(t, uow)
@@ -74,7 +74,7 @@ func TestSingleClaimIsHead(t *testing.T) {
 }
 
 func TestChainOfTwo(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	c2 := mustClaimEnv(t, "CLM-2", "peos:satisfied", nil, "")
 	putClaim(t, uow, c2)
 	c4 := mustClaimEnv(t, "CLM-4", "peos:not-satisfied", &c2, "peos:correct")
@@ -90,7 +90,7 @@ func TestChainOfTwo(t *testing.T) {
 }
 
 func TestChainOfThree(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	a := mustClaimEnv(t, "CLM-A", "peos:satisfied", nil, "")
 	putClaim(t, uow, a)
 	b := mustClaimEnv(t, "CLM-B", "peos:not-satisfied", &a, "peos:correct")
@@ -108,7 +108,7 @@ func TestChainOfThree(t *testing.T) {
 }
 
 func TestOriginalRemainsReadable(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	c2 := mustClaimEnv(t, "CLM-2", "peos:satisfied", nil, "")
 	putClaim(t, uow, c2)
 	c4 := mustClaimEnv(t, "CLM-4", "peos:not-satisfied", &c2, "peos:correct")
@@ -134,7 +134,7 @@ func TestOriginalRemainsReadable(t *testing.T) {
 }
 
 func TestSelectionIgnoresTimestamps(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	c2 := mustClaimEnv(t, "CLM-2", "peos:satisfied", nil, "")
 	putClaim(t, uow, c2)
 	// The correcting claim is backdated to BEFORE its target's timestamp.
@@ -167,7 +167,7 @@ func TestSelectionIgnoresTimestamps(t *testing.T) {
 // correction targets, for instance) cannot silently regress into picking an
 // arbitrary claim instead of reporting ambiguity or absence.
 func TestZeroHeadsIsGraphTheoreticallyUnreachable(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	c1 := mustClaimEnv(t, "CLM-1", "peos:satisfied", nil, "")
 	putClaim(t, uow, c1)
 	c2 := mustClaimEnv(t, "CLM-2", "peos:inconclusive", &c1, "peos:invalidate")
@@ -186,7 +186,7 @@ func TestZeroHeadsIsGraphTheoreticallyUnreachable(t *testing.T) {
 }
 
 func TestInvalidatorEvaluatedOnOwnMerits(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	c1 := mustClaimEnv(t, "CLM-1", "peos:satisfied", nil, "")
 	putClaim(t, uow, c1)
 	invalidator := mustClaimEnv(t, "CLM-2", "peos:not-satisfied", &c1, "peos:invalidate")
@@ -202,7 +202,7 @@ func TestInvalidatorEvaluatedOnOwnMerits(t *testing.T) {
 }
 
 func TestMissingTarget(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	ghost := engineering.RecordEnvelope{Key: engineering.RecordKey{Kind: engineering.RecordKindClaim, ID: "CLM-GHOST"}}
 	c := mustClaimEnv(t, "CLM-1", "peos:not-satisfied", &ghost, "peos:correct")
 	putClaim(t, uow, c)
@@ -214,7 +214,7 @@ func TestMissingTarget(t *testing.T) {
 }
 
 func TestSelfCorrection(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	self := engineering.RecordEnvelope{Key: engineering.RecordKey{Kind: engineering.RecordKindClaim, ID: "CLM-1"}}
 	c := mustClaimEnv(t, "CLM-1", "peos:not-satisfied", &self, "peos:correct")
 	putClaim(t, uow, c)
@@ -226,7 +226,7 @@ func TestSelfCorrection(t *testing.T) {
 }
 
 func TestCycle(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	a := engineering.RecordKey{Kind: engineering.RecordKindClaim, ID: "CLM-A"}
 	b := engineering.RecordKey{Kind: engineering.RecordKindClaim, ID: "CLM-B"}
 	claimA := mustClaimEnv(t, "CLM-A", "peos:satisfied", &engineering.RecordEnvelope{Key: b}, "peos:correct")
@@ -241,7 +241,7 @@ func TestCycle(t *testing.T) {
 }
 
 func TestCompetingHeads(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	target := mustClaimEnv(t, "CLM-1", "peos:satisfied", nil, "")
 	putClaim(t, uow, target)
 	c2 := mustClaimEnv(t, "CLM-2", "peos:not-satisfied", &target, "peos:correct")
@@ -256,7 +256,7 @@ func TestCompetingHeads(t *testing.T) {
 }
 
 func TestScopeAndCriteriaPartitioning(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	key, err := engineering.NewRecordKey(engineering.RecordKindClaim, "CLM-OTHER")
 	if err != nil {
 		t.Fatal(err)

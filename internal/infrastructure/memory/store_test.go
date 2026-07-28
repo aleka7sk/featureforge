@@ -7,14 +7,37 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/aleka7sk/featureforge/internal/application"
 	"github.com/aleka7sk/featureforge/internal/domain"
 	"github.com/aleka7sk/featureforge/internal/engineering"
+	"github.com/aleka7sk/featureforge/internal/infrastructure/contracttest"
 )
 
 func newTestRevisionKey(artifactID, revisionID string) (engineering.RevisionKey, error) {
 	return engineering.NewRevisionKey(artifactID, revisionID)
+}
+
+// fixedContractTime and mustArtifactEnvelope mirror the helpers in
+// internal/infrastructure/contracttest. They are duplicated here rather than
+// exported from that package because they are ordinary test scaffolding, not
+// part of the contract this package must satisfy -- exporting them would
+// widen contracttest's API for no reason.
+func fixedContractTime() time.Time { return time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC) }
+
+func mustArtifactEnvelope(t *testing.T, artifactID string) engineering.ArtifactEnvelope {
+	t.Helper()
+	key, err := engineering.NewArtifactKey(artifactID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte(`{"artifact_id":"` + artifactID + `"}`)
+	env, err := engineering.NewArtifactEnvelope(key, "featureforge:product-capability", payload, engineering.ComputeDigest(payload), fixedContractTime())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return env
 }
 
 func newTestRevisionEnvelope(key engineering.RevisionKey) (engineering.RevisionEnvelope, error) {
@@ -31,7 +54,7 @@ func newTestOrderMetadata(key engineering.RevisionKey, sequence int) (engineerin
 }
 
 func TestRepositoryContractSuite(t *testing.T) {
-	RunRepositoryContractSuite(t, func() application.UnitOfWork {
+	contracttest.RunRepositoryContractSuite(t, func() application.UnitOfWork {
 		return NewUnitOfWork(NewStore())
 	})
 }

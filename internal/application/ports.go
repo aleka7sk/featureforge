@@ -19,7 +19,9 @@ type ProjectRepository interface {
 	List(ctx context.Context) ([]domain.Project, error)
 }
 
-// FeatureCardRepository persists FeatureCards. Put is create-only.
+// FeatureCardRepository persists FeatureCards. Put is create-only, and
+// returns ErrReferencedValueMissing if the card's ProjectID does not name a
+// stored Project (AD-021).
 //
 // LinkCapability is a narrowly-scoped addition beyond FF-009 §5's table,
 // documented in the M.3 implementation report: it is the one-time monotonic
@@ -58,6 +60,13 @@ type StructuredContentRepository interface {
 
 // RecordEnvelopeRepository persists RecordEnvelopes: executions, claims,
 // decisions, and state assignments.
+//
+// Put returns ErrReferencedValueMissing if SubjectKey does not resolve --
+// through engineering.ParseSubjectKey -- to a stored ArtifactEnvelope or
+// RevisionEnvelope, or if CorrectionTargetID is set and names no stored claim
+// (AD-021). That target check establishes only that the claim exists; whether
+// the resulting correction graph is acyclic remains a read-time concern of
+// ResolveCurrentClaim (FF-010 §6).
 type RecordEnvelopeRepository interface {
 	Put(ctx context.Context, env engineering.RecordEnvelope) error
 	Get(ctx context.Context, key engineering.RecordKey) (engineering.RecordEnvelope, bool, error)
@@ -74,6 +83,12 @@ type RevisionOrderRepository interface {
 }
 
 // RevisionAcceptanceRepository persists the append-only acceptance journal.
+//
+// Append is create-only on RecordID: re-appending an identical record is a
+// no-op, and a differing record reusing an existing RecordID is
+// ErrImmutableValueConflict. FF-009 §4.3 declares RecordID unique and
+// FF-006 §2 derives a timeline event's identity from it, so a duplicate would
+// collide two timeline events onto one event ID (AD-021).
 type RevisionAcceptanceRepository interface {
 	Append(ctx context.Context, record engineering.RevisionAcceptanceRecord) error
 	ListByRevision(ctx context.Context, key engineering.RevisionKey) ([]engineering.RevisionAcceptanceRecord, error)

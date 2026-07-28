@@ -96,6 +96,9 @@ func (r featureCardRepo) Put(_ context.Context, c domain.FeatureCard) error {
 	if err := r.txn.store.countWrite("featurecard"); err != nil {
 		return err
 	}
+	if _, ok := lookup(r.txn.overlay.projects, r.txn.store.committed.projects, c.ProjectID()); !ok {
+		return fmt.Errorf("%w: feature card %s names project %s, which does not exist", application.ErrReferencedValueMissing, c.ID(), c.ProjectID())
+	}
 	return putCreateOnly(r.txn.overlay.featureCards, r.txn.store.committed.featureCards, c.ID(), c,
 		func(a, b domain.FeatureCard) bool {
 			aLink, aOK := a.CapabilityArtifactID()
@@ -258,8 +261,42 @@ func (r recordRepo) Put(_ context.Context, env engineering.RecordEnvelope) error
 	if err := r.txn.store.countWrite("record"); err != nil {
 		return err
 	}
+	if err := r.verifySubject(env); err != nil {
+		return err
+	}
 	return putCreateOnly(r.txn.overlay.records, r.txn.store.committed.records, env.Key, env,
 		func(a, b engineering.RecordEnvelope) bool { return a.Equal(b) })
+}
+
+// verifySubject resolves env.SubjectKey through the shared parser and
+// confirms the artifact or revision it names exists (AD-021). The PostgreSQL
+// adapter performs the structurally identical check with a SELECT.
+//
+// CorrectionTargetID is deliberately NOT verified here. AD-017 already places
+// that check on the write side in CorrectValidationClaimCommand, which
+// returns the more specific ErrCorrectionTargetMissing, and requires the read
+// side -- ResolveCurrentClaim -- to remain total over any stored graph,
+// including a dangling, self-referential, or cyclic one, so that resolution
+// cannot be poisoned by a payload written by some other means. A third check
+// at this layer would duplicate the command-layer one and make the read-side
+// guarantee both unreachable and untestable.
+func (r recordRepo) verifySubject(env engineering.RecordEnvelope) error {
+	kind, artifactID, revisionID, err := engineering.ParseSubjectKey(env.SubjectKey)
+	if err != nil {
+		return fmt.Errorf("record %s: %w", env.Key, err)
+	}
+	switch kind {
+	case engineering.SubjectKindArtifact:
+		if _, ok := lookup(r.txn.overlay.artifacts, r.txn.store.committed.artifacts, engineering.ArtifactKey{ArtifactID: artifactID}); !ok {
+			return fmt.Errorf("%w: record %s names artifact %s, which does not exist", application.ErrReferencedValueMissing, env.Key, artifactID)
+		}
+	case engineering.SubjectKindArtifactRevision:
+		key := engineering.RevisionKey{ArtifactID: artifactID, RevisionID: revisionID}
+		if _, ok := lookup(r.txn.overlay.revisions, r.txn.store.committed.revisions, key); !ok {
+			return fmt.Errorf("%w: record %s names revision %s, which does not exist", application.ErrReferencedValueMissing, env.Key, key)
+		}
+	}
+	return nil
 }
 
 func (r recordRepo) Get(_ context.Context, key engineering.RecordKey) (engineering.RecordEnvelope, bool, error) {
@@ -375,8 +412,39 @@ func (r acceptanceRepo) Append(_ context.Context, record engineering.RevisionAcc
 	if _, ok := lookup(r.txn.overlay.revisions, r.txn.store.committed.revisions, record.Key); !ok {
 		return fmt.Errorf("%w: acceptance record for revision %s references a revision that does not exist", application.ErrReferencedValueMissing, record.Key)
 	}
+	existing, found := r.findByRecordID(record.RecordID)
+	if found {
+		if existing == record {
+			return nil
+		}
+		return fmt.Errorf("%w: acceptance record id %s", application.ErrImmutableValueConflict, record.RecordID)
+	}
 	r.txn.overlay.acceptance[record.Key] = append(r.txn.overlay.acceptance[record.Key], record)
 	return nil
+}
+
+// findByRecordID searches the whole journal for an entry with this RecordID.
+// FF-009 §4.3 declares RecordID unique and FF-006 §2 derives a timeline
+// event's identity from it, so the same id must not appear twice even under
+// two different revisions (AD-021). Append is therefore create-only on
+// RecordID: an identical re-append is a no-op, a differing one conflicts --
+// the same semantics every other repository's Put already has.
+func (r acceptanceRepo) findByRecordID(recordID string) (engineering.RevisionAcceptanceRecord, bool) {
+	for _, entries := range r.txn.store.committed.acceptance {
+		for _, e := range entries {
+			if e.RecordID == recordID {
+				return e, true
+			}
+		}
+	}
+	for _, entries := range r.txn.overlay.acceptance {
+		for _, e := range entries {
+			if e.RecordID == recordID {
+				return e, true
+			}
+		}
+	}
+	return engineering.RevisionAcceptanceRecord{}, false
 }
 
 func (r acceptanceRepo) ListByRevision(_ context.Context, key engineering.RevisionKey) ([]engineering.RevisionAcceptanceRecord, error) {

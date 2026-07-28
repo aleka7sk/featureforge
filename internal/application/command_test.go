@@ -85,6 +85,20 @@ func TestCreateFeatureRequiresExistingProject(t *testing.T) {
 	}
 }
 
+// establishCapability writes CAP-1 and its founding revision, so a command
+// whose record names CAP-1 as its subject has a subject to name (AD-021).
+// setupProjectAndFeature must have run first.
+func establishCapability(t *testing.T, f commandFixture) {
+	t.Helper()
+	cmd := application.EstablishCapabilitySpecificationCommand{
+		FeatureCardID: "FC-1", ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-1",
+		Content: mustContent(t, "Homework after a lesson"),
+	}
+	if _, err := cmd.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func setupProjectAndFeature(t *testing.T, f commandFixture) {
 	t.Helper()
 	if _, err := (application.CreateProjectCommand{ProjectID: "PRJ-1", Name: "Pilot"}).Execute(context.Background(), f.uow, f.clock); err != nil {
@@ -359,6 +373,12 @@ func TestCorrectValidationClaimRejectsMissingTarget(t *testing.T) {
 
 func TestAssignLifecycleStateCommand(t *testing.T) {
 	f := newCommandFixture()
+	// A lifecycle state is assigned to the capability itself, so the
+	// capability must exist before its state can be recorded -- the state
+	// assignment's subject is CAP-1, not the Transition Record artifact the
+	// command creates alongside it (AD-021).
+	setupProjectAndFeature(t, f)
+	establishCapability(t, f)
 	entry := application.AssignLifecycleStateCommand{
 		AssignmentID: "SA-1", SubjectArtifactID: "CAP-1", State: "drafting", IsEntry: true,
 		TransitionRecordArtifactID: "TR-1", TransitionRecordRevisionID: "TR-1-REV-0",

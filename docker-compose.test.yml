@@ -1,0 +1,25 @@
+# PostgreSQL for FeatureForge's M.4 integration tests.
+#
+# Test-only: FeatureForge has no deployment target before M.5, so this file is
+# development and CI infrastructure, not a deployment manifest.
+#
+# The published port defaults to 55433, well clear of the 5432-5434 range a
+# developer's own PostgreSQL instances tend to occupy, and is overridable with
+# FEATUREFORGE_POSTGRES_PORT if even that collides. Storage is tmpfs, so every
+# `up` starts from an empty database and no state survives a `down`.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: featureforge
+      POSTGRES_PASSWORD: featureforge
+      POSTGRES_DB: featureforge
+    ports:
+      - "${FEATUREFORGE_POSTGRES_PORT:-55433}:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U featureforge -d featureforge"]
+      interval: 2s
+      timeout: 2s
+      retries: 20

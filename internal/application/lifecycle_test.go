@@ -45,7 +45,7 @@ func resolveLifecycle(t *testing.T, uow application.UnitOfWork) (application.Lif
 }
 
 func TestNoAssignmentsReturnsNone(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	result, err := resolveLifecycle(t, uow)
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestNoAssignmentsReturnsNone(t *testing.T) {
 }
 
 func TestLatestEffectiveAtWins(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	putStateAssignment(t, uow, "SA-1", "featureforge:drafting", fixedTime())
 	putStateAssignment(t, uow, "SA-2", "featureforge:under-validation", fixedTime().Add(time.Hour))
 	result, err := resolveLifecycle(t, uow)
@@ -69,7 +69,7 @@ func TestLatestEffectiveAtWins(t *testing.T) {
 }
 
 func TestEqualTimestampSameStateTieBreaks(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	putStateAssignment(t, uow, "SA-2", "featureforge:drafting", fixedTime())
 	putStateAssignment(t, uow, "SA-1", "featureforge:drafting", fixedTime())
 	result, err := resolveLifecycle(t, uow)
@@ -85,7 +85,7 @@ func TestEqualTimestampSameStateTieBreaks(t *testing.T) {
 }
 
 func TestEqualTimestampDifferentStatesFails(t *testing.T) {
-	uow := newStoreAndUOW()
+	uow := newStoreWithRecordSubject(t)
 	putStateAssignment(t, uow, "SA-1", "featureforge:drafting", fixedTime())
 	putStateAssignment(t, uow, "SA-2", "featureforge:specified", fixedTime())
 	_, err := resolveLifecycle(t, uow)

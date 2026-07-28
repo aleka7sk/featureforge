@@ -13,10 +13,25 @@ corrections, and history. It does not implement the capability itself.
 
 ## Status
 
-Phase **M.3 — In-Memory Vertical Slice**: complete. The canonical scenario
-(FF-011) runs end to end against a real PEOS v1.0.0 SDK and an in-memory
-store. See the [M.3 implementation report](docs/reports/m3-implementation-report.md)
-and the [delivery roadmap](docs/spec/007-delivery-roadmap.md).
+Phase **M.4 — PostgreSQL Persistence**: complete. The canonical scenario
+(FF-011) runs end to end against a real PEOS v1.0.0 SDK on **both** an
+in-memory store and a real PostgreSQL database, producing identical
+engineering answers, with one shared repository contract suite run against
+both adapters. See the
+[M.4 implementation report](docs/reports/m4-implementation-report.md), the
+[M.3 report](docs/reports/m3-implementation-report.md), and the
+[delivery roadmap](docs/spec/007-delivery-roadmap.md).
+
+## Running the tests
+
+```sh
+make test            # everything that needs no database (PostgreSQL tests skip)
+make postgres-test   # starts PostgreSQL, migrates, runs the DB-backed tests, tears down
+make verify          # fmt, vet, build, test, -race, and postgres-test
+```
+
+`make postgres-test` needs Docker. Migrations are applied by the test harness
+itself, so no schema or table is ever created by hand.
 
 ## Documentation
 
@@ -38,6 +53,7 @@ Start with the [product overview](docs/spec/000-product-overview.md).
 | [FF-011 Canonical Scenario](docs/spec/011-canonical-scenario.md) | What are the exact fixture identities and PEOS value inventory? |
 | [FF-012 Test Specification](docs/spec/012-test-specification.md) | What must the test suite prove? |
 | [FF-013 M.3 Implementation Packet](docs/spec/013-m3-implementation-packet.md) | What must M.3 build, and in what commit order? |
+| [FF-014 PostgreSQL Persistence](docs/spec/014-postgresql-persistence.md) | How is engineering state persisted in PostgreSQL, and why is that an adapter? |
 | [Decision log](docs/decisions/README.md) | What was decided, and why? |
 | [Glossary](docs/glossary.md) | What does this word mean here? |
 

@@ -1,5 +1,10 @@
 package engineering
 
+import (
+	"fmt"
+	"strings"
+)
+
 // The functions below define the plain, PEOS-independent string form used
 // for every projected reference key on an envelope: SubjectKey,
 // CriterionKeys, EvidenceKeys, ExecutionKeys, CorrectionTargetID.
@@ -28,6 +33,41 @@ func ArtifactSubjectKey(artifactID string) string {
 // LifecycleSubjectRef naming an exact Artifact Revision.
 func ArtifactRevisionSubjectKey(artifactID, revisionID string) string {
 	return "artifact-revision:" + artifactID + "/" + revisionID
+}
+
+// SubjectKind names which of the two subject forms a SubjectKey carries.
+type SubjectKind string
+
+const (
+	// SubjectKindArtifact names an Artifact at the identity level.
+	SubjectKindArtifact SubjectKind = "artifact"
+	// SubjectKindArtifactRevision names an exact Artifact Revision.
+	SubjectKindArtifactRevision SubjectKind = "artifact-revision"
+)
+
+// ParseSubjectKey is the inverse of ArtifactSubjectKey and
+// ArtifactRevisionSubjectKey. It exists so that both persistence adapters
+// resolve a RecordEnvelope's SubjectKey to the value it references using one
+// shared definition of the key's shape, rather than each re-deriving the
+// prefix convention independently (AD-021).
+//
+// For SubjectKindArtifact the returned revisionID is empty. A key that names
+// neither form, or whose identity part is malformed, is ErrInvalidEnvelope.
+func ParseSubjectKey(key string) (SubjectKind, string, string, error) {
+	if after, found := strings.CutPrefix(key, "artifact-revision:"); found {
+		artifactID, revisionID, split := strings.Cut(after, "/")
+		if !split || artifactID == "" || revisionID == "" {
+			return "", "", "", fmt.Errorf("%w: subject key %q must name artifact-revision:<artifact>/<revision>", ErrInvalidEnvelope, key)
+		}
+		return SubjectKindArtifactRevision, artifactID, revisionID, nil
+	}
+	if after, found := strings.CutPrefix(key, "artifact:"); found {
+		if after == "" {
+			return "", "", "", fmt.Errorf("%w: subject key %q must name artifact:<artifact>", ErrInvalidEnvelope, key)
+		}
+		return SubjectKindArtifact, after, "", nil
+	}
+	return "", "", "", fmt.Errorf("%w: subject key %q names neither an artifact nor an artifact revision", ErrInvalidEnvelope, key)
 }
 
 // RequirementCriterionKey is the key for a CriterionRef citing a
