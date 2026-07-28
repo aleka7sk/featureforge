@@ -14,7 +14,7 @@ import (
 // leaving it implicit (FF-021 §14: "parse every template at init").
 func TestTemplatesParseAtInit(t *testing.T) {
 	for _, name := range []string{
-		"error", "projects", "feature_overview", "revisions", "requirements", "decisions", "validation", "timeline",
+		"error", "projects", "project_detail", "feature_overview", "revisions", "requirements", "decisions", "validation", "timeline",
 	} {
 		if templates.Lookup(name) == nil {
 			t.Errorf("template %q was not parsed", name)

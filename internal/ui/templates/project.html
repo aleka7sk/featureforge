@@ -1,0 +1,38 @@
+{{define "project_detail"}}
+{{template "shared-head" .}}
+{{template "nav" .}}
+<main id="main-content">
+  <h1>{{.Name}}</h1>
+  <p><a href="/">&larr; All projects</a></p>
+
+  {{template "error-notice" .FormError}}
+
+  <section class="panel" aria-labelledby="features-heading">
+    <h2 id="features-heading">Feature cards</h2>
+    {{if .Features}}
+    <table>
+      <thead>
+        <tr><th scope="col">Title</th><th scope="col">Description</th><th scope="col">Created</th></tr>
+      </thead>
+      <tbody>
+        {{range .Features}}
+        <tr>
+          <td><a href="/features/{{.FeatureCardID}}">{{.Title}}</a></td>
+          <td>{{.Description}}</td>
+          <td>{{.CreatedAt.Format "2006-01-02"}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    {{template "empty-state" "No feature cards yet."}}
+    {{end}}
+  </section>
+
+  <section class="panel" aria-labelledby="new-feature-heading">
+    <h2 id="new-feature-heading">Create a feature card</h2>
+    <div id="feature-form-slot"></div>
+  </section>
+</main>
+{{template "footer" .}}
+{{end}}

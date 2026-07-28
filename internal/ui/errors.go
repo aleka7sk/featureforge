@@ -12,6 +12,14 @@ import "net/http"
 // that boundary rather than re-deriving which codes are safe to show,
 // which would duplicate FF-018's error-mapping table (FF-021 §2: "must not
 // duplicate API error mapping").
+// writeInternalErrorPage renders the generic error page for a failure in
+// this package's own plumbing (callAPI transport failure, a response body
+// that does not decode) -- distinct from writeAPIErrorPage, which renders
+// the API's own status and message for a request the API itself rejected.
+func writeInternalErrorPage(w http.ResponseWriter) {
+	writeErrorPage(w, http.StatusInternalServerError, "Something went wrong", "An unexpected error occurred.")
+}
+
 func writeAPIErrorPage(w http.ResponseWriter, result apiResult) {
 	heading := "Something went wrong"
 	switch result.Status {

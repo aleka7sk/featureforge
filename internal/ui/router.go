@@ -18,6 +18,13 @@ func newRouter(deps Dependencies) http.Handler {
 	// make every genuinely unmatched route look like the Projects screen
 	// instead of 404ing.
 	mux.HandleFunc("GET /{$}", handleProjects(deps))
+	mux.HandleFunc("GET /projects/{projectID}", handleProjectDetail(deps))
+	mux.HandleFunc("GET /features/{featureCardID}", handleFeatureOverview(deps))
+	mux.HandleFunc("GET /features/{featureCardID}/revisions", handleRevisions(deps))
+	mux.HandleFunc("GET /features/{featureCardID}/requirements", handleRequirements(deps))
+	mux.HandleFunc("GET /features/{featureCardID}/decisions", handleDecisions(deps))
+	mux.HandleFunc("GET /features/{featureCardID}/validation", handleValidation(deps))
+	mux.HandleFunc("GET /features/{featureCardID}/timeline", handleTimeline(deps))
 	mux.HandleFunc("GET /static/style.css", handleStaticCSS)
 
 	return withNotFound(mux)

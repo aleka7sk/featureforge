@@ -21,13 +21,15 @@ import (
 
 // apiResult is the interpreted outcome of one in-process call to the API
 // handler: the real HTTP status it wrote, and either the decoded success
-// envelope's "data" payload or the decoded error body -- never both.
+// envelope's "data" (plus optional "rationale") payload or the decoded
+// error body -- never both.
 type apiResult struct {
-	Status  int
-	OK      bool
-	Data    json.RawMessage
-	ErrCode string
-	ErrMsg  string
+	Status    int
+	OK        bool
+	Data      json.RawMessage
+	Rationale json.RawMessage
+	ErrCode   string
+	ErrMsg    string
 }
 
 // responseCapture is a minimal http.ResponseWriter that records what the
@@ -83,13 +85,15 @@ func callAPI(ctx context.Context, api http.Handler, method, path string, body an
 	result := apiResult{Status: rec.status}
 	if rec.status >= 200 && rec.status < 300 {
 		var envelope struct {
-			Data json.RawMessage `json:"data"`
+			Data      json.RawMessage `json:"data"`
+			Rationale json.RawMessage `json:"rationale"`
 		}
 		if err := json.Unmarshal(rec.body.Bytes(), &envelope); err != nil {
 			return apiResult{}, err
 		}
 		result.OK = true
 		result.Data = envelope.Data
+		result.Rationale = envelope.Rationale
 		return result, nil
 	}
 
@@ -114,4 +118,15 @@ func decodeInto(result apiResult, v any) error {
 		return nil
 	}
 	return json.Unmarshal(result.Data, v)
+}
+
+// decodeRationale unmarshals an apiResult's Rationale into v -- Q3, Q4, and
+// Q6 carry a "rationale" sibling to "data" the same envelope shape as
+// decodeInto's Data (internal/transport/http/errors.go's writeJSON); most
+// endpoints omit it, in which case v is left untouched.
+func decodeRationale(result apiResult, v any) error {
+	if len(result.Rationale) == 0 {
+		return nil
+	}
+	return json.Unmarshal(result.Rationale, v)
 }
