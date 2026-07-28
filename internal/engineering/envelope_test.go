@@ -158,11 +158,13 @@ func TestEnvelopeEqualityIsKeyPlusPayload(t *testing.T) {
 	}
 }
 
-// TestRevisionEnvelopeEqualityIgnoresSubjectKey asserts SubjectKey, like
-// every other projection on RevisionEnvelope, is not part of Equal -- only
-// the key and the byte-identical payload are (FF-016 §3, mirroring
-// TestEnvelopeEqualityIsKeyPlusPayload's ArtifactEnvelope coverage).
-func TestRevisionEnvelopeEqualityIgnoresSubjectKey(t *testing.T) {
+// TestRevisionEnvelopeEqualityComparesSubjectKey asserts SubjectKey
+// participates in Equal (AD-026): two revision envelopes with equal keys and
+// identical payloads are Equal only when SubjectKey also matches, and a
+// differing SubjectKey makes them unequal. Other projections (RecordedAt)
+// remain excluded, as TestEnvelopeEqualityIsKeyPlusPayload already covers for
+// ArtifactEnvelope.
+func TestRevisionEnvelopeEqualityComparesSubjectKey(t *testing.T) {
 	revKey, _ := NewRevisionKey("REQ-1", "REV-1")
 	payload, digest := validPayload(t)
 
@@ -175,7 +177,22 @@ func TestRevisionEnvelopeEqualityIgnoresSubjectKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := NewRevisionEnvelope(RevisionEnvelopeInput{
+	// Same key, payload, and SubjectKey, but a differing RecordedAt
+	// projection: still Equal, since RecordedAt is not compared.
+	sameSubject, err := NewRevisionEnvelope(RevisionEnvelopeInput{
+		Key: revKey, RevisionFamily: RevisionFamilyRequirement,
+		ArtifactType: "featureforge:requirement", IntegrityValue: "sha256:x",
+		SubjectKey: ArtifactSubjectKey("CAP-1"),
+		Payload:    payload, PayloadDigest: digest, RecordedAt: fixedRecordedAt().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.Equal(sameSubject) {
+		t.Error("revision envelopes with equal keys, payloads, and SubjectKey must be Equal regardless of differing RecordedAt")
+	}
+
+	differentSubject, err := NewRevisionEnvelope(RevisionEnvelopeInput{
 		Key: revKey, RevisionFamily: RevisionFamilyRequirement,
 		ArtifactType: "featureforge:requirement", IntegrityValue: "sha256:x",
 		SubjectKey: ArtifactSubjectKey("CAP-2"),
@@ -184,8 +201,8 @@ func TestRevisionEnvelopeEqualityIgnoresSubjectKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !a.Equal(b) {
-		t.Error("revision envelopes with equal keys and identical payloads must be Equal regardless of differing SubjectKey")
+	if a.Equal(differentSubject) {
+		t.Error("revision envelopes with equal keys and identical payloads but differing SubjectKey must not be Equal (AD-026)")
 	}
 }
 

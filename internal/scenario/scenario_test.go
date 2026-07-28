@@ -343,6 +343,38 @@ func assertCanonicalEndState(
 	if !sawReq4IncompleteViaDiscovery {
 		t.Error("expected REQ-4, found via discovery rather than a caller-supplied list, to be reported with no applicable claim")
 	}
+
+	// 14. Transition-record subject discovery (AD-026, FF-017). Both
+	// lifecycle acts the scenario recorded -- the entry assignment (step 5,
+	// content-free per AD-014, whose SubjectKey the architecture review's
+	// finding F-001 identified as unrecoverable from its own payload) and the
+	// first transition (step 10) -- are revisions of RevisionFamily
+	// TransitionRecord projecting CAP-1 as their subject. This is the
+	// narrowest layer that exercises BuildEntryAssignment and BuildTransition
+	// through the real command path against a real repository, on whichever
+	// adapter backs uow.
+	transitionRecords := doQuery(t, uow, func(r application.Repositories) ([]engineering.RevisionEnvelope, error) {
+		return r.Revisions.ListByFamilyAndSubject(ctx, engineering.RevisionFamilyTransitionRecord, engineering.ArtifactSubjectKey(scenario.CapabilityArtifactID))
+	})
+	wantTransitionKeys := []string{
+		scenario.TransitionRecordArtifactID + "/" + scenario.EntryTransitionRevisionID,
+		scenario.TransitionRecordArtifactID + "/" + scenario.FirstTransitionRevisionID,
+	}
+	if len(transitionRecords) != len(wantTransitionKeys) {
+		t.Fatalf("transition-record revisions discovered by subject = %v, want exactly %v", transitionRecords, wantTransitionKeys)
+	}
+	for i, want := range wantTransitionKeys {
+		if transitionRecords[i].Key.String() != want {
+			t.Errorf("transition record index %d: key = %s, want %s (ascending order)", i, transitionRecords[i].Key.String(), want)
+		}
+	}
+
+	unrelated := doQuery(t, uow, func(r application.Repositories) ([]engineering.RevisionEnvelope, error) {
+		return r.Revisions.ListByFamilyAndSubject(ctx, engineering.RevisionFamilyTransitionRecord, engineering.ArtifactSubjectKey("CAP-UNRELATED-TR"))
+	})
+	if len(unrelated) != 0 {
+		t.Errorf("transition-record query for an unrelated capability subject returned %d results, want 0", len(unrelated))
+	}
 }
 
 // TestCanonicalScenarioInsertionOrderIndependence runs the scenario twice,

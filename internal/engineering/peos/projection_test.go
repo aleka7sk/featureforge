@@ -86,6 +86,37 @@ func TestProjectionFidelity_TransitionRevision(t *testing.T) {
 	if f.transitionRevision.RevisionFamily != "transition-record" {
 		t.Errorf("RevisionFamily = %q, want transition-record", f.transitionRevision.RevisionFamily)
 	}
+	// AD-026 (FF-017): BuildTransition's revision carries its subject inside
+	// its own payload (lifecycle.NewTransitionRecordContent), so this
+	// projection is redundant with the payload -- the case AD-026 leaves
+	// unaffected. Still asserted so a regression removing the projection is
+	// caught here rather than only inferred from the canonical scenario.
+	wantSubjectKey := engineering.ArtifactSubjectKey("CAP-1")
+	if f.transitionRevision.SubjectKey != wantSubjectKey {
+		t.Errorf("SubjectKey = %q, want %q", f.transitionRevision.SubjectKey, wantSubjectKey)
+	}
+}
+
+// TestProjectionFidelity_EntryTransitionRevision covers the one codec path
+// that made AD-026 necessary: BuildEntryAssignment's revision is content-free
+// under AD-014, so its projected SubjectKey cannot be reconstructed from its
+// own payload (FF-016 architecture review, finding F-001; AD-026). Nothing
+// previously asserted this projection at all (finding F-003).
+func TestProjectionFidelity_EntryTransitionRevision(t *testing.T) {
+	f := buildFixtures(t)
+	rev, err := DecodeArtifactRevision(f.entryTransitionRevision.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIntegrityProjection(t, f.entryTransitionRevision, rev)
+	assertProvenanceProjection(t, f.entryTransitionRevision, rev)
+	if f.entryTransitionRevision.RevisionFamily != "transition-record" {
+		t.Errorf("RevisionFamily = %q, want transition-record", f.entryTransitionRevision.RevisionFamily)
+	}
+	wantSubjectKey := engineering.ArtifactSubjectKey("CAP-1")
+	if f.entryTransitionRevision.SubjectKey != wantSubjectKey {
+		t.Errorf("SubjectKey = %q, want %q", f.entryTransitionRevision.SubjectKey, wantSubjectKey)
+	}
 }
 
 func TestProjectionFidelity_Decision(t *testing.T) {

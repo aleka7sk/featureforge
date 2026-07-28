@@ -884,6 +884,12 @@ Existing consumers remain compatible — `ResolveCurrentRevision`,
 untouched, and `RevisionEnvelope.Equal` still compares key and payload only, so
 a projection cannot affect identity or conflict detection.
 
+> **Corrected by [AD-026](#ad-026--revisionenvelopesubjectkey-participates-in-semantic-equality).**
+> The preceding sentence is no longer accurate: `RevisionEnvelope.Equal` also
+> compares `SubjectKey` as of AD-026/FF-017. This text is left as written,
+> per this log's rule that a decision is never edited to say something
+> different — see AD-026 for the corrected statement and its rationale.
+
 **AD-005 is unaffected:** only `internal/engineering/peos` produces the value,
 from input it already holds, and no read path decodes anything.
 **AD-006 is unaffected:** the projection records a fact already inside the
@@ -977,7 +983,7 @@ contract and the implementation order.
 
 Status: Accepted
 Date: 2026-07-28
-Phase: M.5 (correction; specified, not yet implemented)
+Phase: M.5 (correction; implemented)
 
 Recorded in [ad-026-subjectkey-equality.md](ad-026-subjectkey-equality.md).
 

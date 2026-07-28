@@ -62,6 +62,15 @@ func RunRepositoryContractSuite(t *testing.T, newUOW func() application.UnitOfWo
 	t.Run("RevisionListByFamilyAndSubject", func(t *testing.T) { testRevisionListByFamilyAndSubject(t, newUOW()) })
 	t.Run("RevisionSubjectKeyIsOptional", func(t *testing.T) { testRevisionSubjectKeyIsOptional(t, newUOW()) })
 	t.Run("RevisionRejectsMalformedSubjectKey", func(t *testing.T) { testRevisionRejectsMalformedSubjectKey(t, newUOW()) })
+
+	// AD-026: SubjectKey participates in RevisionEnvelope.Equal, and
+	// therefore in create-only conflict detection, identically in both
+	// adapters because both dispatch through the same Equal method.
+	t.Run("RevisionSubjectBearingPutIsIdempotent", func(t *testing.T) { testRevisionSubjectBearingPutIsIdempotent(t, newUOW()) })
+	t.Run("RevisionSubjectKeyDifferenceConflicts", func(t *testing.T) { testRevisionSubjectKeyDifferenceConflicts(t, newUOW()) })
+	t.Run("RevisionSubjectVisibilityAcrossTransactionBoundaries", func(t *testing.T) {
+		testRevisionSubjectVisibilityAcrossTransactionBoundaries(t, newUOW())
+	})
 }
 
 func fixedContractTime() time.Time { return time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC) }
@@ -826,6 +835,210 @@ func testRevisionRejectsMalformedSubjectKey(t *testing.T, uow application.UnitOf
 	})
 	if !errors.Is(err, engineering.ErrInvalidEnvelope) {
 		t.Errorf("err = %v, want ErrInvalidEnvelope", err)
+	}
+}
+
+// --- AD-026: SubjectKey participates in RevisionEnvelope.Equal ---
+
+// testRevisionSubjectBearingPutIsIdempotent asserts a subject-bearing
+// revision can be re-Put with the identical value, and both the payload and
+// the SubjectKey round-trip unchanged.
+func testRevisionSubjectBearingPutIsIdempotent(t *testing.T, uow application.UnitOfWork) {
+	key, err := engineering.NewRevisionKey("REQ-IDEMP-SUBJ", "REV-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := engineering.ArtifactSubjectKey("CAP-IDEMP-SUBJ")
+	env := mustRevisionEnvelopeWithSubject(t, key, engineering.RevisionFamilyRequirement, subject)
+
+	err = uow.Do(context.Background(), func(r application.Repositories) error {
+		if err := r.Artifacts.Put(context.Background(), mustArtifactEnvelope(t, "REQ-IDEMP-SUBJ")); err != nil {
+			return err
+		}
+		return r.Revisions.Put(context.Background(), env)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range 2 {
+		err = uow.Do(context.Background(), func(r application.Repositories) error {
+			return r.Revisions.Put(context.Background(), env)
+		})
+		if err != nil {
+			t.Fatalf("put %d: %v", i, err)
+		}
+	}
+
+	err = uow.Do(context.Background(), func(r application.Repositories) error {
+		got, found, err := r.Revisions.Get(context.Background(), key)
+		if err != nil {
+			return err
+		}
+		if !found {
+			t.Fatal("expected the revision to be found")
+		}
+		if string(got.Payload) != string(env.Payload) {
+			t.Error("payload changed across idempotent re-Puts")
+		}
+		if got.SubjectKey != subject {
+			t.Errorf("SubjectKey = %q, want %q", got.SubjectKey, subject)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// testRevisionSubjectKeyDifferenceConflicts asserts that, for an existing
+// RevisionKey with byte-identical Payload, a differing SubjectKey is
+// ErrImmutableValueConflict -- in every direction -- and that the failed Put
+// leaves the originally stored SubjectKey unchanged rather than merely
+// returning an error (AD-026).
+func testRevisionSubjectKeyDifferenceConflicts(t *testing.T, uow application.UnitOfWork) {
+	subjectA := engineering.ArtifactSubjectKey("CAP-CONFLICT-A")
+	subjectB := engineering.ArtifactSubjectKey("CAP-CONFLICT-B")
+
+	cases := []struct {
+		name                    string
+		artifactID              string
+		storedSubject, incoming string
+	}{
+		{"subject A to subject B", "REQ-CONFLICT-AB", subjectA, subjectB},
+		{"empty to subject A", "REQ-CONFLICT-EMPTY-TO-A", "", subjectA},
+		{"subject A to empty", "REQ-CONFLICT-A-TO-EMPTY", subjectA, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			key, err := engineering.NewRevisionKey(tc.artifactID, "REV-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored := mustRevisionEnvelopeWithSubject(t, key, engineering.RevisionFamilyRequirement, tc.storedSubject)
+			incoming := mustRevisionEnvelopeWithSubject(t, key, engineering.RevisionFamilyRequirement, tc.incoming)
+			if string(stored.Payload) != string(incoming.Payload) {
+				t.Fatal("test setup error: stored and incoming payloads must be byte-identical")
+			}
+
+			err = uow.Do(context.Background(), func(r application.Repositories) error {
+				if err := r.Artifacts.Put(context.Background(), mustArtifactEnvelope(t, tc.artifactID)); err != nil {
+					return err
+				}
+				return r.Revisions.Put(context.Background(), stored)
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			err = uow.Do(context.Background(), func(r application.Repositories) error {
+				return r.Revisions.Put(context.Background(), incoming)
+			})
+			if !errors.Is(err, application.ErrImmutableValueConflict) {
+				t.Errorf("err = %v, want ErrImmutableValueConflict", err)
+			}
+
+			err = uow.Do(context.Background(), func(r application.Repositories) error {
+				got, found, err := r.Revisions.Get(context.Background(), key)
+				if err != nil {
+					return err
+				}
+				if !found {
+					t.Fatal("expected the original revision to still be present")
+				}
+				if got.SubjectKey != tc.storedSubject {
+					t.Errorf("SubjectKey after a rejected Put = %q, want the original %q unchanged", got.SubjectKey, tc.storedSubject)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// testRevisionSubjectVisibilityAcrossTransactionBoundaries proves FF-016
+// §4.2's transaction-visibility claim for a subject-projected revision:
+// visible to ListByFamilyAndSubject inside the same Do that wrote it,
+// visible from a fresh Do after commit, and absent after a rolled-back Do --
+// the same commit/rollback idiom testCommitPersistsAllWrites and
+// testRollbackDiscardsAllWrites already use, extended with an in-transaction
+// read.
+func testRevisionSubjectVisibilityAcrossTransactionBoundaries(t *testing.T, uow application.UnitOfWork) {
+	subject := engineering.ArtifactSubjectKey("CAP-VIS-SUBJ")
+	key, err := engineering.NewRevisionKey("REQ-VIS-SUBJ", "REV-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := mustRevisionEnvelopeWithSubject(t, key, engineering.RevisionFamilyRequirement, subject)
+
+	err = uow.Do(context.Background(), func(r application.Repositories) error {
+		if err := r.Artifacts.Put(context.Background(), mustArtifactEnvelope(t, "REQ-VIS-SUBJ")); err != nil {
+			return err
+		}
+		if err := r.Revisions.Put(context.Background(), env); err != nil {
+			return err
+		}
+		inTxn, err := r.Revisions.ListByFamilyAndSubject(context.Background(), engineering.RevisionFamilyRequirement, subject)
+		if err != nil {
+			return err
+		}
+		if len(inTxn) != 1 {
+			t.Errorf("in-transaction ListByFamilyAndSubject = %d results, want 1 (the write just made in this Do)", len(inTxn))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = uow.Do(context.Background(), func(r application.Repositories) error {
+		afterCommit, err := r.Revisions.ListByFamilyAndSubject(context.Background(), engineering.RevisionFamilyRequirement, subject)
+		if err != nil {
+			return err
+		}
+		if len(afterCommit) != 1 {
+			t.Errorf("after commit, ListByFamilyAndSubject = %d results, want 1", len(afterCommit))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rollbackSubject := engineering.ArtifactSubjectKey("CAP-VIS-ROLLBACK")
+	rollbackKey, err := engineering.NewRevisionKey("REQ-VIS-ROLLBACK", "REV-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollbackEnv := mustRevisionEnvelopeWithSubject(t, rollbackKey, engineering.RevisionFamilyRequirement, rollbackSubject)
+	sentinel := errors.New("deliberate rollback")
+	err = uow.Do(context.Background(), func(r application.Repositories) error {
+		if err := r.Artifacts.Put(context.Background(), mustArtifactEnvelope(t, "REQ-VIS-ROLLBACK")); err != nil {
+			return err
+		}
+		if err := r.Revisions.Put(context.Background(), rollbackEnv); err != nil {
+			return err
+		}
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Errorf("err = %v, want it to match the sentinel unwrapped", err)
+	}
+
+	err = uow.Do(context.Background(), func(r application.Repositories) error {
+		afterRollback, err := r.Revisions.ListByFamilyAndSubject(context.Background(), engineering.RevisionFamilyRequirement, rollbackSubject)
+		if err != nil {
+			return err
+		}
+		if len(afterRollback) != 0 {
+			t.Errorf("after rollback, ListByFamilyAndSubject = %d results, want 0", len(afterRollback))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -157,10 +157,14 @@ func NewRevisionEnvelope(in RevisionEnvelopeInput) (RevisionEnvelope, error) {
 	}, nil
 }
 
-// Equal reports whether e and other have equal keys and byte-identical
-// payloads. Projections are not compared.
+// Equal reports whether e and other have equal keys, byte-identical
+// payloads, and equal SubjectKey. SubjectKey is persisted, observable
+// repository state; under AD-026 it participates in equality because it is
+// not always determined by Payload -- a content-free transition-record
+// revision (AD-014) projects a subject its own payload cannot carry. Every
+// other projection remains excluded, as before.
 func (e RevisionEnvelope) Equal(other RevisionEnvelope) bool {
-	return e.Key == other.Key && samePayload(e.Payload, other.Payload)
+	return e.Key == other.Key && samePayload(e.Payload, other.Payload) && e.SubjectKey == other.SubjectKey
 }
 
 // RecordEnvelope is the persistence and projection carrier for an immutable

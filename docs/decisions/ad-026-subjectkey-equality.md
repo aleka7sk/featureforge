@@ -2,11 +2,9 @@
 
 Status: Accepted
 Date: 2026-07-28
-Phase: M.5 (correction; specified, not yet implemented)
+Phase: M.5 (correction; implemented)
 
-Indexed in [the decision log](README.md). Implemented by **FF-017**, which has
-not yet been written; this decision precedes the code that depends on it, per
-CLAUDE.md.
+Indexed in [the decision log](README.md). Implemented by **FF-017**.
 
 ## Context
 
@@ -444,3 +442,45 @@ instant while naming different capabilities. This decision does not rest on
 that reachability: the contract permits the divergence, and a contract that
 permits silent state loss is worth correcting whether or not a current caller
 provokes it.
+
+## Implementation evidence
+
+FF-017 landed as specified, with no deviation from the option this decision
+selected.
+
+- `internal/engineering/envelope.go` — `RevisionEnvelope.Equal` now compares
+  `RevisionKey`, `Payload`, and `SubjectKey`. No signature changed on `Equal`,
+  the constructor, or any repository method; neither adapter's `Put`
+  implementation was edited, because both already dispatch conflict detection
+  through this one method.
+- `internal/infrastructure/contracttest/contract.go` — four subtests close
+  finding F-002: `RevisionSubjectBearingPutIsIdempotent`;
+  `RevisionSubjectKeyDifferenceConflicts` (subject A → B, empty → A, A →
+  empty, each asserting both the conflict error and that the originally
+  stored `SubjectKey` is unchanged after the rejected `Put`); and
+  `RevisionSubjectVisibilityAcrossTransactionBoundaries` (visible inside the
+  writing transaction, visible after commit, absent after rollback). All four
+  run identically against memory and PostgreSQL.
+- `internal/engineering/peos/projection_test.go` — closes the codec half of
+  finding F-003: `TestProjectionFidelity_EntryTransitionRevision` (new) and an
+  added assertion in `TestProjectionFidelity_TransitionRevision` confirm both
+  `BuildEntryAssignment` and `BuildTransition` populate the canonical
+  `SubjectKey`.
+- `internal/scenario/scenario_test.go` — closes the repository-discovery half
+  of finding F-003: `assertCanonicalEndState` (shared by
+  `TestCanonicalScenario` and `TestCanonicalScenarioPostgres`) now asserts
+  both of the canonical scenario's transition-record revisions are
+  discoverable via `ListByFamilyAndSubject`, and that an unrelated capability
+  subject returns none.
+- **Deliberate-violation evidence.** The `RevisionSubjectKeyDifferenceConflicts`
+  subtests were written and run against the pre-FF-017 `Equal` first: all
+  three failed with `err = <nil>, want ErrImmutableValueConflict`, the exact
+  failure F-001 predicted. `Equal` was then corrected and the same subtests
+  passed unchanged. Separately, `TestProjectionFidelity_EntryTransitionRevision`
+  was run with its expected subject deliberately mismatched (`CAP-1` →
+  `CAP-WRONG`), producing the expected mismatch failure, then reverted.
+- **No migration was required.** No stored representation, schema, or
+  repository signature changed.
+
+FF-017 is complete: every follow-up item this document's "Required
+implementation follow-up" section named has landed.

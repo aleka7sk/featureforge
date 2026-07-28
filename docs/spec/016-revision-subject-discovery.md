@@ -332,6 +332,18 @@ evidence; rejects a malformed subject; round-trips the value.
 **Done when.** `go test ./internal/engineering/...` passes and no other package
 compiles differently.
 
+**Corrected by AD-026 (FF-017), after this step's own landing.** The claim
+that `Equal` "compares key and payload only, and a projection is not
+identity" held for every projection at the time this step landed, but not
+universally: `SubjectKey` is not always determined by `Payload` — a
+content-free transition-record revision (AD-014) projects a subject its own
+payload cannot carry. `RevisionEnvelope.Equal` now also compares `SubjectKey`,
+and therefore participates in create-only conflict detection in both
+adapters. This text is left as originally written, per the decision log's own
+rule; see [AD-026](../decisions/README.md#ad-026--revisionenvelopesubjectkey-participates-in-semantic-equality)
+for the corrected statement, the architectural argument, and the
+implementation evidence.
+
 ### Step 2 — Repository interface addition
 
 **Affects.** `internal/application/ports.go`.
