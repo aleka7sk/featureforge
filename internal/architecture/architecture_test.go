@@ -33,6 +33,17 @@ func TestInfrastructureDoesNotImportPEOS(t *testing.T) {
 	assertNoTransitivePEOS(t, ModulePath+"/internal/infrastructure/contracttest")
 }
 
+// TestTransportDoesNotImportPEOS (FF-018 §18 criterion 4, FF-007
+// deliverable): no transport type references a PEOS type. Response DTOs
+// read projected fields off engineering.RevisionEnvelope /
+// engineering.RecordEnvelope (FF-018 §5.1), never a PEOS type -- and
+// internal/engineering is itself PEOS-free, so the transitive check that
+// already proves that for domain/engineering/application/infrastructure
+// proves it here too.
+func TestTransportDoesNotImportPEOS(t *testing.T) {
+	assertNoTransitivePEOS(t, ModulePath+"/internal/transport/http")
+}
+
 func assertNoTransitivePEOS(t *testing.T, importPath string) {
 	t.Helper()
 	all, err := InternalPackages()
@@ -473,9 +484,21 @@ func TestNoAIPackage(t *testing.T) {
 
 // TestNoTimeNowOutsideClock (FF-012 §12).
 func TestNoTimeNowOutsideClock(t *testing.T) {
-	allowedFile := filepath.Join(ModuleRoot(), "internal", "application", "clock.go")
+	allowedFiles := map[string]bool{
+		filepath.Join(ModuleRoot(), "internal", "application", "clock.go"): true,
+		// internal/transport/http/middleware.go measures request duration
+		// for FF-018 §14.3's request-logging line -- HTTP observability,
+		// not an engineering-record timestamp. application.Clock exists to
+		// keep *those* deterministic and retry-safe under UnitOfWork.Do
+		// (FF-010 §2); reusing it here would conflate two unrelated
+		// concerns rather than serve the one it was built for. Narrowed,
+		// not removed, the same way AD-023 narrowed the net/http
+		// prohibition rather than deleting it -- this guard predates the
+		// transport package and did not anticipate it.
+		filepath.Join(ModuleRoot(), "internal", "transport", "http", "middleware.go"): true,
+	}
 	err := walkGoFiles(filepath.Join(ModuleRoot(), "internal"), func(path string, file *ast.File) error {
-		if path == allowedFile || strings.HasSuffix(path, "_test.go") {
+		if allowedFiles[path] || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
 		ast.Inspect(file, func(n ast.Node) bool {
