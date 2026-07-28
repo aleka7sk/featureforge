@@ -55,3 +55,5 @@ Do not make architecture decisions silently. Record material decisions in the
 product specifications or in docs/decisions/README.md.
 
 Do not add abstractions before they are required by the approved vertical slice.
+
+When running in plan mode, the response is not displayed in the plan mode window but is shown as text so that it can be copied using /copy
