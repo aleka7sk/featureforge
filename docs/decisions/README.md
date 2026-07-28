@@ -747,10 +747,216 @@ of it. See [FF-014](../spec/014-postgresql-persistence.md).
 
 ---
 
+## AD-025 — `RevisionEnvelope` gains an optional subject projection, and revisions become discoverable by family and subject
+
+Status: Accepted
+Date: 2026-07-28
+Phase: M.5 (prerequisite change; specified, not yet implemented)
+
+**Context.** `RecordEnvelope` projects `SubjectKey`, and
+`RecordEnvelopeRepository.ListByKindAndSubject` searches on it, so decisions,
+executions, claims, and state assignments are discoverable from the value they
+are about. `RevisionEnvelope` projects no subject, and every revision-listing
+operation — `ListByArtifact` on revisions and on order metadata — requires the
+caller to already know the artifact identifier. Requirements and validation
+plans are revisions.
+
+The consequence is that no caller can enumerate the requirements governing a
+capability unless it was told their identifiers in advance. In M.3 and M.4 the
+only caller was `internal/scenario`, which created every record and held its
+identifiers as fixture constants, so the gap was invisible and the contract was
+correct for its callers. M.5 introduces a caller holding only a
+`FeatureCardID`.
+
+**HTTP exposed this; HTTP did not cause it.** The information was never
+projected. What changed is the arrival of a caller that cannot supply it. Two
+accepted acceptance criteria independently require the enumeration —
+FF-001 §3.4's Requirements screen exists to list requirements, and FF-001 §3.2
+requires an effective-requirement count and a per-requirement readiness
+rationale table.
+
+The full evidence is in
+[the M.5 contract investigation](../reports/m5-contract-investigation.md).
+
+**Decision.** Two additive changes, specified in
+[FF-016](../spec/016-revision-subject-discovery.md).
+
+1. `RevisionEnvelope` and `RevisionEnvelopeInput` gain
+   `SubjectKey string` — a projection written once by
+   `internal/engineering/peos` at record time, using the existing
+   `engineering.ArtifactSubjectKey` helper, answering one question: *which
+   capability Artifact is this revision about?*
+2. `RevisionEnvelopeRepository` gains one operation, mirroring the validated
+   `ListByKindAndSubject`:
+
+   ```go
+   ListByFamilyAndSubject(ctx context.Context, family engineering.RevisionFamily, subjectKey string) ([]engineering.RevisionEnvelope, error)
+   ```
+
+Semantics, in full in FF-016 §3–§4 and summarised here: three families define a
+subject (`requirement` from its Subject, `validation-plan` from its Scope,
+`transition-record` from its lifecycle Subject) and two do not (`capability` —
+the revision *is* the subject; `evidence` — it is about nothing). Absence means
+the family has no capability it is about, not that a value is missing or
+pending. A subject supplied for a family without subject semantics is rejected
+at construction, as is a malformed one, because a malformed projection fails
+silently rather than loudly. Existence of the referenced artifact is **not**
+verified at write time — AD-021 decided that for records, and extending it to
+revisions is a separate decision requiring its own evidence. After validation
+the persistence layer treats the value as opaque and compares it as an exact
+string. Results are ordered ascending by `RevisionKey.String()`; no match is an
+empty slice and never `ErrNotFound`; duplicates are impossible; an empty
+`subjectKey` argument returns nothing rather than enumerating subject-less
+revisions; and the operation never decodes a PEOS payload. Both adapters must
+exhibit identical observable behaviour, proven by the shared contract suite
+rather than asserted.
+
+**Rejected alternatives.**
+
+*1. Require HTTP callers to supply all revision artifact identifiers.*
+Rejected — it relocates the problem to a caller that also cannot answer it. A
+browser loading a feature page for the first time has no prior response to have
+learned them from, and the screen that would list them is the one being
+rendered. It also fails FF-001 §3.4 outright.
+
+*2. Derive requirements from claims or plan activity.* **Rejected as
+semantically invalid, not merely incomplete** — this is the most important
+rejection in this decision, because it is the alternative that looks correct.
+Claims project `CriterionKeys` as `requirement-revision:REQ-n/…`, so
+requirements appear derivable from the claims that cite them, using only
+existing projections and no forbidden capability.
+
+The counterexample is FF-011's `REQ-4`. It has **no plan activity** and **no
+claim** — FF-011 §5 lists it as "uncovered", and FF-011 §252 explains the
+intent: it exercises `incomplete` alongside `not-ready` so the readiness
+precedence rule "has both inputs present and is genuinely tested rather than
+assumed". Nothing cites `REQ-4`, so claim-derived discovery cannot see it.
+`REQ-4` would vanish from the discovered population, and its absence of a claim
+is precisely the fact readiness exists to report. Readiness would therefore
+report a **falsely complete** result: a requirement set that appears fully
+accounted for while silently omitting the only requirement nobody validated.
+
+A discovery method whose blind spot is exactly the population the query must
+report does not return a degraded answer. It returns a confidently wrong one.
+That is a correctness defect, not a limitation to document.
+
+*3. Decode every stored PEOS revision payload during queries.* Rejected — it
+requires importing the PEOS SDK outside `internal/engineering/peos`, violating
+AD-005, the project's most fundamental boundary. It is also impossible in
+practice: no repository operation enumerates revisions globally, so there is
+nothing to iterate.
+
+*4. Add an HTTP-only lookup registry.* Rejected — it creates a second source of
+truth for a relationship the engineering records already contain, outside the
+layer that owns engineering meaning, with no transaction covering it. It is a
+materialized projection in a different location, and it can disagree with the
+records. Contrary to AD-006 and to the PEOS consumer guide's warning against
+recording derived verdicts as authoritative state.
+
+*5. Add a new application query composed only from existing repositories.* This
+was the most attractive alternative and **cannot be written**. Such a query
+would need to call `Revisions.ListByArtifact(requirementArtifactID)` — which
+requires the answer as its input. Composition cannot create information the
+composed parts do not carry.
+
+*6. Denormalize broader requirement or readiness state.* Rejected — storing a
+requirement list or a readiness verdict is exactly the derived state AD-006
+forbids, and `TestNoDerivedStateOnFeatureCard` already fails the build if a
+`FeatureCard` grows such a field. A naming-convention scheme (`CAP-1` →
+`REQ-1…REQ-n`) was also rejected: it would make identifier *format*
+load-bearing, contradicting AD-003 and PEOS-002's prohibition on assuming
+identifiers carry structure. `RelationEnvelope` (AD-013) was rejected as
+disproportionate — an entire deferred construct to solve what one projected
+string solves.
+
+*What needs no change at all.* Decisions, executions, claims, and evidence are
+already discoverable using existing operations: a decision's subject is a
+capability revision, capability revisions are enumerable via `ListByArtifact`,
+and `ListByKindAndSubject` finds records from there; evidence is recoverable
+from the `EvidenceKeys` that claims and executions already project. Five of the
+seven identifier lists the M.5 queries need dissolve without any contract
+change. Only requirements and validation plans required this decision.
+
+**Consequences.** The change is **additive**: one optional field, one new
+method, no existing signature altered and no existing field's meaning changed.
+Existing consumers remain compatible — `ResolveCurrentRevision`,
+`ResolveReadiness`, the timeline, and both adapters' current behaviour are
+untouched, and `RevisionEnvelope.Equal` still compares key and payload only, so
+a projection cannot affect identity or conflict detection.
+
+**AD-005 is unaffected:** only `internal/engineering/peos` produces the value,
+from input it already holds, and no read path decodes anything.
+**AD-006 is unaffected:** the projection records a fact already inside the
+immutable payload, written once at record time, exactly as
+`RecordEnvelope.SubjectKey` has since M.3. No current-state answer, readiness
+verdict, or resolved revision is materialized; every derived query remains
+computed on read.
+
+The change **extends a projection pattern M.4 validated** rather than
+introducing a new direction — the M.4 architecture review §9.2 confirmed that
+repository contracts constrain observable behaviour rather than storage
+representation, and this is that principle applied to the envelope that lacked
+it. **Shared contract coverage is mandatory** for the same reason it was
+mandatory in M.4: a contract satisfied by two structurally different adapters
+is load-bearing, and one satisfied by a single adapter is merely a description
+of it. The subject is **optional rather than universally required** because two
+of the five families genuinely have none; forcing a value would make them state
+something false.
+
+Costs: one nullable column and one index in PostgreSQL, one filtered scan in
+memory, three subtests in the shared suite, and a permanent asymmetry with
+`RecordEnvelope.SubjectKey`, which is mandatory — recorded in FF-016 §3.4 so it
+reads as deliberate rather than inconsistent.
+
+**Migration and backfill.** For a fresh database the migration adds storage and
+an index; new writes populate the projection where it is defined. No backfill
+is required for the current POC, and the empty-database assumption is
+verifiable rather than assumed: no FeatureForge deployment exists, the test
+container's data directory is `tmpfs`, and every integration test creates and
+drops its own schema.
+
+For any existing database, SQL can add the column but **cannot reconstruct
+subjects** — that requires PEOS decoding, and **SQL must not decode PEOS**.
+This is already enforced rather than merely stated:
+`TestNoUpdateOrDeleteOnEngineeringTables` fails the build on
+`UPDATE revision_envelopes`, so a backfill migration is structurally
+prohibited while the additive `ALTER TABLE` is permitted. Any future
+reconstruction must be a one-off tool inside `internal/engineering/peos`, using
+that package's canonical decoders. This decision does not design it. A mixed
+population returns incomplete results without error (FF-016 §3.8, §7.3), which
+any such tool must treat as its acceptance criterion.
+
+**Architecture Freeze exception — and its limits.** The M.4 freeze requires,
+for reopening any frozen decision, "a working implementation that cannot
+satisfy the contract, a contract test that cannot be made to pass, or a
+reproducible failure the current design cannot express." The third is met: the
+current design **cannot express** the question "which requirements govern this
+capability?" The information exists inside each revision's payload, the only
+package permitted to read it may not be called from the query path that needs
+it, and no projection carries it outward. Every transport-level alternative was
+evaluated; one attractive alternative produces a reproducibly false result; the
+surviving change is the smallest additive extension of an existing validated
+abstraction.
+
+**This exception admits this decision only.** It does not license revisiting
+`UnitOfWork`, transaction semantics, the `SubjectKey` string representation
+(`refkeys.go` is unchanged), repository architecture generally, the PEOS
+integration boundary, AD-005, AD-006, or any other envelope contract. Evidence
+about revision subject discovery is evidence about revision subject discovery
+and nothing else. A future proposal to reopen an unrelated M.4 contract must
+produce its own evidence of comparable weight; it may not cite this decision as
+precedent for a lower bar.
+
+See [FF-016](../spec/016-revision-subject-discovery.md) for the binding
+contract and the implementation order.
+
+---
+
 ## Open questions
 
-None. Every material architecture decision for M.1 through M.4 is resolved.
-Questions deferred to a later phase, with the phase that owns them:
+None. Every material architecture decision for M.1 through M.4 is resolved, as
+is the one M.5 planning reopened on evidence (AD-025). Questions deferred to a
+later phase, with the phase that owns them:
 
 | Question | Owned by |
 |---|---|
@@ -758,6 +964,8 @@ Questions deferred to a later phase, with the phase that owns them:
 | Connection-pool sizing, timeouts, and retry tuning under load | M.5, with measurement |
 | Whether `RelationEnvelope` is ever required | Deferred until a relation is |
 | Random identity generation at the transport edge | M.5 |
+| Whether revision subject references should be existence-verified at write time | Deferred; AD-021 is the precedent that would govern it, and it needs its own evidence (FF-016 §3.6) |
+| Whether a subject backfill tool is ever required | Deferred until a durable FeatureForge database exists (FF-016 §7) |
 | Which patterns Belcanto reuses or redesigns | M.7 freeze artifacts |
 
 Resolved since M.1: canonical JSON serialization rules
@@ -771,3 +979,9 @@ Resolved in M.4: PostgreSQL schema and index design
 materialization question is deliberately *not* closed — M.4 added no
 materialized projection and no index beyond what correctness requires, which
 is the answer AD-006 asks for until there is evidence to the contrary.
+
+Decided in M.5 planning, not yet implemented: revision subject projection and
+discovery (AD-025, [FF-016](../spec/016-revision-subject-discovery.md)). The
+decision is accepted; the implementation is a prerequisite for the M.5 queries
+that need a complete requirement or validation-plan population, and must land
+before them.
