@@ -10,6 +10,22 @@ func newRouter(deps Dependencies) http.Handler {
 
 	mux.HandleFunc("GET /api/v1/projects", handleListProjects(deps))
 
+	// Command endpoints, in canonical-scenario order (FF-018 §16 step 6):
+	// project -> feature -> capability -> requirement -> decision -> plan
+	// -> run -> claim -> correction -> lifecycle.
+	mux.HandleFunc("POST /api/v1/projects", handleCreateProject(deps))
+	mux.HandleFunc("POST /api/v1/features", handleCreateFeature(deps))
+	mux.HandleFunc("POST /api/v1/capabilities", handleEstablishCapability(deps))
+	mux.HandleFunc("POST /api/v1/capabilities/{artifactID}/revisions", handleReviseCapability(deps))
+	mux.HandleFunc("POST /api/v1/capabilities/{artifactID}/acceptances", handleAcceptRevision(deps))
+	mux.HandleFunc("POST /api/v1/requirements", handleEstablishRequirement(deps))
+	mux.HandleFunc("POST /api/v1/decisions", handleRecordDecision(deps))
+	mux.HandleFunc("POST /api/v1/validation/plans", handleEstablishPlan(deps))
+	mux.HandleFunc("POST /api/v1/validation/runs", handleRecordRun(deps))
+	mux.HandleFunc("POST /api/v1/validation/claims", handleRecordClaim(deps))
+	mux.HandleFunc("POST /api/v1/validation/claims/corrections", handleCorrectClaim(deps))
+	mux.HandleFunc("POST /api/v1/capabilities/{artifactID}/lifecycle", handleAssignLifecycle(deps))
+
 	return withJSONNotFoundAndMethodNotAllowed(mux)
 }
 
