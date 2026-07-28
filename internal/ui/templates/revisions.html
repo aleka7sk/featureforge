@@ -52,13 +52,73 @@
     {{else}}
       {{template "empty-state" "No specification content stored for this revision."}}
     {{end}}
-    <div class="accept-form-slot" data-artifact-id="{{$.ArtifactID}}" data-revision-id="{{.RevisionID}}"></div>
+    <form class="command-form" method="post" action="/features/{{$.FeatureCardID}}/revisions/{{.RevisionID}}/acceptance">
+      <div class="field">
+        <label for="record-id-{{.RevisionID}}">Record ID</label>
+        <input type="text" id="record-id-{{.RevisionID}}" name="record_id" required>
+      </div>
+      <div class="field">
+        <label for="state-{{.RevisionID}}">Acceptance state</label>
+        <select id="state-{{.RevisionID}}" name="state" required>
+          <option value="accepted">Accepted</option>
+          <option value="withdrawn">Withdrawn</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="reason-{{.RevisionID}}">Reason</label>
+        <input type="text" id="reason-{{.RevisionID}}" name="reason">
+      </div>
+      <button type="submit">Record acceptance</button>
+    </form>
   </section>
   {{end}}
 
   <section class="panel" aria-labelledby="new-revision-heading">
     <h2 id="new-revision-heading">Add a revision</h2>
-    <div id="revision-form-slot"></div>
+    <form class="command-form" method="post" action="/features/{{.FeatureCardID}}/revisions">
+      <div class="field">
+        <label for="revision_id">Revision ID</label>
+        <input type="text" id="revision_id" name="revision_id" value="{{index .FormValues "revision_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" value="{{index .FormValues "title"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="problem_statement">Problem statement</label>
+        <textarea id="problem_statement" name="problem_statement" rows="3" required {{if .FormError}}aria-describedby="form-error"{{end}}>{{index .FormValues "problem_statement"}}</textarea>
+      </div>
+      <div class="field">
+        <label for="user_outcome">User outcome</label>
+        <textarea id="user_outcome" name="user_outcome" rows="2">{{index .FormValues "user_outcome"}}</textarea>
+      </div>
+      <div class="field">
+        <label for="functional_behaviours">Functional behaviours</label>
+        <p class="hint">One per line.</p>
+        <textarea id="functional_behaviours" name="functional_behaviours" rows="3">{{index .FormValues "functional_behaviours"}}</textarea>
+      </div>
+      <div class="field">
+        <label for="constraints">Constraints</label>
+        <p class="hint">One per line.</p>
+        <textarea id="constraints" name="constraints" rows="3">{{index .FormValues "constraints"}}</textarea>
+      </div>
+      <div class="field">
+        <label for="acceptance_criteria">Acceptance criteria</label>
+        <p class="hint">One per line, as "key: text".</p>
+        <textarea id="acceptance_criteria" name="acceptance_criteria" rows="3">{{index .FormValues "acceptance_criteria"}}</textarea>
+      </div>
+      <div class="field">
+        <label for="dependencies">Dependencies</label>
+        <p class="hint">One per line.</p>
+        <textarea id="dependencies" name="dependencies" rows="2">{{index .FormValues "dependencies"}}</textarea>
+      </div>
+      <div class="field">
+        <label for="open_questions">Open questions</label>
+        <p class="hint">One per line.</p>
+        <textarea id="open_questions" name="open_questions" rows="2">{{index .FormValues "open_questions"}}</textarea>
+      </div>
+      <button type="submit">Add revision</button>
+    </form>
   </section>
 </main>
 {{template "footer" .}}

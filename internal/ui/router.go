@@ -27,6 +27,20 @@ func newRouter(deps Dependencies) http.Handler {
 	mux.HandleFunc("GET /features/{featureCardID}/timeline", handleTimeline(deps))
 	mux.HandleFunc("GET /static/style.css", handleStaticCSS)
 
+	// Command forms (AD-028), one per command, in FF-011 canonical order.
+	mux.HandleFunc("POST /projects", handleCreateProject(deps))
+	mux.HandleFunc("POST /projects/{projectID}/features", handleCreateFeature(deps))
+	mux.HandleFunc("POST /features/{featureCardID}/capability", handleEstablishCapability(deps))
+	mux.HandleFunc("POST /features/{featureCardID}/lifecycle", handleAssignLifecycle(deps))
+	mux.HandleFunc("POST /features/{featureCardID}/revisions", handleReviseCapability(deps))
+	mux.HandleFunc("POST /features/{featureCardID}/revisions/{revisionID}/acceptance", handleAcceptRevision(deps))
+	mux.HandleFunc("POST /features/{featureCardID}/requirements", handleEstablishRequirement(deps))
+	mux.HandleFunc("POST /features/{featureCardID}/decisions", handleRecordDecision(deps))
+	mux.HandleFunc("POST /features/{featureCardID}/validation-plan", handleEstablishPlan(deps))
+	mux.HandleFunc("POST /features/{featureCardID}/validation-runs", handleRecordRun(deps))
+	mux.HandleFunc("POST /features/{featureCardID}/claims", handleRecordClaim(deps))
+	mux.HandleFunc("POST /features/{featureCardID}/claims/corrections", handleCorrectClaim(deps))
+
 	return withNotFound(mux)
 }
 

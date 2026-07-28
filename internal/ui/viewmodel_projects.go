@@ -13,8 +13,10 @@ type projectRow struct {
 
 // projectsPageData is templates/projects.html's shape.
 type projectsPageData struct {
-	PageTitle string
-	Projects  []projectRow
+	PageTitle  string
+	Projects   []projectRow
+	FormError  string
+	FormValues map[string]string
 }
 
 // apiProjectDTO mirrors internal/transport/http's projectDTO field for

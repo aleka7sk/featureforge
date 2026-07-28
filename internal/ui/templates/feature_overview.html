@@ -25,7 +25,57 @@
     {{else}}
       {{template "empty-state" "No capability specification established yet."}}
     {{end}}
-    <div id="capability-form-slot"></div>
+    {{if not .HasCapability}}
+    <h3>Establish the capability specification</h3>
+    <form class="command-form" method="post" action="/features/{{.FeatureCardID}}/capability">
+      <div class="field">
+        <label for="artifact_id">Artifact ID</label>
+        <input type="text" id="artifact_id" name="artifact_id" value="{{index .FormValues "artifact_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="revision_id">Revision ID</label>
+        <input type="text" id="revision_id" name="revision_id" value="{{index .FormValues "revision_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" value="{{index .FormValues "title"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="problem_statement">Problem statement</label>
+        <textarea id="problem_statement" name="problem_statement" rows="3" required {{if .FormError}}aria-describedby="form-error"{{end}}>{{index .FormValues "problem_statement"}}</textarea>
+      </div>
+      <div class="field">
+        <label for="user_outcome">User outcome</label>
+        <textarea id="user_outcome" name="user_outcome" rows="2">{{index .FormValues "user_outcome"}}</textarea>
+      </div>
+      <div class="field">
+        <label for="functional_behaviours">Functional behaviours</label>
+        <p class="hint">One per line.</p>
+        <textarea id="functional_behaviours" name="functional_behaviours" rows="3">{{index .FormValues "functional_behaviours"}}</textarea>
+      </div>
+      <div class="field">
+        <label for="constraints">Constraints</label>
+        <p class="hint">One per line.</p>
+        <textarea id="constraints" name="constraints" rows="3">{{index .FormValues "constraints"}}</textarea>
+      </div>
+      <div class="field">
+        <label for="acceptance_criteria">Acceptance criteria</label>
+        <p class="hint">One per line, as "key: text".</p>
+        <textarea id="acceptance_criteria" name="acceptance_criteria" rows="3">{{index .FormValues "acceptance_criteria"}}</textarea>
+      </div>
+      <div class="field">
+        <label for="dependencies">Dependencies</label>
+        <p class="hint">One per line.</p>
+        <textarea id="dependencies" name="dependencies" rows="2">{{index .FormValues "dependencies"}}</textarea>
+      </div>
+      <div class="field">
+        <label for="open_questions">Open questions</label>
+        <p class="hint">One per line.</p>
+        <textarea id="open_questions" name="open_questions" rows="2">{{index .FormValues "open_questions"}}</textarea>
+      </div>
+      <button type="submit">Establish capability</button>
+    </form>
+    {{end}}
   </section>
 
   <section class="panel" aria-labelledby="readiness-heading">
@@ -60,7 +110,42 @@
     {{else}}
       {{template "empty-state" "No lifecycle state assigned yet."}}
     {{end}}
-    <div id="lifecycle-form-slot"></div>
+    <h3>Assign a lifecycle state</h3>
+    <form class="command-form" method="post" action="/features/{{.FeatureCardID}}/lifecycle">
+      <div class="field">
+        <label for="assignment_id">Assignment ID</label>
+        <input type="text" id="assignment_id" name="assignment_id" value="{{index .FormValues "assignment_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="state">State</label>
+        <input type="text" id="state" name="state" value="{{index .FormValues "state"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="is_entry">
+          <input type="checkbox" id="is_entry" name="is_entry" value="true" {{if eq (index .FormValues "is_entry") "true"}}checked{{end}}>
+          This is the entry assignment (the feature's first lifecycle state)
+        </label>
+      </div>
+      <div class="field">
+        <label for="transition_record_artifact_id">Transition record artifact ID</label>
+        <p class="hint">Always required.</p>
+        <input type="text" id="transition_record_artifact_id" name="transition_record_artifact_id" value="{{index .FormValues "transition_record_artifact_id"}}">
+      </div>
+      <div class="field">
+        <label for="transition_record_revision_id">Transition record revision ID</label>
+        <input type="text" id="transition_record_revision_id" name="transition_record_revision_id" value="{{index .FormValues "transition_record_revision_id"}}">
+      </div>
+      <div class="field">
+        <label for="transition_key">Transition key</label>
+        <p class="hint">Required unless this is the entry assignment.</p>
+        <input type="text" id="transition_key" name="transition_key" value="{{index .FormValues "transition_key"}}">
+      </div>
+      <div class="field">
+        <label for="from_assignment_id">From assignment ID</label>
+        <input type="text" id="from_assignment_id" name="from_assignment_id" value="{{index .FormValues "from_assignment_id"}}">
+      </div>
+      <button type="submit">Assign lifecycle state</button>
+    </form>
   </section>
 
   <section class="panel" aria-labelledby="history-heading">

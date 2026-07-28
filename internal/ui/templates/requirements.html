@@ -31,7 +31,21 @@
 
   <section class="panel" aria-labelledby="new-requirement-heading">
     <h2 id="new-requirement-heading">Add a requirement</h2>
-    <div id="requirement-form-slot"></div>
+    <form class="command-form" method="post" action="/features/{{.FeatureCardID}}/requirements">
+      <div class="field">
+        <label for="artifact_id">Artifact ID</label>
+        <input type="text" id="artifact_id" name="artifact_id" value="{{index .FormValues "artifact_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="revision_id">Revision ID</label>
+        <input type="text" id="revision_id" name="revision_id" value="{{index .FormValues "revision_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="statement">Statement</label>
+        <textarea id="statement" name="statement" rows="3" required {{if .FormError}}aria-describedby="form-error"{{end}}>{{index .FormValues "statement"}}</textarea>
+      </div>
+      <button type="submit">Add requirement</button>
+    </form>
   </section>
 </main>
 {{template "footer" .}}

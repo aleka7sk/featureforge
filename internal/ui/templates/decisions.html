@@ -43,7 +43,53 @@
 
   <section class="panel" aria-labelledby="new-decision-heading">
     <h2 id="new-decision-heading">Record a decision</h2>
-    <div id="decision-form-slot"></div>
+    <form class="command-form" method="post" action="/features/{{.FeatureCardID}}/decisions">
+      <div class="field">
+        <label for="decision_id">Decision ID</label>
+        <input type="text" id="decision_id" name="decision_id" value="{{index .FormValues "decision_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="question">Question</label>
+        <textarea id="question" name="question" rows="2" required {{if .FormError}}aria-describedby="form-error"{{end}}>{{index .FormValues "question"}}</textarea>
+      </div>
+      <div class="field">
+        <label for="outcome_statement">Outcome</label>
+        <textarea id="outcome_statement" name="outcome_statement" rows="3" required {{if .FormError}}aria-describedby="form-error"{{end}}>{{index .FormValues "outcome_statement"}}</textarea>
+      </div>
+      <div class="field">
+        <label for="alternatives">Alternatives considered</label>
+        <p class="hint">One per line.</p>
+        <textarea id="alternatives" name="alternatives" rows="3">{{index .FormValues "alternatives"}}</textarea>
+      </div>
+      <div class="field">
+        <label for="evidence_artifact_id">Evidence artifact ID</label>
+        <input type="text" id="evidence_artifact_id" name="evidence_artifact_id" value="{{index .FormValues "evidence_artifact_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="evidence_revision_id">Evidence revision ID</label>
+        <input type="text" id="evidence_revision_id" name="evidence_revision_id" value="{{index .FormValues "evidence_revision_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="assumptions">Assumptions</label>
+        <p class="hint">One per line.</p>
+        <textarea id="assumptions" name="assumptions" rows="2">{{index .FormValues "assumptions"}}</textarea>
+      </div>
+      <div class="field">
+        <label for="constraints">Constraints</label>
+        <p class="hint">One per line.</p>
+        <textarea id="constraints" name="constraints" rows="2">{{index .FormValues "constraints"}}</textarea>
+      </div>
+      <div class="field">
+        <label for="uncertainties">Uncertainties</label>
+        <p class="hint">One per line.</p>
+        <textarea id="uncertainties" name="uncertainties" rows="2">{{index .FormValues "uncertainties"}}</textarea>
+      </div>
+      <div class="field">
+        <label for="rationale">Rationale</label>
+        <textarea id="rationale" name="rationale" rows="3">{{index .FormValues "rationale"}}</textarea>
+      </div>
+      <button type="submit">Record decision</button>
+    </form>
   </section>
 </main>
 {{template "footer" .}}

@@ -31,7 +31,21 @@
 
   <section class="panel" aria-labelledby="new-feature-heading">
     <h2 id="new-feature-heading">Create a feature card</h2>
-    <div id="feature-form-slot"></div>
+    <form class="command-form" method="post" action="/projects/{{.ProjectID}}/features">
+      <div class="field">
+        <label for="feature_card_id">Feature card ID</label>
+        <input type="text" id="feature_card_id" name="feature_card_id" value="{{index .FormValues "feature_card_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" value="{{index .FormValues "title"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="description">Description</label>
+        <textarea id="description" name="description" rows="3" {{if .FormError}}aria-describedby="form-error"{{end}}>{{index .FormValues "description"}}</textarea>
+      </div>
+      <button type="submit">Create feature card</button>
+    </form>
   </section>
 </main>
 {{template "footer" .}}

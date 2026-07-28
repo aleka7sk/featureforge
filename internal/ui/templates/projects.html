@@ -23,6 +23,22 @@
     {{template "empty-state" "No projects yet."}}
     {{end}}
   </section>
+
+  <section class="panel" aria-labelledby="new-project-heading">
+    <h2 id="new-project-heading">Create a project</h2>
+    {{template "error-notice" .FormError}}
+    <form class="command-form" method="post" action="/projects">
+      <div class="field">
+        <label for="project_id">Project ID</label>
+        <input type="text" id="project_id" name="project_id" value="{{index .FormValues "project_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" value="{{index .FormValues "name"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <button type="submit">Create project</button>
+    </form>
+  </section>
 </main>
 {{template "footer" .}}
 {{end}}

@@ -24,7 +24,25 @@
     {{else}}
       {{template "empty-state" "No validation plan established yet."}}
     {{end}}
-    <div id="plan-form-slot"></div>
+    {{if not .PlanFound}}
+    <h3>Establish a validation plan</h3>
+    <form class="command-form" method="post" action="/features/{{.FeatureCardID}}/validation-plan">
+      <div class="field">
+        <label for="plan_artifact_id">Plan artifact ID</label>
+        <input type="text" id="plan_artifact_id" name="artifact_id" value="{{index .FormValues "artifact_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="plan_revision_id">Plan revision ID</label>
+        <input type="text" id="plan_revision_id" name="revision_id" value="{{index .FormValues "revision_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="activities">Activities</label>
+        <p class="hint">One per line, as "key|method|outcome interpretation|requirement artifact ID|requirement revision ID|expected evidence (comma-separated)".</p>
+        <textarea id="activities" name="activities" rows="4" required {{if .FormError}}aria-describedby="form-error"{{end}}>{{index .FormValues "activities"}}</textarea>
+      </div>
+      <button type="submit">Establish plan</button>
+    </form>
+    {{end}}
   </section>
 
   <section class="panel" aria-labelledby="executions-heading">
@@ -42,7 +60,38 @@
     {{else}}
     {{template "empty-state" "No executions recorded yet."}}
     {{end}}
-    <div id="run-form-slot"></div>
+    <h3>Record a validation run</h3>
+    <form class="command-form" method="post" action="/features/{{.FeatureCardID}}/validation-runs">
+      <div class="field">
+        <label for="execution_id">Execution ID</label>
+        <input type="text" id="execution_id" name="execution_id" value="{{index .FormValues "execution_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="activity_key">Activity key</label>
+        <input type="text" id="activity_key" name="activity_key" value="{{index .FormValues "activity_key"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="run_method">Method</label>
+        <input type="text" id="run_method" name="method" value="{{index .FormValues "method"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="outcome">Outcome</label>
+        <input type="text" id="outcome" name="outcome" value="{{index .FormValues "outcome"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="run_evidence_artifact_id">Evidence artifact ID</label>
+        <input type="text" id="run_evidence_artifact_id" name="evidence_artifact_id" value="{{index .FormValues "evidence_artifact_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="run_evidence_revision_id">Evidence revision ID</label>
+        <input type="text" id="run_evidence_revision_id" name="evidence_revision_id" value="{{index .FormValues "evidence_revision_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="evidence_locator">Evidence locator</label>
+        <input type="text" id="evidence_locator" name="evidence_locator" value="{{index .FormValues "evidence_locator"}}">
+      </div>
+      <button type="submit">Record run</button>
+    </form>
   </section>
 
   <section class="panel" aria-labelledby="claims-heading">
@@ -75,8 +124,99 @@
     {{else}}
     {{template "empty-state" "No requirements to claim against yet."}}
     {{end}}
-    <div id="claim-form-slot"></div>
-    <div id="correction-form-slot"></div>
+
+    <h3>Record a claim</h3>
+    <form class="command-form" method="post" action="/features/{{.FeatureCardID}}/claims">
+      <div class="field">
+        <label for="claim_id">Claim ID</label>
+        <input type="text" id="claim_id" name="claim_id" value="{{index .FormValues "claim_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="requirement_artifact_id">Requirement artifact ID</label>
+        <input type="text" id="requirement_artifact_id" name="requirement_artifact_id" value="{{index .FormValues "requirement_artifact_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="requirement_revision_id">Requirement revision ID</label>
+        <input type="text" id="requirement_revision_id" name="requirement_revision_id" value="{{index .FormValues "requirement_revision_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="claim_outcome">Outcome</label>
+        <input type="text" id="claim_outcome" name="outcome" value="{{index .FormValues "outcome"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="claim_method">Method</label>
+        <input type="text" id="claim_method" name="method" value="{{index .FormValues "method"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="claim_evidence_artifact_id">Evidence artifact ID</label>
+        <input type="text" id="claim_evidence_artifact_id" name="evidence_artifact_id" value="{{index .FormValues "evidence_artifact_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="claim_evidence_revision_id">Evidence revision ID</label>
+        <input type="text" id="claim_evidence_revision_id" name="evidence_revision_id" value="{{index .FormValues "evidence_revision_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="claim_execution_id">Execution ID</label>
+        <input type="text" id="claim_execution_id" name="execution_id" value="{{index .FormValues "execution_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="claim_reasoning">Reasoning</label>
+        <textarea id="claim_reasoning" name="reasoning" rows="2">{{index .FormValues "reasoning"}}</textarea>
+      </div>
+      <button type="submit">Record claim</button>
+    </form>
+
+    <h3>Correct a claim</h3>
+    <form class="command-form" method="post" action="/features/{{.FeatureCardID}}/claims/corrections">
+      <div class="field">
+        <label for="correcting_claim_id">New claim ID</label>
+        <input type="text" id="correcting_claim_id" name="claim_id" value="{{index .FormValues "correcting_claim_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="correction_target">Claim being corrected</label>
+        <input type="text" id="correction_target" name="correction_target" value="{{index .FormValues "correction_target"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="correction_kind">Correction kind</label>
+        <select id="correction_kind" name="correction_kind" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+          <option value="correct">Correct</option>
+          <option value="invalidate">Invalidate</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="correction_requirement_artifact_id">Requirement artifact ID</label>
+        <input type="text" id="correction_requirement_artifact_id" name="requirement_artifact_id" value="{{index .FormValues "correction_requirement_artifact_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="correction_requirement_revision_id">Requirement revision ID</label>
+        <input type="text" id="correction_requirement_revision_id" name="requirement_revision_id" value="{{index .FormValues "correction_requirement_revision_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="correction_outcome">Outcome</label>
+        <input type="text" id="correction_outcome" name="outcome" value="{{index .FormValues "correction_outcome"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="correction_method">Method</label>
+        <input type="text" id="correction_method" name="method" value="{{index .FormValues "correction_method"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="correction_evidence_artifact_id">Evidence artifact ID</label>
+        <input type="text" id="correction_evidence_artifact_id" name="evidence_artifact_id" value="{{index .FormValues "correction_evidence_artifact_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="correction_evidence_revision_id">Evidence revision ID</label>
+        <input type="text" id="correction_evidence_revision_id" name="evidence_revision_id" value="{{index .FormValues "correction_evidence_revision_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="correction_execution_id">Execution ID</label>
+        <input type="text" id="correction_execution_id" name="execution_id" value="{{index .FormValues "correction_execution_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="correction_reasoning">Reasoning</label>
+        <textarea id="correction_reasoning" name="reasoning" rows="2">{{index .FormValues "correction_reasoning"}}</textarea>
+      </div>
+      <button type="submit">Correct claim</button>
+    </form>
   </section>
 </main>
 {{template "footer" .}}
