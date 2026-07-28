@@ -423,35 +423,69 @@ func allPackagesIncludingCmd(t *testing.T) []PackageInfo {
 }
 
 // TestOnlyTransportAndCommandImportNetHTTP (AD-023): net/http is permitted
-// only in the HTTP transport package and the cmd composition root that
-// builds the server around it. Replaces the net/http half of the former
-// TestNoHTTPDatabaseUIOrAIPackage with a named-holder test, mirroring
-// TestOnlyIntegrationPackageImportsPEOS and
+// only in the HTTP transport package, the UI package (FF-021, which speaks
+// to the API in-process over net/http per AD-028), and the cmd composition
+// root that builds the server around both. Replaces the net/http half of
+// the former TestNoHTTPDatabaseUIOrAIPackage with a named-holder test,
+// mirroring TestOnlyIntegrationPackageImportsPEOS and
 // TestOnlyPostgresInfrastructureImportsDriver.
 func TestOnlyTransportAndCommandImportNetHTTP(t *testing.T) {
 	all := allPackagesIncludingCmd(t)
 	allowed := map[string]bool{
 		ModulePath + "/internal/transport/http": true,
+		ModulePath + "/internal/ui":             true,
 		ModulePath + "/cmd/featureforge":        true,
 	}
 	for _, p := range all {
 		for _, imp := range p.Imports {
 			if imp == "net/http" && !allowed[p.ImportPath] {
-				t.Errorf("%s imports net/http, which only internal/transport/http and cmd/featureforge may import (AD-023)", p.ImportPath)
+				t.Errorf("%s imports net/http, which only internal/transport/http, internal/ui, and cmd/featureforge may import (AD-023)", p.ImportPath)
 			}
 		}
 	}
 }
 
 // TestOnlyUIImportsHTMLTemplate (AD-023): html/template is reserved for the
-// Phase B UI package. No holder exists yet in Phase A, so this test
-// currently asserts absence everywhere.
+// Phase B UI package, internal/ui (FF-021). Narrowed from "forbidden
+// everywhere" now that the reserved holder exists; cmd/featureforge
+// composes the UI but does not render templates itself, so it is not a
+// permitted holder.
 func TestOnlyUIImportsHTMLTemplate(t *testing.T) {
 	all := allPackagesIncludingCmd(t)
+	allowed := map[string]bool{ModulePath + "/internal/ui": true}
 	for _, p := range all {
 		for _, imp := range p.Imports {
-			if imp == "html/template" {
-				t.Errorf("%s imports html/template; no Phase A package may (AD-023, reserved for the Phase B UI package)", p.ImportPath)
+			if imp == "html/template" && !allowed[p.ImportPath] {
+				t.Errorf("%s imports html/template, which only internal/ui may import (AD-023)", p.ImportPath)
+			}
+		}
+	}
+}
+
+// TestUIDoesNotImportPEOS (AD-005, FF-021): internal/ui speaks to the
+// engineering model only through the existing HTTP API, in-process
+// (AD-028), never through PEOS directly.
+func TestUIDoesNotImportPEOS(t *testing.T) {
+	assertNoTransitivePEOS(t, ModulePath+"/internal/ui")
+}
+
+// TestUIDoesNotImportApplicationOrInfrastructure (FF-021 §2): internal/ui's
+// AD-028 write path makes every other internal/ boundary structurally
+// unreachable, not just test-enforced -- the UI holds no engineering rule
+// and reaches no repository, so it should import nothing under internal/
+// at all except itself.
+func TestUIDoesNotImportApplicationOrInfrastructure(t *testing.T) {
+	all, err := InternalPackages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range all {
+		if p.ImportPath != ModulePath+"/internal/ui" && !strings.HasPrefix(p.ImportPath, ModulePath+"/internal/ui/") {
+			continue
+		}
+		for _, imp := range p.Imports {
+			if strings.HasPrefix(imp, ModulePath+"/internal/") && imp != ModulePath+"/internal/ui" && !strings.HasPrefix(imp, ModulePath+"/internal/ui/") {
+				t.Errorf("%s imports %s; internal/ui must import nothing else under internal/ (FF-021 §2, AD-028)", p.ImportPath, imp)
 			}
 		}
 	}
