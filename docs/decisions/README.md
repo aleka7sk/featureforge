@@ -973,6 +973,22 @@ contract and the implementation order.
 
 ---
 
+## AD-026 — `RevisionEnvelope.SubjectKey` participates in semantic equality
+
+Status: Accepted
+Date: 2026-07-28
+Phase: M.5 (correction; specified, not yet implemented)
+
+Recorded in [ad-026-subjectkey-equality.md](ad-026-subjectkey-equality.md).
+
+A projection may be excluded from semantic equality only when it is fully
+determined by fields that do participate in equality. `SubjectKey` is not, for
+the content-free entry-assignment revision, so it joins `RevisionKey` and
+`Payload` in `RevisionEnvelope.Equal` and therefore in create-only conflict
+detection. Corrects one consequence stated in AD-025; supersedes nothing.
+
+---
+
 ## Open questions
 
 None. Every material architecture decision for M.1 through M.4 is resolved, as
