@@ -8,7 +8,14 @@ import "net/http"
 func newRouter(deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 
+	// Query endpoints (FF-018 §3.2).
 	mux.HandleFunc("GET /api/v1/projects", handleListProjects(deps))
+	mux.HandleFunc("GET /api/v1/projects/{projectID}/features", handleListFeatures(deps))
+	mux.HandleFunc("GET /api/v1/features/{featureCardID}", handleGetFeature(deps))
+	mux.HandleFunc("GET /api/v1/features/{featureCardID}/state", handleGetFeatureState(deps))
+	mux.HandleFunc("GET /api/v1/features/{featureCardID}/timeline", handleGetFeatureTimeline(deps))
+	mux.HandleFunc("GET /api/v1/capabilities/{artifactID}/revisions", handleListCapabilityRevisions(deps))
+	mux.HandleFunc("GET /api/v1/capabilities/{artifactID}/revisions/{revisionID}", handleGetCapabilityRevision(deps))
 
 	// Command endpoints, in canonical-scenario order (FF-018 §16 step 6):
 	// project -> feature -> capability -> requirement -> decision -> plan
