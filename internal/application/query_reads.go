@@ -50,10 +50,22 @@ func ListFeaturesByProject(ctx context.Context, uow UnitOfWork, projectID domain
 	return result, nil
 }
 
-// CapabilityRevisionsResult lists every revision of a capability alongside
-// its resolved current revision (FF-018 §3.2, Q6).
+// RevisionWithContent pairs a capability revision envelope with its
+// structured content (FF-020 §2 class A, FF-001 §3.3: "full specification
+// content per revision"). HasContent is false, with no error, when no
+// content was ever stored for this revision -- an empty state, not an
+// error; every capability revision this module's own commands create does
+// store content, so absence means a revision from outside that path.
+type RevisionWithContent struct {
+	Revision   engineering.RevisionEnvelope
+	Content    engineering.CapabilitySpecificationContent
+	HasContent bool
+}
+
+// CapabilityRevisionsResult lists every revision of a capability, each with
+// its content, alongside its resolved current revision (FF-018 §3.2, Q6).
 type CapabilityRevisionsResult struct {
-	Revisions []engineering.RevisionEnvelope
+	Revisions []RevisionWithContent
 	Current   CurrentRevisionResult
 }
 
@@ -66,11 +78,19 @@ func GetCapabilityRevisions(ctx context.Context, uow UnitOfWork, artifactID stri
 		if err != nil {
 			return err
 		}
+		withContent := make([]RevisionWithContent, 0, len(revisions))
+		for _, rev := range revisions {
+			content, found, err := r.StructuredContent.Get(ctx, rev.Key)
+			if err != nil {
+				return err
+			}
+			withContent = append(withContent, RevisionWithContent{Revision: rev, Content: content, HasContent: found})
+		}
 		current, err := ResolveCurrentRevision(ctx, r, artifactID)
 		if err != nil {
 			return err
 		}
-		result = CapabilityRevisionsResult{Revisions: revisions, Current: current}
+		result = CapabilityRevisionsResult{Revisions: withContent, Current: current}
 		return nil
 	})
 	if err != nil {
@@ -79,13 +99,14 @@ func GetCapabilityRevisions(ctx context.Context, uow UnitOfWork, artifactID stri
 	return result, nil
 }
 
-// GetCapabilityRevision fetches exactly one revision by key (FF-018 §6.5,
-// Q7). Found is false, with no error, when it does not exist -- the
-// handler maps that to 404 directly (FF-018 §3.2); this function does not
-// manufacture ErrNotFound.
-func GetCapabilityRevision(ctx context.Context, uow UnitOfWork, key engineering.RevisionKey) (engineering.RevisionEnvelope, bool, error) {
+// GetCapabilityRevision fetches exactly one revision by key, with its
+// content (FF-018 §6.5, Q7; FF-020 §2 class A). Found is false, with no
+// error, when the revision itself does not exist -- the handler maps that
+// to 404 directly (FF-018 §3.2); this function does not manufacture
+// ErrNotFound.
+func GetCapabilityRevision(ctx context.Context, uow UnitOfWork, key engineering.RevisionKey) (RevisionWithContent, bool, error) {
 	var (
-		result engineering.RevisionEnvelope
+		result RevisionWithContent
 		found  bool
 	)
 	err := uow.Do(ctx, func(r Repositories) error {
@@ -93,11 +114,18 @@ func GetCapabilityRevision(ctx context.Context, uow UnitOfWork, key engineering.
 		if err != nil {
 			return err
 		}
-		result, found = env, ok
+		if !ok {
+			return nil
+		}
+		content, hasContent, err := r.StructuredContent.Get(ctx, key)
+		if err != nil {
+			return err
+		}
+		result, found = RevisionWithContent{Revision: env, Content: content, HasContent: hasContent}, true
 		return nil
 	})
 	if err != nil {
-		return engineering.RevisionEnvelope{}, false, err
+		return RevisionWithContent{}, false, err
 	}
 	return result, found, nil
 }
@@ -110,11 +138,12 @@ type FeatureOverviewResult struct {
 }
 
 // GetFeatureOverview composes FeatureOverviewResult for a caller holding
-// only a FeatureCardID (FF-018 §6.4, Q3).
-func GetFeatureOverview(ctx context.Context, uow UnitOfWork, featureCardID domain.FeatureCardID) (FeatureOverviewResult, error) {
+// only a FeatureCardID (FF-018 §6.4, Q3). projector decodes the FF-020
+// display content GetFeatureEngineeringState now renders.
+func GetFeatureOverview(ctx context.Context, uow UnitOfWork, projector EngineeringProjector, featureCardID domain.FeatureCardID) (FeatureOverviewResult, error) {
 	var result FeatureOverviewResult
 	err := uow.Do(ctx, func(r Repositories) error {
-		card, state, err := resolveFeatureCardAndState(ctx, r, featureCardID)
+		card, state, err := resolveFeatureCardAndState(ctx, r, projector, featureCardID)
 		if err != nil {
 			return err
 		}
@@ -131,11 +160,12 @@ func GetFeatureOverview(ctx context.Context, uow UnitOfWork, featureCardID domai
 // a caller holding only a FeatureCardID (FF-018 §6.4, Q4). A card with no
 // linked capability yields a well-formed, empty-but-Incomplete state, not
 // an error -- the same fallback GetFeatureEngineeringState already applies
-// when no current revision is found.
-func GetFeatureEngineeringStateForCard(ctx context.Context, uow UnitOfWork, featureCardID domain.FeatureCardID) (EngineeringStateResult, error) {
+// when no current revision is found. projector decodes the FF-020 display
+// content GetFeatureEngineeringState now renders.
+func GetFeatureEngineeringStateForCard(ctx context.Context, uow UnitOfWork, projector EngineeringProjector, featureCardID domain.FeatureCardID) (EngineeringStateResult, error) {
 	var result EngineeringStateResult
 	err := uow.Do(ctx, func(r Repositories) error {
-		_, state, err := resolveFeatureCardAndState(ctx, r, featureCardID)
+		_, state, err := resolveFeatureCardAndState(ctx, r, projector, featureCardID)
 		if err != nil {
 			return err
 		}
@@ -187,7 +217,7 @@ func GetFeatureTimelineForCard(ctx context.Context, uow UnitOfWork, featureCardI
 // resolveFeatureCardAndState is shared by GetFeatureOverview and
 // GetFeatureEngineeringStateForCard so the card lookup and discovery
 // sequence exists exactly once (FF-018 §6.4 steps 1-7).
-func resolveFeatureCardAndState(ctx context.Context, repos Repositories, featureCardID domain.FeatureCardID) (domain.FeatureCard, EngineeringStateResult, error) {
+func resolveFeatureCardAndState(ctx context.Context, repos Repositories, projector EngineeringProjector, featureCardID domain.FeatureCardID) (domain.FeatureCard, EngineeringStateResult, error) {
 	card, found, err := repos.FeatureCards.Get(ctx, featureCardID)
 	if err != nil {
 		return domain.FeatureCard{}, EngineeringStateResult{}, err
@@ -201,10 +231,11 @@ func resolveFeatureCardAndState(ctx context.Context, repos Repositories, feature
 	if err != nil {
 		return domain.FeatureCard{}, EngineeringStateResult{}, err
 	}
-	state, err := GetFeatureEngineeringState(ctx, repos, EngineeringStateInput{
+	state, err := GetFeatureEngineeringState(ctx, repos, projector, EngineeringStateInput{
 		CapabilityArtifactID:   artifactID,
 		RequirementArtifactIDs: components.requirementArtifactIDs,
 		DecisionIDs:            components.decisionIDs,
+		PlanArtifactID:         components.planArtifactID,
 	})
 	if err != nil {
 		return domain.FeatureCard{}, EngineeringStateResult{}, err

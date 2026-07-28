@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/aleka7sk/featureforge/internal/application"
+	"github.com/aleka7sk/featureforge/internal/engineering/peos"
 	"github.com/aleka7sk/featureforge/internal/infrastructure/memory"
 	transporthttp "github.com/aleka7sk/featureforge/internal/transport/http"
 )
@@ -17,8 +18,9 @@ import (
 // real application stack, not a mocked one, per FF-018 §18.1.
 func newTestHandler() http.Handler {
 	return transporthttp.NewHandler(transporthttp.Dependencies{
-		UOW:   memory.NewUnitOfWork(memory.NewStore()),
-		Clock: application.SystemClock{},
+		UOW:       memory.NewUnitOfWork(memory.NewStore()),
+		Projector: peos.NewRecorder(),
+		Clock:     application.SystemClock{},
 	})
 }
 

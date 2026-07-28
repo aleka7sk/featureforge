@@ -27,9 +27,10 @@ import (
 // calls, which only a controlled clock can guarantee.
 func newTestDeps() transporthttp.Dependencies {
 	return transporthttp.Dependencies{
-		UOW:      memory.NewUnitOfWork(memory.NewStore()),
-		Recorder: peos.NewRecorder(),
-		Clock:    application.NewFixedClock(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)),
+		UOW:       memory.NewUnitOfWork(memory.NewStore()),
+		Recorder:  peos.NewRecorder(),
+		Projector: peos.NewRecorder(),
+		Clock:     application.NewFixedClock(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)),
 	}
 }
 

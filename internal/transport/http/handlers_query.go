@@ -57,7 +57,7 @@ func handleGetFeature(deps Dependencies) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		overview, err := application.GetFeatureOverview(r.Context(), deps.UOW, featureCardID)
+		overview, err := application.GetFeatureOverview(r.Context(), deps.UOW, deps.Projector, featureCardID)
 		if err != nil {
 			writeAppError(w, r, deps, err)
 			return
@@ -76,7 +76,7 @@ func handleGetFeatureState(deps Dependencies) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		state, err := application.GetFeatureEngineeringStateForCard(r.Context(), deps.UOW, featureCardID)
+		state, err := application.GetFeatureEngineeringStateForCard(r.Context(), deps.UOW, deps.Projector, featureCardID)
 		if err != nil {
 			writeAppError(w, r, deps, err)
 			return
@@ -120,10 +120,10 @@ func handleListCapabilityRevisions(deps Dependencies) http.HandlerFunc {
 		revisions := make([]revisionDTO, 0, len(result.Revisions))
 		for _, rev := range result.Revisions {
 			sequence := 0
-			if result.Current.Found && rev.Key == result.Current.Revision.Key {
+			if result.Current.Found && rev.Revision.Key == result.Current.Revision.Key {
 				sequence = result.Current.Sequence
 			}
-			revisions = append(revisions, mapRevisionDTO(rev, sequence))
+			revisions = append(revisions, mapRevisionWithContentDTO(rev.Revision, rev.Content, rev.HasContent, sequence))
 		}
 		data := capabilityRevisionsResponse{Revisions: revisions, Current: mapCurrentRevisionDTO(result.Current)}
 		writeJSON(w, http.StatusOK, data, mapResolutionRationaleDTO(result.Current.Rationale))
@@ -149,7 +149,7 @@ func handleGetCapabilityRevision(deps Dependencies) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 			return
 		}
-		env, found, err := application.GetCapabilityRevision(r.Context(), deps.UOW, key)
+		result, found, err := application.GetCapabilityRevision(r.Context(), deps.UOW, key)
 		if err != nil {
 			writeAppError(w, r, deps, err)
 			return
@@ -158,7 +158,7 @@ func handleGetCapabilityRevision(deps Dependencies) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "not_found", "no revision matches "+key.String())
 			return
 		}
-		writeJSON(w, http.StatusOK, mapRevisionDTO(env, 0), nil)
+		writeJSON(w, http.StatusOK, mapRevisionWithContentDTO(result.Revision, result.Content, result.HasContent, 0), nil)
 	}
 }
 

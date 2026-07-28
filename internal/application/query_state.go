@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"sort"
 
 	"github.com/aleka7sk/featureforge/internal/engineering"
@@ -14,10 +15,17 @@ import (
 // DiscoverRequirementArtifactIDs (AD-025, FF-016 §5) rather than being
 // unable to find it at all, which is what this comment described before
 // FF-016 projected a subject onto RevisionEnvelope.
+//
+// PlanArtifactID is the applicable validation plan (FF-018 §6.6's
+// exactly-one contract, ResolveApplicableValidationPlanID), empty when
+// none exists yet. It was already discovered by every caller before
+// FF-020 and discarded; FF-020 renders it as ValidationPlanResult rather
+// than re-deriving it (FF-020 §5).
 type EngineeringStateInput struct {
 	CapabilityArtifactID   string
 	RequirementArtifactIDs []string
 	DecisionIDs            []string
+	PlanArtifactID         string
 }
 
 // discoverArtifactIDsBySubject collects the distinct artifact IDs of every
@@ -92,9 +100,27 @@ func DiscoverDecisionIDs(ctx context.Context, repos Repositories, capabilityArti
 
 // ApplicableDecision is one decision found to name the capability as a
 // subject, with the rationale for how it was matched (FF-004 §3.3).
+// Detail is the decision's full basis, decoded from Decision.Payload
+// (FF-020 §5, FF-001 §3.5: "the basis is displayed, not collapsed").
 type ApplicableDecision struct {
 	DecisionID string
 	Decision   engineering.RecordEnvelope
+	Detail     engineering.DecisionDetail
+}
+
+// ValidationPlanResult names the applicable validation plan and its
+// activities (FF-020 §5, FF-001 §3.6: "plan revision and its activities").
+// Found is false, with no error, when the capability has no applicable
+// plan yet -- the same well-formed-empty convention every other
+// EngineeringStateResult field already uses. A plan artifact carries
+// exactly one revision (no command revises a validation plan), so no
+// current-revision resolution applies here the way it does for
+// capabilities and requirements.
+type ValidationPlanResult struct {
+	Found      bool
+	ArtifactID string
+	RevisionID string
+	Activities []engineering.PlanActivityDetail
 }
 
 // EngineeringStateResult bundles every current-state answer for one
@@ -103,13 +129,18 @@ type EngineeringStateResult struct {
 	CurrentRevision       CurrentRevisionResult
 	EffectiveRequirements []EffectiveRequirement
 	ApplicableDecisions   []ApplicableDecision
+	ValidationPlan        ValidationPlanResult
 	Readiness             ReadinessResult
 	Lifecycle             LifecycleStateResult
 }
 
 // GetFeatureEngineeringState composes every current-state query into one
-// result (FF-010 §10). It is read-only and deterministic.
-func GetFeatureEngineeringState(ctx context.Context, repos Repositories, in EngineeringStateInput) (EngineeringStateResult, error) {
+// result (FF-010 §10). It is read-only and deterministic. projector decodes
+// the display content FF-020 adds -- requirement statements, decision
+// bases, and plan activities -- from the payloads repos already returns;
+// a stored payload that will not decode is ErrStoredPayloadUnreadable
+// (FF-020 §7), never a silently empty field.
+func GetFeatureEngineeringState(ctx context.Context, repos Repositories, projector EngineeringProjector, in EngineeringStateInput) (EngineeringStateResult, error) {
 	var result EngineeringStateResult
 
 	currentRevision, err := ResolveCurrentRevision(ctx, repos, in.CapabilityArtifactID)
@@ -121,6 +152,20 @@ func GetFeatureEngineeringState(ctx context.Context, repos Repositories, in Engi
 	effective, err := ResolveEffectiveRequirements(ctx, repos, in.RequirementArtifactIDs)
 	if err != nil {
 		return EngineeringStateResult{}, err
+	}
+	for i, req := range effective {
+		env, found, err := repos.Revisions.Get(ctx, req.RevisionKey)
+		if err != nil {
+			return EngineeringStateResult{}, err
+		}
+		if !found {
+			continue
+		}
+		statement, err := projector.ProjectRequirementStatement(env.Payload)
+		if err != nil {
+			return EngineeringStateResult{}, fmt.Errorf("%w: requirement %s: %w", ErrStoredPayloadUnreadable, req.ArtifactID, err)
+		}
+		effective[i].Statement = statement
 	}
 	result.EffectiveRequirements = effective
 
@@ -134,13 +179,37 @@ func GetFeatureEngineeringState(ctx context.Context, repos Repositories, in Engi
 			return EngineeringStateResult{}, err
 		}
 		if found {
-			result.ApplicableDecisions = append(result.ApplicableDecisions, ApplicableDecision{DecisionID: decID, Decision: rec})
+			detail, err := projector.ProjectDecisionDetail(rec.Payload)
+			if err != nil {
+				return EngineeringStateResult{}, fmt.Errorf("%w: decision %s: %w", ErrStoredPayloadUnreadable, decID, err)
+			}
+			result.ApplicableDecisions = append(result.ApplicableDecisions, ApplicableDecision{DecisionID: decID, Decision: rec, Detail: detail})
+		}
+	}
+
+	if in.PlanArtifactID != "" {
+		planRevisions, err := repos.Revisions.ListByArtifact(ctx, in.PlanArtifactID)
+		if err != nil {
+			return EngineeringStateResult{}, err
+		}
+		if len(planRevisions) > 0 {
+			rev := planRevisions[len(planRevisions)-1]
+			activities, err := projector.ProjectPlanActivities(rev.Payload)
+			if err != nil {
+				return EngineeringStateResult{}, fmt.Errorf("%w: validation plan %s: %w", ErrStoredPayloadUnreadable, in.PlanArtifactID, err)
+			}
+			result.ValidationPlan = ValidationPlanResult{
+				Found: true, ArtifactID: rev.Key.ArtifactID, RevisionID: rev.Key.RevisionID, Activities: activities,
+			}
 		}
 	}
 
 	if currentRevision.Found {
 		readiness, err := ResolveReadiness(ctx, repos, currentRevision.Revision, effective)
 		if err != nil {
+			return EngineeringStateResult{}, err
+		}
+		if err := decorateReadinessReasoning(ctx, repos, readiness, projector); err != nil {
 			return EngineeringStateResult{}, err
 		}
 		result.Readiness = readiness
@@ -155,4 +224,43 @@ func GetFeatureEngineeringState(ctx context.Context, repos Repositories, in Engi
 	result.Lifecycle = lifecycle
 
 	return result, nil
+}
+
+// decorateReadinessReasoning fills in the free-text reasoning
+// GetFeatureEngineeringState adds to a readiness result -- the current
+// claim's own reasoning, and each superseded or invalidated claim's, all
+// decoded from their stored payloads (FF-020 §5, FF-001 §3.6: "claims
+// with outcomes, criteria, reasoning, and correction links" and
+// "superseded claims shown inline ... not hidden"). ResolveReadiness
+// itself has no projector, so this is a second pass over its result
+// rather than something ResolveReadiness does inline; readiness.PerRequirement
+// is a slice, so mutating its elements by index here is visible to the
+// caller without a pointer receiver.
+func decorateReadinessReasoning(ctx context.Context, repos Repositories, readiness ReadinessResult, projector EngineeringProjector) error {
+	for i := range readiness.PerRequirement {
+		p := &readiness.PerRequirement[i]
+		if p.HasClaim {
+			reasoning, err := projector.ProjectClaimReasoning(p.Claim.Payload)
+			if err != nil {
+				return fmt.Errorf("%w: claim %s: %w", ErrStoredPayloadUnreadable, p.Claim.Key, err)
+			}
+			p.Reasoning = reasoning
+		}
+		for j := range p.Rejected {
+			rej := &p.Rejected[j]
+			env, found, err := repos.Records.Get(ctx, rej.Key)
+			if err != nil {
+				return err
+			}
+			if !found {
+				continue
+			}
+			reasoning, err := projector.ProjectClaimReasoning(env.Payload)
+			if err != nil {
+				return fmt.Errorf("%w: claim %s: %w", ErrStoredPayloadUnreadable, rej.Key, err)
+			}
+			rej.Reasoning = reasoning
+		}
+	}
+	return nil
 }

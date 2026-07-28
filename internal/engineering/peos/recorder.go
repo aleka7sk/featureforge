@@ -84,3 +84,32 @@ func (Recorder) RecordTransition(in engineering.TransitionInput) (engineering.Ar
 func (Recorder) VerifyContentDigest(rev engineering.RevisionEnvelope, content engineering.CapabilitySpecificationContent) error {
 	return VerifyContentDigest(rev, content)
 }
+
+// The four methods below implement internal/application's EngineeringProjector
+// port (FF-020 §4): the sibling read seam to EngineeringRecorder, decoding a
+// stored Payload back into the PEOS-free projections engineering/projections.go
+// defines.
+
+// ProjectRequirementStatement decodes a stored requirement revision
+// payload and returns its statement text.
+func (Recorder) ProjectRequirementStatement(payload []byte) (string, error) {
+	return ProjectRequirementStatement(payload)
+}
+
+// ProjectDecisionDetail decodes a stored decision payload into its full
+// basis.
+func (Recorder) ProjectDecisionDetail(payload []byte) (engineering.DecisionDetail, error) {
+	return ProjectDecisionDetail(payload)
+}
+
+// ProjectPlanActivities decodes a stored validation plan revision payload
+// into its planned activities.
+func (Recorder) ProjectPlanActivities(payload []byte) ([]engineering.PlanActivityDetail, error) {
+	return ProjectPlanActivities(payload)
+}
+
+// ProjectClaimReasoning decodes a stored claim payload and returns its
+// reasoning text, if any.
+func (Recorder) ProjectClaimReasoning(payload []byte) (string, error) {
+	return ProjectClaimReasoning(payload)
+}

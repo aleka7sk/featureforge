@@ -1103,6 +1103,85 @@ detection. Corrects one consequence stated in AD-025; supersedes nothing.
 
 ---
 
+## AD-027 — Read-surface content is projected on read, never stored, through a sibling `EngineeringProjector` port
+
+Status: Accepted and implemented
+Date: 2026-07-28
+Phase: M.5 (read-surface extension, ahead of Phase B UI planning)
+
+**Context.** Phase B UI planning was stopped on a blocking finding: FF-018's
+seven query endpoints expose identity, projections, and rationale metadata,
+but not the engineering *content* FF-001 §3 requires a reader to see —
+capability specification content, requirement statement text, a decision's
+full basis, validation-plan activities, and claim reasoning. `internal/application`
+had no query reading `StructuredContent` at all (only commands `.Put` it), and
+`RecordEnvelope`/`RevisionEnvelope` project identity and outcome fields but
+never the free-text content that exists only inside a stored `Payload`. Full
+investigation is in
+[FF-020](../spec/020-read-surface-extension.md).
+
+**Decision.** Two parts.
+
+*Decode at read time, not write time.* No new stored field, no migration, no
+backfill. `Payload` is already authoritative (`RevisionEnvelope`'s own doc:
+"Payload is authoritative and every other field is a derived projection");
+decoding it is reading the authority, not duplicating it. This keeps adapter
+parity structural — both adapters already persist the same `Payload` bytes,
+and decoding happens above the adapter boundary — and upholds AD-006: nothing
+derived is stored.
+
+*A sibling `EngineeringProjector` port, decoding through the existing PEOS
+seam.* `internal/engineering/peos` already carried a complete, round-trip-tested
+decoder set (`DecodeDecision`, `DecodeClaim`, `DecodePlanRevision`,
+`DecodeRequirementRevision`, …) with no caller outside its own tests. FF-020
+adds thin projection functions in that same package — the only permitted PEOS
+importer (AD-005) — that decode a payload and return PEOS-free structs defined
+in `internal/engineering` (`DecisionDetail`, `PlanActivityDetail`; a
+requirement's statement and a claim's reasoning need no dedicated type, each
+being a single string). These are exposed through a new
+`application.EngineeringProjector` interface — declared in engineering types
+only, implemented structurally by the existing `peos.Recorder`, exactly the
+shape `EngineeringRecorder` already established for the write side — rather
+than added to `EngineeringRecorder` itself, so a query dependency never
+implies write authority and vice versa.
+
+**What needed no new mechanism.** A decision's evidence list, a claim's
+criterion keys, and a claim's correction target were already projected on
+`RecordEnvelope` (`EvidenceKeys`, `CriterionKeys`, `CorrectionTargetID`); FF-020
+reads them directly rather than duplicating them into a projection type. The
+applicable validation plan's identity was already discovered by every Q3/Q4
+caller (`ResolveApplicableValidationPlanID`, §6.6's exactly-one contract) and
+silently discarded; FF-020 renders it instead of re-deriving it.
+
+**No new HTTP endpoint.** A companion review challenged the initially-proposed
+`GET /features/{id}/validation` endpoint and found no query failed to own its
+datum: Q4's own composition already resolved the applicable plan before
+discarding it, and Q5's timeline already emitted `plan.revised`,
+`execution.recorded`, `evidence.recorded`, and `claim.recorded`/`corrected`
+events. A dedicated endpoint would have re-read exactly what Q4 and Q5 already
+read, assembled for one screen — a screen-shaped (BFF) endpoint, the same
+shape AD-022 already rejected alongside GraphQL. AD-022's nineteen-operation
+surface is therefore neither extended nor amended; every FF-020 field is
+additive to an existing response.
+
+**Alternatives.** Storing projected content as new envelope fields at write
+time, rejected — duplicates the payload's own authority and reopens the
+migration/backfill cost FF-016 needed for `SubjectKey`, for no benefit `Payload`
+does not already give for free. Adding projection methods to
+`EngineeringRecorder` itself, rejected — collapses a query-only dependency into
+one that also implies write authority. A new `GET /validation` endpoint,
+rejected per the review above.
+
+**Consequences.** No repository method, no migration, no new dependency, no
+architecture decision reversed. `internal/transport/http`'s response DTOs gain
+fields only — every field added is additive, so FF-018's frozen contract and
+its 23+ transport tests keep passing unmodified. One new application sentinel,
+`ErrStoredPayloadUnreadable`, closes the one new failure mode a decode
+introduces: a payload that will not decode is server-side data corruption, not
+client error, and maps to an opaque `500`.
+
+---
+
 ## Open questions
 
 None. Every material architecture decision for M.1 through M.4 is resolved, as
@@ -1137,3 +1216,10 @@ revision subject projection and discovery (AD-025,
 prerequisite the M.5 queries needed for a complete requirement or
 validation-plan population; the HTTP API and UI implementation §16 of FF-015
 orders is separate work and remains open.
+
+Resolved and implemented after Phase A, ahead of Phase B UI planning: the
+read-surface content gap Phase B UI planning found blocking (AD-027,
+[FF-020](../spec/020-read-surface-extension.md)). This clears the prerequisite
+FF-001 §3's usability acceptance needs — every screen now has a query
+answering it — so Phase B UI planning can resume against a complete read
+contract.

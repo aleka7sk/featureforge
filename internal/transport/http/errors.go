@@ -82,6 +82,7 @@ var errorMappings = []errorMapping{
 	{application.ErrCorrectionCycle, http.StatusUnprocessableEntity, "correction_cycle", true},
 	{application.ErrUnknownDefinitionVersion, http.StatusUnprocessableEntity, "unknown_definition_version", true},
 	{application.ErrNestedTransaction, http.StatusInternalServerError, "internal_error", false},
+	{application.ErrStoredPayloadUnreadable, http.StatusInternalServerError, "internal_error", false},
 	{application.ErrTransactionAborted, http.StatusServiceUnavailable, "transaction_aborted", true},
 }
 

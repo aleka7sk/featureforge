@@ -43,10 +43,11 @@ func run(logger *slog.Logger) error {
 	defer closeAdapter()
 
 	deps := transporthttp.Dependencies{
-		UOW:      uow,
-		Recorder: peos.NewRecorder(),
-		Clock:    application.SystemClock{},
-		Logger:   logger,
+		UOW:       uow,
+		Recorder:  peos.NewRecorder(),
+		Projector: peos.NewRecorder(),
+		Clock:     application.SystemClock{},
+		Logger:    logger,
 	}
 
 	server := &http.Server{

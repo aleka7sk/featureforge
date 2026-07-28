@@ -16,10 +16,11 @@ import (
 // Dependencies are injected rather than constructed inside this package --
 // cmd/featureforge is the sole composition root (FF-018 §5.2, AD-024).
 type Dependencies struct {
-	UOW      application.UnitOfWork
-	Recorder application.EngineeringRecorder
-	Clock    application.Clock
-	Logger   *slog.Logger
+	UOW       application.UnitOfWork
+	Recorder  application.EngineeringRecorder
+	Projector application.EngineeringProjector
+	Clock     application.Clock
+	Logger    *slog.Logger
 }
 
 // logger returns deps.Logger, or the default logger if none was supplied,

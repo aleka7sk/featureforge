@@ -59,19 +59,23 @@ type listFeaturesResponse struct {
 // (Q4, Q6, Q7). Sequence is set only where order metadata was resolved
 // alongside the revision (Q6's current, and Q4's current_revision); zero
 // otherwise, matching the "omitted when zero" convention that already
-// applies to ContentDigest.
+// applies to ContentDigest. Content is set only by mapRevisionWithContentDTO
+// (Q6, Q7); mapRevisionDTO (Q4's current_revision) leaves it nil, since
+// application.CurrentRevisionResult carries no content lookup -- FF-020 §5
+// scopes full specification content to Q6/Q7 only (FF-020 §2 class A).
 type revisionDTO struct {
-	ArtifactID           string     `json:"artifact_id"`
-	RevisionID           string     `json:"revision_id"`
-	Sequence             int        `json:"sequence,omitempty"`
-	RevisionFamily       string     `json:"revision_family"`
-	ArtifactType         string     `json:"artifact_type"`
-	IntegrityValue       string     `json:"integrity_value"`
-	ContentDigest        string     `json:"content_digest,omitempty"`
-	SubjectKey           string     `json:"subject_key,omitempty"`
-	RecordedAt           time.Time  `json:"recorded_at"`
-	ProvenanceActor      string     `json:"provenance_actor,omitempty"`
-	ProvenanceRecordedAt *time.Time `json:"provenance_recorded_at,omitempty"`
+	ArtifactID           string      `json:"artifact_id"`
+	RevisionID           string      `json:"revision_id"`
+	Sequence             int         `json:"sequence,omitempty"`
+	RevisionFamily       string      `json:"revision_family"`
+	ArtifactType         string      `json:"artifact_type"`
+	IntegrityValue       string      `json:"integrity_value"`
+	ContentDigest        string      `json:"content_digest,omitempty"`
+	SubjectKey           string      `json:"subject_key,omitempty"`
+	RecordedAt           time.Time   `json:"recorded_at"`
+	ProvenanceActor      string      `json:"provenance_actor,omitempty"`
+	ProvenanceRecordedAt *time.Time  `json:"provenance_recorded_at,omitempty"`
+	Content              *contentDTO `json:"content,omitempty"`
 }
 
 func mapRevisionDTO(env engineering.RevisionEnvelope, sequence int) revisionDTO {
@@ -89,6 +93,42 @@ func mapRevisionDTO(env engineering.RevisionEnvelope, sequence int) revisionDTO 
 	if env.HasProvenanceTime {
 		t := env.ProvenanceRecordedAt
 		dto.ProvenanceRecordedAt = &t
+	}
+	return dto
+}
+
+// mapContentDTOFromContent is the read-side inverse of dto_command.go's
+// mapContentDTO: it projects a stored engineering.CapabilitySpecificationContent
+// (FF-020 §2 class A) into the same contentDTO shape C3/C4 accept, field
+// for field, using its accessor set (never invented, per §10.2).
+func mapContentDTOFromContent(c engineering.CapabilitySpecificationContent) contentDTO {
+	criteria := c.AcceptanceCriteria()
+	dto := contentDTO{
+		SchemaVersion:        c.SchemaVersion(),
+		Title:                c.Title(),
+		ProblemStatement:     c.ProblemStatement(),
+		UserOutcome:          c.UserOutcome(),
+		FunctionalBehaviours: append([]string{}, c.FunctionalBehaviours()...),
+		Constraints:          append([]string{}, c.Constraints()...),
+		AcceptanceCriteria:   make([]acceptanceCriterionDTO, 0, len(criteria)),
+		Dependencies:         append([]string{}, c.Dependencies()...),
+		OpenQuestions:        append([]string{}, c.OpenQuestions()...),
+	}
+	for _, ac := range criteria {
+		dto.AcceptanceCriteria = append(dto.AcceptanceCriteria, acceptanceCriterionDTO{Key: ac.Key(), Text: ac.Text()})
+	}
+	return dto
+}
+
+// mapRevisionWithContentDTO is mapRevisionDTO plus the revision's
+// structured content (FF-020 §2 class A, FF-001 §3.3: "full specification
+// content per revision"), used by Q6 and Q7 only. hasContent false leaves
+// Content nil -- an empty state, not an invented empty object.
+func mapRevisionWithContentDTO(env engineering.RevisionEnvelope, content engineering.CapabilitySpecificationContent, hasContent bool, sequence int) revisionDTO {
+	dto := mapRevisionDTO(env, sequence)
+	if hasContent {
+		c := mapContentDTOFromContent(content)
+		dto.Content = &c
 	}
 	return dto
 }
@@ -161,25 +201,53 @@ func mapResolutionRationaleDTO(r application.ResolutionRationale) resolutionRati
 }
 
 // effectiveRequirementDTO mirrors application.EffectiveRequirement.
+// Statement is decoded from the requirement revision's stored payload
+// (FF-020 §5, FF-001 §3.4).
 type effectiveRequirementDTO struct {
 	ArtifactID string `json:"artifact_id"`
 	RevisionID string `json:"revision_id"`
 	Sequence   int    `json:"sequence"`
+	Statement  string `json:"statement"`
+}
+
+// decisionBasisDTO mirrors a decision's full basis (FF-020 §5, FF-001
+// §3.5: "the basis is displayed, not collapsed"). Evidence is the
+// existing RecordEnvelope.EvidenceKeys projection, not a decode; every
+// other field is engineering.DecisionDetail, decoded from Payload.
+type decisionBasisDTO struct {
+	Evidence      []string `json:"evidence"`
+	Assumptions   []string `json:"assumptions"`
+	Constraints   []string `json:"constraints"`
+	Uncertainties []string `json:"uncertainties"`
 }
 
 // applicableDecisionDTO mirrors application.ApplicableDecision, projecting
-// the cited engineering.RecordEnvelope's fields directly.
+// the cited engineering.RecordEnvelope's fields directly, plus its full
+// basis (FF-020 §5).
 type applicableDecisionDTO struct {
-	DecisionID string     `json:"decision_id"`
-	SubjectKey string     `json:"subject_key"`
-	Scope      string     `json:"scope"`
-	OccurredAt *time.Time `json:"occurred_at,omitempty"`
-	Outcome    string     `json:"outcome"`
+	DecisionID       string           `json:"decision_id"`
+	SubjectKey       string           `json:"subject_key"`
+	Scope            string           `json:"scope"`
+	OccurredAt       *time.Time       `json:"occurred_at,omitempty"`
+	Outcome          string           `json:"outcome"`
+	Question         string           `json:"question,omitempty"`
+	OutcomeStatement string           `json:"outcome_statement"`
+	Rationale        string           `json:"rationale,omitempty"`
+	Alternatives     []string         `json:"alternatives"`
+	Basis            decisionBasisDTO `json:"basis"`
 }
 
 func mapApplicableDecisionDTO(d application.ApplicableDecision) applicableDecisionDTO {
 	dto := applicableDecisionDTO{
 		DecisionID: d.DecisionID, SubjectKey: d.Decision.SubjectKey, Scope: d.Decision.Scope, Outcome: d.Decision.Outcome,
+		Question: d.Detail.Question, OutcomeStatement: d.Detail.OutcomeStatement, Rationale: d.Detail.Rationale,
+		Alternatives: append([]string{}, d.Detail.Alternatives...),
+		Basis: decisionBasisDTO{
+			Evidence:      append([]string{}, d.Decision.EvidenceKeys...),
+			Assumptions:   append([]string{}, d.Detail.Assumptions...),
+			Constraints:   append([]string{}, d.Detail.Constraints...),
+			Uncertainties: append([]string{}, d.Detail.Uncertainties...),
+		},
 	}
 	if d.Decision.HasOccurredAt {
 		t := d.Decision.OccurredAt
@@ -188,19 +256,31 @@ func mapApplicableDecisionDTO(d application.ApplicableDecision) applicableDecisi
 	return dto
 }
 
-// rejectedClaimDTO mirrors application.RejectedClaim.
+// rejectedClaimDTO mirrors application.RejectedClaim (FF-020 §5, FF-001
+// §3.6: "superseded claims shown inline ... with their outcome intact and
+// a link to the claim that corrected them" -- "shown, not hidden").
 type rejectedClaimDTO struct {
-	RecordKey string `json:"record_key"`
-	Reason    string `json:"reason"`
+	RecordKey   string `json:"record_key"`
+	Reason      string `json:"reason"`
+	Outcome     string `json:"outcome"`
+	Reasoning   string `json:"reasoning,omitempty"`
+	CorrectedBy string `json:"corrected_by,omitempty"`
 }
 
 // perRequirementReadinessDTO mirrors application.PerRequirementReadiness.
+// Reasoning and CriterionKeys are the current claim's own detail (FF-020
+// §5); Corrects is the existing RecordEnvelope.CorrectionTargetID
+// projection, present when the current claim itself corrects an earlier
+// one (e.g. FF-011's CLM-4).
 type perRequirementReadinessDTO struct {
 	RequirementArtifactID string             `json:"requirement_artifact_id"`
 	RequirementRevisionID string             `json:"requirement_revision_id"`
 	HasClaim              bool               `json:"has_claim"`
 	ClaimID               string             `json:"claim_id,omitempty"`
 	Outcome               string             `json:"outcome,omitempty"`
+	Reasoning             string             `json:"reasoning,omitempty"`
+	CriterionKeys         []string           `json:"criterion_keys,omitempty"`
+	Corrects              string             `json:"corrects,omitempty"`
 	ExecutionOutcome      string             `json:"execution_outcome,omitempty"`
 	Stale                 bool               `json:"stale"`
 	StaleSequence         int                `json:"stale_sequence,omitempty"`
@@ -214,6 +294,7 @@ func mapPerRequirementReadinessDTO(p application.PerRequirementReadiness) perReq
 		RequirementRevisionID: p.RequirementRevisionKey.RevisionID,
 		HasClaim:              p.HasClaim,
 		Outcome:               p.Outcome,
+		Reasoning:             p.Reasoning,
 		ExecutionOutcome:      p.ExecutionOutcome,
 		Stale:                 p.Stale,
 		StaleSequence:         p.StaleSequence,
@@ -222,9 +303,16 @@ func mapPerRequirementReadinessDTO(p application.PerRequirementReadiness) perReq
 	}
 	if p.HasClaim {
 		dto.ClaimID = p.Claim.Key.ID
+		dto.CriterionKeys = append([]string{}, p.Claim.CriterionKeys...)
+		if p.Claim.HasCorrection() {
+			dto.Corrects = p.Claim.CorrectionTargetID
+		}
 	}
 	for _, rj := range p.Rejected {
-		dto.Rejected = append(dto.Rejected, rejectedClaimDTO{RecordKey: rj.Key.String(), Reason: rj.Reason})
+		dto.Rejected = append(dto.Rejected, rejectedClaimDTO{
+			RecordKey: rj.Key.String(), Reason: rj.Reason, Outcome: rj.Outcome,
+			Reasoning: rj.Reasoning, CorrectedBy: rj.CorrectedBy,
+		})
 	}
 	return dto
 }
@@ -274,12 +362,49 @@ func mapLifecycleStateDTO(l application.LifecycleStateResult) lifecycleStateDTO 
 	return dto
 }
 
+// planActivityDetailDTO mirrors engineering.PlanActivityDetail (FF-020 §5,
+// FF-001 §3.6: "plan revision and its activities"). Named distinctly from
+// dto_command.go's planActivityDTO (a C9 request field, different shape)
+// to keep write and read DTOs unambiguous.
+type planActivityDetailDTO struct {
+	Key                   string   `json:"key"`
+	Method                string   `json:"method"`
+	OutcomeInterpretation string   `json:"outcome_interpretation"`
+	ExpectedEvidence      []string `json:"expected_evidence"`
+}
+
+// validationPlanDTO mirrors application.ValidationPlanResult. Found false
+// means the capability has no applicable plan yet -- an empty state, not
+// an error.
+type validationPlanDTO struct {
+	Found      bool                    `json:"found"`
+	ArtifactID string                  `json:"artifact_id,omitempty"`
+	RevisionID string                  `json:"revision_id,omitempty"`
+	Activities []planActivityDetailDTO `json:"activities"`
+}
+
+func mapValidationPlanDTO(v application.ValidationPlanResult) validationPlanDTO {
+	dto := validationPlanDTO{Found: v.Found, Activities: make([]planActivityDetailDTO, 0, len(v.Activities))}
+	if !v.Found {
+		return dto
+	}
+	dto.ArtifactID, dto.RevisionID = v.ArtifactID, v.RevisionID
+	for _, a := range v.Activities {
+		dto.Activities = append(dto.Activities, planActivityDetailDTO{
+			Key: a.Key, Method: a.Method, OutcomeInterpretation: a.OutcomeInterpretation,
+			ExpectedEvidence: append([]string{}, a.ExpectedEvidence...),
+		})
+	}
+	return dto
+}
+
 // engineeringStateDTO is Q4's data payload, and the "state" sub-object of
 // Q3's (FF-018 §10.3).
 type engineeringStateDTO struct {
 	CurrentRevision       currentRevisionDTO        `json:"current_revision"`
 	EffectiveRequirements []effectiveRequirementDTO `json:"effective_requirements"`
 	ApplicableDecisions   []applicableDecisionDTO   `json:"applicable_decisions"`
+	ValidationPlan        validationPlanDTO         `json:"validation_plan"`
 	Readiness             readinessResultDTO        `json:"readiness"`
 	Lifecycle             lifecycleStateDTO         `json:"lifecycle"`
 }
@@ -303,12 +428,13 @@ func mapEngineeringStateDTO(s application.EngineeringStateResult) (engineeringSt
 		CurrentRevision:       mapCurrentRevisionDTO(s.CurrentRevision),
 		EffectiveRequirements: make([]effectiveRequirementDTO, 0, len(s.EffectiveRequirements)),
 		ApplicableDecisions:   make([]applicableDecisionDTO, 0, len(s.ApplicableDecisions)),
+		ValidationPlan:        mapValidationPlanDTO(s.ValidationPlan),
 		Readiness:             mapReadinessResultDTO(s.Readiness),
 		Lifecycle:             mapLifecycleStateDTO(s.Lifecycle),
 	}
 	for _, req := range s.EffectiveRequirements {
 		data.EffectiveRequirements = append(data.EffectiveRequirements, effectiveRequirementDTO{
-			ArtifactID: req.ArtifactID, RevisionID: req.RevisionKey.RevisionID, Sequence: req.Sequence,
+			ArtifactID: req.ArtifactID, RevisionID: req.RevisionKey.RevisionID, Sequence: req.Sequence, Statement: req.Statement,
 		})
 	}
 	for _, dec := range s.ApplicableDecisions {

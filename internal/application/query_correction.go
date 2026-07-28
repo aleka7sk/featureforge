@@ -16,10 +16,20 @@ type CorrectionEdge struct {
 	Kind string
 }
 
-// RejectedClaim is a claim excluded from being the current one, with why.
+// RejectedClaim is a claim excluded from being the current one, with why
+// (FF-001 §3.6: "superseded claims shown inline, visibly marked, with
+// their outcome intact and a link to the claim that corrected them" --
+// "shown, not hidden"). Outcome and CorrectedBy are populated only when
+// Reason is "superseded"; an invalidated claim was never superseded by a
+// specific claim, so CorrectedBy stays empty for that case. Reasoning is
+// left for the caller with a projector to fill in (FF-020 §5); it needs a
+// payload decode this function's callers do not all have.
 type RejectedClaim struct {
-	Key    engineering.RecordKey
-	Reason string
+	Key         engineering.RecordKey
+	Reason      string
+	Outcome     string
+	CorrectedBy string
+	Reasoning   string
 }
 
 // CorrectionRationale explains how a current-claim resolution reached its
@@ -122,14 +132,25 @@ func ResolveCurrentClaim(ctx context.Context, repos Repositories, subjectKey, sc
 		}
 	}
 
+	// correctedBy maps a superseded claim's ID to the claim that corrected
+	// it, i.e. the edge pointing at it -- FF-001 §3.6's "a link to the
+	// claim that corrected them". An invalidated claim has no such link:
+	// invalidation retracts, it does not point to a replacement.
+	correctedBy := map[string]string{}
+	for _, e := range rationale.Edges {
+		if e.Kind == engineering.CorrectionKindCorrect || e.Kind == engineering.CorrectionKindReplace {
+			correctedBy[e.To.ID] = e.From.ID
+		}
+	}
+
 	// Step 6: heads are claims neither superseded nor invalidated.
 	var heads []engineering.RecordEnvelope
 	for _, c := range claims {
 		switch {
 		case superseded[c.Key.ID]:
-			rationale.Rejected = append(rationale.Rejected, RejectedClaim{Key: c.Key, Reason: "superseded"})
+			rationale.Rejected = append(rationale.Rejected, RejectedClaim{Key: c.Key, Reason: "superseded", Outcome: c.Outcome, CorrectedBy: correctedBy[c.Key.ID]})
 		case invalidated[c.Key.ID]:
-			rationale.Rejected = append(rationale.Rejected, RejectedClaim{Key: c.Key, Reason: "invalidated"})
+			rationale.Rejected = append(rationale.Rejected, RejectedClaim{Key: c.Key, Reason: "invalidated", Outcome: c.Outcome})
 		default:
 			heads = append(heads, c)
 		}

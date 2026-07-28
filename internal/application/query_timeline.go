@@ -407,11 +407,21 @@ func timelineFromRevision(cardID domain.FeatureCardID, kind EventKind, label, su
 	}
 }
 
+// timelineFromRecord builds one timeline event from a record's own
+// projected fields. References always names the record's subject, plus --
+// for a record that cites evidence or an execution, such as
+// execution.recorded and claim.recorded/corrected -- the existing
+// EvidenceKeys/ExecutionKeys projections (FF-020 §5, FF-001 §3.6:
+// "execution records with outcomes and evidence"), so a reader can follow
+// an event to what it produced or relied on without a second query.
 func timelineFromRecord(cardID domain.FeatureCardID, kind EventKind, label, summary string, env engineering.RecordEnvelope) TimelineEvent {
+	references := []string{env.SubjectKey}
+	references = append(references, env.EvidenceKeys...)
+	references = append(references, env.ExecutionKeys...)
 	return TimelineEvent{
 		EventID: string(kind) + ":" + env.Key.String(), FeatureCardID: cardID, Kind: kind,
 		OccurredAt: env.OccurredAt, HasOccurredAt: env.HasOccurredAt, Label: label, Summary: summary,
-		SourceIdentity: env.Key.String(), References: []string{env.SubjectKey}, Rationale: "record's own occurred-at time",
+		SourceIdentity: env.Key.String(), References: references, Rationale: "record's own occurred-at time",
 	}
 }
 

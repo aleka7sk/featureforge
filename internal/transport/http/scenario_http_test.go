@@ -161,7 +161,7 @@ func runActivityViaHTTP(t *testing.T, handler http.Handler, tick func(), activit
 // surfaces.
 func runScenarioThroughHTTP(t *testing.T, ctx context.Context, uow application.UnitOfWork, rec peos.Recorder, clock *application.FixedClock) http.Handler {
 	t.Helper()
-	deps := transporthttp.Dependencies{UOW: uow, Recorder: rec, Clock: clock}
+	deps := transporthttp.Dependencies{UOW: uow, Recorder: rec, Projector: rec, Clock: clock}
 	handler := transporthttp.NewHandler(deps)
 	tick := func() { clock.Advance(time.Hour) }
 
@@ -386,10 +386,21 @@ func assertCanonicalEndStateThroughHTTP(t *testing.T, ctx context.Context, handl
 			} `json:"current_revision"`
 			EffectiveRequirements []struct {
 				ArtifactID string `json:"artifact_id"`
+				Statement  string `json:"statement"`
 			} `json:"effective_requirements"`
 			ApplicableDecisions []struct {
-				DecisionID string `json:"decision_id"`
+				DecisionID       string   `json:"decision_id"`
+				Question         string   `json:"question"`
+				OutcomeStatement string   `json:"outcome_statement"`
+				Alternatives     []string `json:"alternatives"`
 			} `json:"applicable_decisions"`
+			ValidationPlan struct {
+				Found      bool   `json:"found"`
+				ArtifactID string `json:"artifact_id"`
+				Activities []struct {
+					Key string `json:"key"`
+				} `json:"activities"`
+			} `json:"validation_plan"`
 			Readiness struct {
 				Status         string `json:"status"`
 				PerRequirement []struct {
@@ -397,6 +408,14 @@ func assertCanonicalEndStateThroughHTTP(t *testing.T, ctx context.Context, handl
 					HasClaim              bool   `json:"has_claim"`
 					ClaimID               string `json:"claim_id"`
 					Outcome               string `json:"outcome"`
+					Reasoning             string `json:"reasoning"`
+					Corrects              string `json:"corrects"`
+					Rejected              []struct {
+						RecordKey   string `json:"record_key"`
+						Outcome     string `json:"outcome"`
+						Reasoning   string `json:"reasoning"`
+						CorrectedBy string `json:"corrected_by"`
+					} `json:"rejected"`
 				} `json:"per_requirement"`
 			} `json:"readiness"`
 			Lifecycle struct {
@@ -420,15 +439,46 @@ func assertCanonicalEndStateThroughHTTP(t *testing.T, ctx context.Context, handl
 		t.Fatalf("Q4: effective_requirements = %v, want %d entries (proves AD-025 discovery ran through HTTP, including REQ-4)",
 			state.Data.EffectiveRequirements, len(scenario.RequirementArtifactIDs))
 	}
+	// FF-020 §2 class B: every effective requirement's statement text
+	// reaches the wire, decoded from its stored payload.
+	for _, req := range state.Data.EffectiveRequirements {
+		if req.Statement == "" {
+			t.Errorf("Q4: requirement %s has no statement", req.ArtifactID)
+		}
+	}
 
 	sawDecision := false
 	for _, d := range state.Data.ApplicableDecisions {
 		if d.DecisionID == scenario.DecisionID {
 			sawDecision = true
+			// FF-020 §5, FF-001 §3.5: the decision's full basis reaches the
+			// wire, not just its identity and outcome string.
+			if d.Question == "" || d.OutcomeStatement == "" {
+				t.Errorf("Q4: decision %s has no question/outcome_statement: %+v", scenario.DecisionID, d)
+			}
+			if len(d.Alternatives) == 0 {
+				t.Errorf("Q4: decision %s has no alternatives, want the three the scenario recorded", scenario.DecisionID)
+			}
 		}
 	}
 	if !sawDecision {
 		t.Errorf("Q4: decision %s not found in applicable_decisions %+v", scenario.DecisionID, state.Data.ApplicableDecisions)
+	}
+
+	// FF-020 §5, FF-001 §3.6: the applicable validation plan and its
+	// activities reach the wire -- Q4 already discovered PlanArtifactID
+	// before FF-020; this proves it is now rendered, not discarded.
+	if !state.Data.ValidationPlan.Found || state.Data.ValidationPlan.ArtifactID != scenario.PlanArtifactID {
+		t.Fatalf("Q4: validation_plan = %+v, want found with %s", state.Data.ValidationPlan, scenario.PlanArtifactID)
+	}
+	sawActivities := map[string]bool{}
+	for _, a := range state.Data.ValidationPlan.Activities {
+		sawActivities[a.Key] = true
+	}
+	for _, key := range []string{"A-1", "A-2", "A-3"} {
+		if !sawActivities[key] {
+			t.Errorf("Q4: validation_plan.activities missing %s, got %v", key, state.Data.ValidationPlan.Activities)
+		}
 	}
 
 	if state.Data.Readiness.Status != string(application.ReadinessNotReady) {
@@ -458,6 +508,38 @@ func assertCanonicalEndStateThroughHTTP(t *testing.T, ctx context.Context, handl
 		}
 		if want.hasClaim && (per.ClaimID != want.claimID || per.Outcome != want.outcome) {
 			t.Errorf("Q4: %s claim = (%s, %s), want (%s, %s)", per.RequirementArtifactID, per.ClaimID, per.Outcome, want.claimID, want.outcome)
+		}
+		// FF-020 §5, FF-001 §3.6: REQ-2's current claim is CLM-4, which
+		// corrects CLM-2 -- both the reasoning CLM-4 itself gives and the
+		// existing CorrectionTargetID projection (surfaced here as
+		// "corrects") must reach the wire; CLM-2 must appear in rejected,
+		// "shown, not hidden", with its own original outcome and reasoning
+		// intact and a link (corrected_by) back to CLM-4.
+		if per.RequirementArtifactID == "REQ-2" {
+			if per.Reasoning == "" {
+				t.Error("Q4: REQ-2's current claim (CLM-4) has no reasoning")
+			}
+			if per.Corrects != scenario.ClaimIncorrect {
+				t.Errorf("Q4: REQ-2's current claim corrects = %q, want %q", per.Corrects, scenario.ClaimIncorrect)
+			}
+			sawRejectedCLM2 := false
+			for _, rej := range per.Rejected {
+				if rej.RecordKey == "claim:"+scenario.ClaimIncorrect {
+					sawRejectedCLM2 = true
+					if rej.Outcome != "peos:satisfied" {
+						t.Errorf("Q4: rejected CLM-2 outcome = %q, want peos:satisfied (must remain unchanged)", rej.Outcome)
+					}
+					if rej.Reasoning == "" {
+						t.Error("Q4: rejected CLM-2 has no reasoning, want its original reasoning shown, not hidden")
+					}
+					if rej.CorrectedBy != scenario.ClaimCorrecting {
+						t.Errorf("Q4: rejected CLM-2 corrected_by = %q, want %q", rej.CorrectedBy, scenario.ClaimCorrecting)
+					}
+				}
+			}
+			if !sawRejectedCLM2 {
+				t.Errorf("Q4: REQ-2's rejected list does not include CLM-2: %+v", per.Rejected)
+			}
 		}
 	}
 	for req := range wantClaims {

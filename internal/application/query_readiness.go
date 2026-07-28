@@ -26,6 +26,12 @@ type EffectiveRequirement struct {
 	ArtifactID  string
 	RevisionKey engineering.RevisionKey
 	Sequence    int
+	// Statement is the requirement's text, decoded from its revision's
+	// stored payload (FF-020 §5, FF-001 §3.4). Populated only by
+	// GetFeatureEngineeringState, which has a projector; empty when
+	// resolved directly via ResolveEffectiveRequirements, which does not
+	// (e.g. readiness resolution, which never renders it).
+	Statement string
 }
 
 // ResolveEffectiveRequirements resolves the current revision of every
@@ -54,12 +60,17 @@ type PerRequirementReadiness struct {
 	RequirementRevisionKey engineering.RevisionKey
 	HasClaim               bool
 	Claim                  engineering.RecordEnvelope
-	Outcome                string
-	ExecutionOutcome       string
-	Stale                  bool
-	StaleSequence          int
-	Rejected               []RejectedClaim
-	VerdictReason          string
+	// Reasoning is the current claim's justification text, decoded from
+	// Claim.Payload (FF-020 §5, FF-001 §3.6). Populated only by
+	// GetFeatureEngineeringState, which has a projector; empty when
+	// resolved directly via ResolveReadiness, which does not.
+	Reasoning        string
+	Outcome          string
+	ExecutionOutcome string
+	Stale            bool
+	StaleSequence    int
+	Rejected         []RejectedClaim
+	VerdictReason    string
 }
 
 // ReadinessResult is the outcome of a release-readiness resolution

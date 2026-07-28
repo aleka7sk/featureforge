@@ -1721,3 +1721,15 @@ No architecture decision was reopened. AD-022, AD-024, AD-025, and AD-026 were
 found correctly realized as specified; AD-023's decision was found correct,
 with only its enforcement extension to `cmd/` incomplete (MAJOR-1) — an
 implementation gap against an accepted decision, not grounds to revisit it.
+
+### Pointer: read-surface extension
+
+Subsequent Phase B UI planning found a second, independent gap this document
+did not cover: the query surface above exposes identity, projections, and
+rationale metadata, but not the engineering content FF-001 §3 requires a
+reader to see. That gap and its closure are recorded in
+[FF-020](020-read-surface-extension.md) and
+[AD-027](../decisions/README.md#ad-027--read-surface-content-is-projected-on-read-never-stored-through-a-sibling-engineeringprojector-port) —
+an additive extension to the response DTOs above, not an amendment. The HTTP
+surface remains the nineteen operations this document specifies; FF-020 added
+no endpoint.

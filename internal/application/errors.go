@@ -50,6 +50,14 @@ var (
 	// invented here. Sort order is deterministic for discovery output but
 	// is never used to select a plan.
 	ErrValidationPlanAmbiguous = errors.New("application: validation plan ambiguous")
+	// ErrStoredPayloadUnreadable reports that a stored PEOS payload would
+	// not decode when a read-side projection (FF-020) tried to reconstruct
+	// display content from it. A revision or record that was written
+	// through this module's own commands always decodes; failure here
+	// means the stored bytes are corrupt, which is server-side data
+	// integrity, not a client mistake -- mapped to 500 with no internal
+	// text (FF-020 §7).
+	ErrStoredPayloadUnreadable = errors.New("application: stored payload unreadable")
 )
 
 // Command validation errors.
