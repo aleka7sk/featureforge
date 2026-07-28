@@ -5,16 +5,32 @@ import (
 	"embed"
 	"html/template"
 	"net/http"
+	"strings"
 )
 
 //go:embed templates/*.html
 var templateFiles embed.FS
 
+// templateFuncs are the template functions every page template can call.
+// statusClass strips a wire value's namespace prefix (e.g. "peos:satisfied"
+// -> "satisfied") for use as a CSS class suffix, while the value displayed
+// as text is left completely unchanged -- AD-022's "the wire value is the
+// domain value" governs what a reader sees; this only normalises what
+// selects a colour.
+var templateFuncs = template.FuncMap{
+	"statusClass": func(s string) string {
+		if i := strings.LastIndex(s, ":"); i >= 0 {
+			s = s[i+1:]
+		}
+		return s
+	},
+}
+
 // templates parses every page template once, at init, so a malformed
 // template fails the build/startup rather than a request (FF-021 §14:
 // "parse every template at init (fail fast)"). Every page template defines
 // "title" and "content"; base.html supplies the shared shell around them.
-var templates = template.Must(template.ParseFS(templateFiles, "templates/*.html"))
+var templates = template.Must(template.New("ui").Funcs(templateFuncs).ParseFS(templateFiles, "templates/*.html"))
 
 // render executes the named page template inside the shared base layout
 // and writes it with status. It buffers first: html/template can fail

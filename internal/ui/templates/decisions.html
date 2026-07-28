@@ -1,0 +1,50 @@
+{{define "decisions"}}
+{{template "shared-head" .}}
+{{template "nav" .}}
+<main id="main-content">
+  <h1>Decisions</h1>
+  <p><a href="/features/{{.FeatureCardID}}">&larr; Back to overview</a></p>
+
+  {{template "error-notice" .FormError}}
+
+  {{if .Decisions}}
+  {{range .Decisions}}
+  <section class="panel" aria-labelledby="dec-{{.DecisionID}}">
+    <h2 id="dec-{{.DecisionID}}">{{.DecisionID}} {{template "status-badge" .Outcome}}</h2>
+    {{if .HasOccurredAt}}<p class="when">{{.OccurredAt.Format "2006-01-02 15:04"}}</p>{{end}}
+    {{if .Question}}<p><strong>Question:</strong> {{.Question}}</p>{{end}}
+    <p><strong>Outcome:</strong> {{.OutcomeStatement}}</p>
+    {{if .Rationale}}<p><strong>Rationale:</strong> {{.Rationale}}</p>{{end}}
+
+    {{if .Alternatives}}
+    <h3>Alternatives considered</h3>
+    <ul>{{range .Alternatives}}<li>{{.}}</li>{{end}}</ul>
+    {{end}}
+
+    <h3>Basis</h3>
+    {{if .Evidence}}<p><strong>Evidence:</strong> {{range $i, $e := .Evidence}}{{if $i}}, {{end}}{{$e}}{{end}}</p>{{end}}
+    {{if .Assumptions}}
+    <h4>Assumptions</h4>
+    <ul>{{range .Assumptions}}<li>{{.}}</li>{{end}}</ul>
+    {{end}}
+    {{if .Constraints}}
+    <h4>Constraints</h4>
+    <ul>{{range .Constraints}}<li>{{.}}</li>{{end}}</ul>
+    {{end}}
+    {{if .Uncertainties}}
+    <h4>Uncertainties</h4>
+    <ul>{{range .Uncertainties}}<li>{{.}}</li>{{end}}</ul>
+    {{end}}
+  </section>
+  {{end}}
+  {{else}}
+  {{template "empty-state" "No decisions recorded yet."}}
+  {{end}}
+
+  <section class="panel" aria-labelledby="new-decision-heading">
+    <h2 id="new-decision-heading">Record a decision</h2>
+    <div id="decision-form-slot"></div>
+  </section>
+</main>
+{{template "footer" .}}
+{{end}}

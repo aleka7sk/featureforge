@@ -1,0 +1,87 @@
+{{define "feature_overview"}}
+{{template "shared-head" .}}
+{{template "nav" .}}
+<main id="main-content">
+  <h1>{{.Title}}</h1>
+  {{if .Description}}<p>{{.Description}}</p>{{end}}
+
+  <nav aria-label="Feature sections" class="panel">
+    <a href="/features/{{.FeatureCardID}}/revisions">Revisions</a> ·
+    <a href="/features/{{.FeatureCardID}}/requirements">Requirements</a> ·
+    <a href="/features/{{.FeatureCardID}}/decisions">Decisions</a> ·
+    <a href="/features/{{.FeatureCardID}}/validation">Validation</a> ·
+    <a href="/features/{{.FeatureCardID}}/timeline">Timeline</a>
+  </nav>
+
+  <section class="panel" aria-labelledby="spec-heading">
+    <h2 id="spec-heading">Capability specification</h2>
+    {{if .HasCapability}}
+      {{if .CurrentRevisionFound}}
+        <p>Current revision <strong>{{.CurrentRevisionID}}</strong> (sequence {{.CurrentRevisionSeq}}): {{.CurrentRevisionTitle}}</p>
+        {{template "rationale" .CurrentRevisionReason}}
+      {{else}}
+        {{template "empty-state" "No accepted revision yet."}}
+      {{end}}
+    {{else}}
+      {{template "empty-state" "No capability specification established yet."}}
+    {{end}}
+    <div id="capability-form-slot"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="readiness-heading">
+    <h2 id="readiness-heading">Release readiness</h2>
+    <p>{{template "status-badge" .ReadinessStatus}} — {{.RequirementCount}} requirement(s)</p>
+    {{if .Readiness}}
+    <table>
+      <caption class="visually-hidden">Per-requirement readiness</caption>
+      <thead>
+        <tr><th scope="col">Requirement</th><th scope="col">Outcome</th><th scope="col">Why</th></tr>
+      </thead>
+      <tbody>
+        {{range .Readiness}}
+        <tr>
+          <td>{{.RequirementArtifactID}}</td>
+          <td>{{if .HasClaim}}{{template "status-badge" .Outcome}}{{else}}{{template "status-badge" "no-claim"}}{{end}}</td>
+          <td>{{.VerdictReason}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    {{template "empty-state" "No requirements yet."}}
+    {{end}}
+  </section>
+
+  <section class="panel" aria-labelledby="lifecycle-heading">
+    <h2 id="lifecycle-heading">Lifecycle</h2>
+    {{if .LifecycleFound}}
+      <p>{{template "status-badge" .LifecycleStateID}}</p>
+      {{template "rationale" .LifecycleReason}}
+    {{else}}
+      {{template "empty-state" "No lifecycle state assigned yet."}}
+    {{end}}
+    <div id="lifecycle-form-slot"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="history-heading">
+    <h2 id="history-heading">Recent history</h2>
+    {{if .RecentEvents}}
+    <ul class="timeline-list">
+      {{range .RecentEvents}}
+      <li class="timeline-item">
+        <span class="kind">{{.Label}}</span>
+        {{if .HasOccurredAt}}<span class="when">{{.OccurredAt.Format "2006-01-02 15:04"}}</span>{{end}}
+        <p>{{.Summary}}</p>
+      </li>
+      {{end}}
+    </ul>
+    <p><a href="/features/{{.FeatureCardID}}/timeline">See full timeline</a></p>
+    {{else}}
+    {{template "empty-state" "No history yet."}}
+    {{end}}
+  </section>
+
+  {{template "error-notice" .FormError}}
+</main>
+{{template "footer" .}}
+{{end}}

@@ -1,0 +1,65 @@
+{{define "revisions"}}
+{{template "shared-head" .}}
+{{template "nav" .}}
+<main id="main-content">
+  <h1>Revisions</h1>
+  <p><a href="/features/{{.FeatureCardID}}">&larr; Back to overview</a></p>
+
+  <section class="panel" aria-labelledby="current-heading">
+    <h2 id="current-heading">Current revision</h2>
+    {{if .CurrentRevision}}
+      <p><strong>{{.CurrentRevision}}</strong> is current.</p>
+      {{template "rationale" .CurrentReason}}
+    {{else}}
+      {{template "empty-state" "No accepted revision."}}
+    {{end}}
+  </section>
+
+  {{template "error-notice" .FormError}}
+
+  {{range .Revisions}}
+  <section class="panel" aria-labelledby="rev-{{.RevisionID}}">
+    <h2 id="rev-{{.RevisionID}}">
+      {{.RevisionID}} (sequence {{.Sequence}})
+      {{if .IsCurrent}}{{template "status-badge" "current"}}{{end}}
+      {{template "status-badge" .AcceptanceState}}
+    </h2>
+    <p class="when">Recorded {{.RecordedAt.Format "2006-01-02 15:04"}}{{if .ProvenanceActor}} by {{.ProvenanceActor}}{{end}}</p>
+    {{if .HasContent}}
+      <h3>{{.Title}}</h3>
+      <p>{{.ProblemStatement}}</p>
+      {{if .UserOutcome}}<p><strong>User outcome:</strong> {{.UserOutcome}}</p>{{end}}
+      {{if .FunctionalBehaviours}}
+      <h4>Functional behaviours</h4>
+      <ul>{{range .FunctionalBehaviours}}<li>{{.}}</li>{{end}}</ul>
+      {{end}}
+      {{if .Constraints}}
+      <h4>Constraints</h4>
+      <ul>{{range .Constraints}}<li>{{.}}</li>{{end}}</ul>
+      {{end}}
+      {{if .AcceptanceCriteria}}
+      <h4>Acceptance criteria</h4>
+      <ul>{{range .AcceptanceCriteria}}<li>{{.Key}}: {{.Text}}</li>{{end}}</ul>
+      {{end}}
+      {{if .Dependencies}}
+      <h4>Dependencies</h4>
+      <ul>{{range .Dependencies}}<li>{{.}}</li>{{end}}</ul>
+      {{end}}
+      {{if .OpenQuestions}}
+      <h4>Open questions</h4>
+      <ul>{{range .OpenQuestions}}<li>{{.}}</li>{{end}}</ul>
+      {{end}}
+    {{else}}
+      {{template "empty-state" "No specification content stored for this revision."}}
+    {{end}}
+    <div class="accept-form-slot" data-artifact-id="{{$.ArtifactID}}" data-revision-id="{{.RevisionID}}"></div>
+  </section>
+  {{end}}
+
+  <section class="panel" aria-labelledby="new-revision-heading">
+    <h2 id="new-revision-heading">Add a revision</h2>
+    <div id="revision-form-slot"></div>
+  </section>
+</main>
+{{template "footer" .}}
+{{end}}

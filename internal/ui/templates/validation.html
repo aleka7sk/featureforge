@@ -1,0 +1,83 @@
+{{define "validation"}}
+{{template "shared-head" .}}
+{{template "nav" .}}
+<main id="main-content">
+  <h1>Validation</h1>
+  <p><a href="/features/{{.FeatureCardID}}">&larr; Back to overview</a></p>
+
+  {{template "error-notice" .FormError}}
+
+  <section class="panel" aria-labelledby="plan-heading">
+    <h2 id="plan-heading">Validation plan</h2>
+    {{if .PlanFound}}
+      <p>Plan <strong>{{.PlanArtifactID}}</strong></p>
+      {{if .Activities}}
+      <table>
+        <thead><tr><th scope="col">Activity</th><th scope="col">Method</th><th scope="col">Satisfied when</th></tr></thead>
+        <tbody>
+          {{range .Activities}}
+          <tr><td>{{.Key}}</td><td>{{.Method}}</td><td>{{.OutcomeInterpretation}}</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{end}}
+    {{else}}
+      {{template "empty-state" "No validation plan established yet."}}
+    {{end}}
+    <div id="plan-form-slot"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="executions-heading">
+    <h2 id="executions-heading">Executions</h2>
+    {{if .Executions}}
+    <ul class="timeline-list">
+      {{range .Executions}}
+      <li class="timeline-item">
+        <span class="kind">{{.Label}}</span> {{template "status-badge" .Summary}}
+        {{if .HasOccurredAt}}<span class="when">{{.OccurredAt.Format "2006-01-02 15:04"}}</span>{{end}}
+        {{if .References}}<p class="hint">References: {{range $i, $r := .References}}{{if $i}}, {{end}}{{$r}}{{end}}</p>{{end}}
+      </li>
+      {{end}}
+    </ul>
+    {{else}}
+    {{template "empty-state" "No executions recorded yet."}}
+    {{end}}
+    <div id="run-form-slot"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="claims-heading">
+    <h2 id="claims-heading">Claims and readiness</h2>
+    {{if .Readiness}}
+    {{range .Readiness}}
+    <div class="panel">
+      <h3>{{.RequirementArtifactID}} {{if .HasClaim}}{{template "status-badge" .Outcome}}{{else}}{{template "status-badge" "no-claim"}}{{end}}</h3>
+      {{if .HasClaim}}
+        <p><strong>Current claim:</strong> {{.ClaimID}}{{if .Corrects}} (corrects {{.Corrects}}){{end}}</p>
+        {{if .Reasoning}}<p>{{.Reasoning}}</p>{{end}}
+        {{template "rationale" .VerdictReason}}
+      {{else}}
+        {{template "empty-state" "No claim recorded."}}
+      {{end}}
+      {{if .Rejected}}
+      <h4>Superseded and invalidated claims</h4>
+      <ul>
+        {{range .Rejected}}
+        <li class="superseded">
+          {{.RecordKey}} {{template "status-badge" .Outcome}} — {{.Reason}}
+          {{if .CorrectedBy}}(corrected by {{.CorrectedBy}}){{end}}
+          {{if .Reasoning}}<p>{{.Reasoning}}</p>{{end}}
+        </li>
+        {{end}}
+      </ul>
+      {{end}}
+    </div>
+    {{end}}
+    {{else}}
+    {{template "empty-state" "No requirements to claim against yet."}}
+    {{end}}
+    <div id="claim-form-slot"></div>
+    <div id="correction-form-slot"></div>
+  </section>
+</main>
+{{template "footer" .}}
+{{end}}

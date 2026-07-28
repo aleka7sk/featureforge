@@ -1,0 +1,38 @@
+{{define "requirements"}}
+{{template "shared-head" .}}
+{{template "nav" .}}
+<main id="main-content">
+  <h1>Requirements</h1>
+  <p><a href="/features/{{.FeatureCardID}}">&larr; Back to overview</a></p>
+
+  {{template "error-notice" .FormError}}
+
+  {{if .Requirements}}
+  {{range .Requirements}}
+  <section class="panel" aria-labelledby="req-{{.ArtifactID}}">
+    <h2 id="req-{{.ArtifactID}}">
+      {{.ArtifactID}}
+      {{if .Readiness.HasClaim}}{{template "status-badge" .Readiness.Outcome}}{{else}}{{template "status-badge" "no-claim"}}{{end}}
+    </h2>
+    <p>{{.Statement}}</p>
+    <p class="hint">Revision {{.RevisionID}}{{if .Readiness.CriterionKeys}} · criterion {{index .Readiness.CriterionKeys 0}}{{end}}</p>
+    {{if .Readiness.HasClaim}}
+      <p><strong>Current claim:</strong> {{.Readiness.ClaimID}}</p>
+      {{template "rationale" .Readiness.VerdictReason}}
+      {{if .Readiness.Reasoning}}<p>{{.Readiness.Reasoning}}</p>{{end}}
+    {{else}}
+      {{template "empty-state" "No claim recorded against this requirement yet."}}
+    {{end}}
+  </section>
+  {{end}}
+  {{else}}
+  {{template "empty-state" "No requirements yet."}}
+  {{end}}
+
+  <section class="panel" aria-labelledby="new-requirement-heading">
+    <h2 id="new-requirement-heading">Add a requirement</h2>
+    <div id="requirement-form-slot"></div>
+  </section>
+</main>
+{{template "footer" .}}
+{{end}}

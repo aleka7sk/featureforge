@@ -38,7 +38,7 @@
      never appears without an adjacent rationale block; enforcing that is
      each page template's responsibility, not this primitive's. */}}
 {{define "status-badge"}}
-<span class="status-badge status-{{.}}">{{.}}</span>
+<span class="status-badge status-{{. | statusClass}}">{{.}}</span>
 {{end}}
 
 {{/* rationale renders a Rule string plus optional supporting detail. Used

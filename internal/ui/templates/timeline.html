@@ -1,0 +1,59 @@
+{{define "timeline"}}
+{{template "shared-head" .}}
+{{template "nav" .}}
+<main id="main-content">
+  <h1>Timeline</h1>
+  <p><a href="/features/{{.FeatureCardID}}">&larr; Back to overview</a></p>
+
+  <form method="get" action="/features/{{.FeatureCardID}}/timeline" class="panel">
+    <div class="field">
+      <label for="kind">Filter by kind</label>
+      <select id="kind" name="kind">
+        <option value="">All kinds</option>
+        {{$selected := .SelectedKind}}
+        {{range .Kinds}}
+        <option value="{{.}}" {{if eq . $selected}}selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+    </div>
+    <button type="submit">Filter</button>
+  </form>
+
+  <section class="panel" aria-labelledby="dated-heading">
+    <h2 id="dated-heading">History</h2>
+    {{if .Dated}}
+    <ul class="timeline-list">
+      {{range .Dated}}
+      <li class="timeline-item">
+        <span class="kind">{{.Label}}</span>
+        <span class="when">{{.OccurredAt.Format "2006-01-02 15:04"}}</span>
+        {{if .Actor}}<span class="hint">by {{.Actor}}</span>{{end}}
+        <p>{{.Summary}}</p>
+        {{if .Corrected}}<p class="hint">Corrects {{.Corrected}}</p>{{end}}
+        {{if .References}}<p class="hint">References: {{range $i, $r := .References}}{{if $i}}, {{end}}{{$r}}{{end}}</p>{{end}}
+        {{template "rationale" .Rationale}}
+      </li>
+      {{end}}
+    </ul>
+    {{else}}
+    {{template "empty-state" "No events match this filter."}}
+    {{end}}
+  </section>
+
+  {{if .Undated}}
+  <section class="panel" aria-labelledby="undated-heading">
+    <h2 id="undated-heading">Undated events</h2>
+    <ul class="timeline-list">
+      {{range .Undated}}
+      <li class="timeline-item">
+        <span class="kind">{{.Label}}</span>
+        <p>{{.Summary}}</p>
+        {{template "rationale" .Rationale}}
+      </li>
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+</main>
+{{template "footer" .}}
+{{end}}
