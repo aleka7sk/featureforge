@@ -19,6 +19,7 @@ import (
 	"github.com/aleka7sk/featureforge/internal/infrastructure/memory"
 	"github.com/aleka7sk/featureforge/internal/infrastructure/postgres"
 	transporthttp "github.com/aleka7sk/featureforge/internal/transport/http"
+	"github.com/aleka7sk/featureforge/internal/ui"
 )
 
 func main() {
@@ -49,10 +50,21 @@ func run(logger *slog.Logger) error {
 		Clock:     application.SystemClock{},
 		Logger:    logger,
 	}
+	apiHandler := transporthttp.NewHandler(deps)
+	uiHandler := ui.NewHandler(ui.Dependencies{API: apiHandler, Logger: logger})
+
+	// One root mux composes the two independently-built handlers under
+	// disjoint prefixes (FF-021 §15): /api/v1/ keeps serving exactly what
+	// FF-018 built and tested, unmodified and independently servable;
+	// everything else reaches the UI, which reaches the API only in-process
+	// through apiHandler (AD-028) -- never a second network hop.
+	rootMux := http.NewServeMux()
+	rootMux.Handle("/api/v1/", apiHandler)
+	rootMux.Handle("/", uiHandler)
 
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           transporthttp.NewHandler(deps),
+		Handler:           rootMux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

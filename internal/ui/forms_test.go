@@ -237,9 +237,14 @@ func TestAssignLifecycleForm_TransitionKeyRequiredForNonEntry(t *testing.T) {
 		"artifact_id": {"CAP-1"}, "revision_id": {"CAP-1-REV-1"}, "title": {"Homework"}, "problem_statement": {"No follow-up."},
 	}, "/features/FC-1")
 
+	// from_assignment_id is deliberately supplied so transition_key is the
+	// only missing field -- the command validates both through a map whose
+	// iteration order is unspecified, so leaving both empty would make the
+	// error message (though not the rejection itself) flaky.
 	rr := postForm(t, handler, "/features/FC-1/lifecycle", url.Values{
 		"assignment_id": {"LC-1"}, "state": {"under-validation"},
 		"transition_record_artifact_id": {"TR-1"}, "transition_record_revision_id": {"TR-1-REV-2"},
+		"from_assignment_id": {"LC-0"},
 	})
 	if rr.Code == http.StatusSeeOther {
 		t.Fatalf("expected the missing transition_key to be rejected, got a redirect to %q", rr.Header().Get("Location"))
