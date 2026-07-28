@@ -747,6 +747,114 @@ of it. See [FF-014](../spec/014-postgresql-persistence.md).
 
 ---
 
+## AD-022 — The Phase A HTTP surface is intent-oriented, not resource-CRUD
+
+Status: Accepted and implemented
+Date: 2026-07-28
+Phase: M.5 (Phase A)
+
+**Context.** FF-010 §3 decomposed the application layer into commands named
+for engineering acts, with no `Update*`, no `Delete*`, and no generic
+`RecordEngineeringAct`. A resource-CRUD HTTP surface would have to invent
+`PUT`/`DELETE` semantics for values that are immutable by construction, and
+would flatten twelve distinct engineering acts into four verbs.
+
+**Decision.** The public HTTP surface is intent-oriented: one endpoint per
+command, one endpoint per query, `GET` and `POST` only, no `PUT`, `PATCH`, or
+`DELETE` route registered anywhere. Full context, the complete route table,
+and the acceptance criteria are in
+[FF-018 §2.1 and §3](../spec/018-http-phase-a-implementation.md).
+
+**Alternatives.** Resource-CRUD rejected — cannot express immutability
+honestly. A single `POST /commands` envelope with a discriminator rejected —
+defeats method/route-level architecture tests. GraphQL rejected — no consumer
+need for a resolver layer over an already-fixed query set.
+
+**Consequences.** The route table is a readable list of the engineering acts
+the system supports; `TestOnlyTransportAndCommandImportNetHTTP` and the
+nineteen-endpoint route table hold it in place. Implemented: twelve command
+endpoints and seven query endpoints, verified by
+`internal/transport/http`'s handler tests and the canonical-scenario-through-
+HTTP test (`internal/transport/http/scenario_http_test.go`).
+
+---
+
+## AD-023 — The `net/http`/template import prohibition is narrowed into named-holder permissions
+
+Status: Accepted and implemented
+Date: 2026-07-28
+Phase: M.5 (Phase A)
+
+**Context.** `TestNoHTTPDatabaseUIOrAIPackage` forbade `net/http`,
+`database/sql`, `html/template`, and `text/template` anywhere under
+`internal/`, carried stale M.3-era wording, had an inert `postgres`/`sql`
+path-prefix check, and left `cmd/` entirely unchecked. Phase A must import
+`net/http`. Full investigation, evidence, and the permitted-holder table are
+in [FF-018 §2.2](../spec/018-http-phase-a-implementation.md).
+
+**Decision.** Narrow the prohibition into named-holder permissions rather
+than removing it — the shape `TestOnlyIntegrationPackageImportsPEOS` (M.3)
+and `TestOnlyPostgresInfrastructureImportsDriver` (M.4) already establish.
+`net/http` is permitted only in `internal/transport/http` and
+`cmd/featureforge`; `html/template`/`text/template` remain forbidden
+everywhere in Phase A (reserved for the future Phase B UI package);
+`database/sql` remains forbidden absolutely. Package discovery
+(`internal/architecture.CmdPackages`) is extended to `cmd/` so the PEOS and
+driver boundaries cover the executable too.
+
+**Alternatives.** Deleting the test rejected — discards the boundary exactly
+when it starts to matter. Adding `net/http` to an allow-list inside the one
+broad test rejected — a failure would not name which boundary broke. Leaving
+`cmd/` unchecked rejected — the executable is where a shortcut import is
+least visible.
+
+**Consequences.** `TestNoHTTPDatabaseUIOrAIPackage` is replaced by four named
+tests (`TestOnlyTransportAndCommandImportNetHTTP`, `TestOnlyUIImportsHTMLTemplate`,
+`TestDatabaseSQLIsNeverImported`, `TestNoAIPackage`) in
+`internal/architecture/architecture_test.go`, each verified against a
+deliberate violation before being trusted. `cmd/featureforge` is covered by
+the PEOS and driver import guards for the first time.
+
+---
+
+## AD-024 — `cmd/featureforge` is the sole composition root; identity generation is deferred to Phase B
+
+Status: Accepted and implemented
+Date: 2026-07-28
+Phase: M.5 (Phase A)
+
+**Context.** Phase A introduces the module's first executable. FF-015 §10
+also reserved identity generation at the transport edge to this decision.
+Full context is in
+[FF-018 §2.3](../spec/018-http-phase-a-implementation.md).
+
+**Decision.** Two parts. *Composition:* `cmd/featureforge` is the sole
+composition root — it reads configuration from environment variables
+(`FEATUREFORGE_ADDR`, `FEATUREFORGE_ADAPTER`, `FEATUREFORGE_POSTGRES_DSN`),
+selects one persistence adapter, applies migrations when the adapter requires
+them, constructs the application dependencies, builds the router, and owns
+server lifecycle — no application, transport, or engineering logic of its
+own. *Identity generation:* client-supplied identity is accepted and is the
+default; server-side generation is Phase B's, deferred rather than built now
+for a caller (a UI form) that does not yet exist. No UUID dependency is
+added — Phase B will use `crypto/rand` with a project-defined format when it
+is needed.
+
+**Alternatives.** Server-generated identity by default rejected — it removes
+the free idempotency client-supplied identity gives every write. A UUID
+library rejected — a new direct dependency, build-failing per
+`TestGoModHasOnlyApprovedRequirements`. Building the generator in Phase A
+rejected as untested infrastructure for a caller that does not exist until
+Phase B.
+
+**Consequences.** `cmd/featureforge/main.go` is wiring only, covered by the
+same architecture rules as every other package. Phase A's command endpoints
+are pure pass-through on identity; a request omitting a required identity is
+`400 ErrInvalidCommand`. `postgres.Connect`'s `*pgxpool.Pool` is carried only
+through type inference, so `cmd/featureforge` needs no direct `pgx` import.
+
+---
+
 ## AD-025 — `RevisionEnvelope` gains an optional subject projection, and revisions become discoverable by family and subject
 
 Status: Accepted

@@ -1,6 +1,8 @@
 # FF-015 — M.5 HTTP API and Minimal UI: Engineering Plan
 
-Status: Proposed (Phase M.5 planning)
+Status: Phase A accepted and implemented via
+[FF-018](018-http-phase-a-implementation.md); Phase B (minimal UI) remains
+proposed
 Governs: the M.5 transport and interface layer — objectives, scope, HTTP
 contracts, and implementation order. Produced before any code is written.
 
@@ -630,9 +632,9 @@ CLAUDE.md's "do not make architecture decisions silently".
 
 | Proposed | Decision |
 |---|---|
-| **AD-022** | Intent-oriented HTTP API rather than resource-CRUD, following FF-010 §3's non-CRUD command decomposition (§5) |
-| **AD-023** | Narrowing the blanket `net/http`/template prohibition into named-holder import tests, extending architecture coverage to `cmd/` (§4.3) |
-| **AD-024** | Identity generation at the transport edge: client-supplied by default, server-generated only when omitted, no UUID dependency (§10) |
+| **AD-022** | **Accepted and implemented.** Intent-oriented HTTP API rather than resource-CRUD, following FF-010 §3's non-CRUD command decomposition (§5) |
+| **AD-023** | **Accepted and implemented.** Narrowing the blanket `net/http`/template prohibition into named-holder import tests, extending architecture coverage to `cmd/` (§4.3) |
+| **AD-024** | **Accepted and implemented.** Identity generation at the transport edge: client-supplied by default, server-generated only when omitted, no UUID dependency (§10) |
 | **AD-025** | **Accepted and implemented.** Revision subject discovery: an optional `SubjectKey` projection on `RevisionEnvelope` and `RevisionEnvelopeRepository.ListByFamilyAndSubject` (§6.2) |
 
 **On AD-025.** It was reserved conditionally when this plan was written —
@@ -646,7 +648,16 @@ clearing the prerequisite for §16 step 5. Revision subject discovery itself is
 implemented — the general HTTP API and UI work §16 orders is not, and remains
 future work.
 
-AD-022, AD-023, and AD-024 remain proposed and undecided.
+**On AD-022, AD-023, and AD-024.** All three were resolved, recorded, and
+implemented together as the Phase A HTTP transport
+([FF-018](018-http-phase-a-implementation.md)), the implementation packet
+that turned this plan's remaining open questions into an ordered,
+architecture-decision-free implementation sequence. Full context,
+alternatives, and consequences for each are in FF-018 §2 and in the decision
+log (AD-022, AD-023, AD-024). Phase A itself — the twelve command and seven
+query endpoints, `cmd/featureforge`, and the canonical scenario proven
+end-to-end through HTTP on both adapters — is implemented; Phase B (the
+minimal UI this plan also describes) is not, and remains future work.
 
 ## 18. Architectural risks
 

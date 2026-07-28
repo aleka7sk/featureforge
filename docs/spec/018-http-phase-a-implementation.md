@@ -1,6 +1,7 @@
 # FF-018 — M.5 Phase A HTTP Implementation
 
-Status: Accepted (Phase M.5, Phase A implementation packet; implementation not started)
+Status: Implemented (Phase M.5, Phase A). All eleven §16 steps and all
+seven commits of §17 landed; see each step's "As implemented" note and §22.
 Date: 2026-07-28
 Phase: M.5 — Phase A (HTTP API)
 Governs: the complete Phase A HTTP transport, its application-layer additions,
@@ -1237,11 +1238,27 @@ green. Record each in the implementation report.
 *Depends on:* nothing. *Done when:* the architecture suite passes, `cmd/`
 absence is tolerated, and every deliberate violation was demonstrated.
 
+*As implemented (commit `8e43f45`).* `CmdPackages()` added exactly as
+specified, tolerating `cmd/`'s pre-Step-8 absence. `TestNoHTTPDatabaseUIOrAIPackage`
+replaced by `TestOnlyTransportAndCommandImportNetHTTP`, `TestOnlyUIImportsHTMLTemplate`,
+`TestDatabaseSQLIsNeverImported`, `TestNoAIPackage`. `TestNoTimeNowOutsideClock`'s
+single-file allowlist was widened to a map including
+`internal/transport/http/middleware.go` (needed by Step 4's request-duration
+logging), and `TestTransportDoesNotImportPEOS` was added alongside the
+existing PEOS/driver guards. Every new test verified against a deliberate
+violation (scratch packages and files, including a real `cmd/featureforge`
+importing `database/sql`), then reverted.
+
 **Step 2 — `ParseEvidenceKey`.**
 *Files:* `internal/engineering/refkeys.go`, `refkeys_test.go` (or the existing
 engineering test file).
 *Behaviour:* §7.2. *Tests:* round-trip + six malformed cases.
 *Depends on:* nothing. *Done when:* `go test ./internal/engineering/...` passes.
+
+*As implemented (commit `267de0e`).* Added mirroring `ParseSubjectKey`
+exactly. `TestParseEvidenceKeyRoundTrips` and
+`TestParseEvidenceKeyRejectsMalformedInput` (six cases) in
+`internal/engineering/refkeys_test.go`.
 
 **Step 3 — Application discovery composition, plan resolution, and the new
 sentinel.**
@@ -1266,6 +1283,18 @@ four plan-selection tests §6.6 requires —
 
 *Depends on:* step 2. *Done when:* `go test ./internal/application/...` passes.
 
+*As implemented (commit `267de0e`).* `ErrValidationPlanAmbiguous` added
+beside `ErrAmbiguousLifecycleState`. `DiscoverDecisionIDs`,
+`DiscoverExecutionAndClaimIDs`, `DiscoverEvidenceArtifactIDs` added to
+`query_state.go`/`query_timeline.go`; `ResolveApplicableValidationPlanID`
+added implementing the exactly-one contract; `query_reads.go` added for the
+thin reads and Q3/Q4/Q5 composition (`GetFeatureOverview`,
+`GetFeatureEngineeringStateForCard`, `GetFeatureTimelineForCard`,
+`GetCapabilityRevisions`, `GetCapabilityRevision`, `ListProjects`,
+`ListFeaturesByProject`). All four plan-selection cases proven in
+`internal/application/discovery_test.go`, including the
+insertion-order-independence case.
+
 **Step 4 — Transport skeleton and DTO contracts.**
 *Files:* `internal/transport/http/{router,middleware,server,dto_command,dto_query}.go`.
 *Behaviour:* package, `NewHandler`, router with one trivial endpoint (Q1) end
@@ -1274,6 +1303,16 @@ to end, logging and recovery middleware, DTO types.
 *Depends on:* steps 1, 3. *Done when:* Q1 returns a correct envelope through
 `httptest`.
 
+*As implemented (commit `27ba08e`).* `Dependencies{UOW, Recorder, Clock,
+Logger}` injected, never constructed in the package. Discovered during this
+step: a bare `"/"` catch-all pattern pre-empts `ServeMux`'s own 405 logic and
+makes 404 and 405 indistinguishable via `mux.Handler` alone (both report an
+empty pattern). Resolved with `withJSONNotFoundAndMethodNotAllowed`, which
+runs the real mux through a `notFoundInterceptor` and rewrites based on the
+status `ServeMux` actually wrote — the only place the two genuinely differ.
+Verified with a throwaway diagnostic program, then removed. This is a
+transport-internal technique, not a deviation from §3's route table.
+
 **Step 5 — Centralized error mapping.**
 *Files:* `internal/transport/http/errors.go` + test.
 *Behaviour:* §11's registry, `statusFor`, error body, fallback.
@@ -1281,6 +1320,15 @@ to end, logging and recovery middleware, DTO types.
 *Depends on:* step 4. *Done when:* every sentinel then present in
 `internal/application` — including `ErrValidationPlanAmbiguous` from step 3 —
 maps, and the exhaustiveness test fails if one is removed from the registry.
+
+*As implemented (commit `27ba08e`).* `errorMappings` (24 rows), `statusFor`,
+`writeAppError` (also logs 500s at error level and 503s at warn level with
+`Retry-After: 1`). `TestErrorMappingIsExhaustive` parses
+`internal/application/errors.go` via `go/ast` and extracts sentinel
+name→message pairs directly from the source, rather than a hand-maintained
+lookup table that could itself drift. Verified against a deliberate
+violation (`ErrScratchUnmapped` added to `errors.go`, confirmed the test
+failed, reverted).
 
 **Step 6 — Command handlers.**
 *Files:* `handlers_command.go`, `dto_command.go` + tests.
@@ -1292,6 +1340,17 @@ error, conflict replay.
 *Depends on:* step 5. *Done when:* every command is reachable and no handler
 contains a domain conditional.
 
+*As implemented (commit `ea919cc`).* All twelve handlers follow the same
+six-step shape. `TestCommandEndpointsCanonicalOrder` drives all twelve in
+order; `TestCommandIdempotentReplay` and `TestCommandConflictingReplay`
+prove §14's replay contract, using a `FixedClock` (not `SystemClock`) so two
+otherwise-identical requests capture the same `clock.Now()`, matching the
+convention every other command fixture in the codebase already uses.
+`TestReviseCapabilityRequiresPathValue`'s empty-`{artifactID}` case calls
+`handleReviseCapability` directly rather than through the router: `//` in a
+URL triggers `ServeMux`'s own redirect before any handler runs, and `ServeMux`
+overwrites a pre-set `PathValue` with its own match.
+
 **Step 7 — Query handlers and discovery-backed composition.**
 *Files:* `handlers_query.go`, `dto_query.go` + tests.
 *Behaviour:* Q1–Q7 per §10.3, using step 3's composition.
@@ -1299,12 +1358,35 @@ contains a domain conditional.
 Q7 `404`.
 *Depends on:* steps 3, 6. *Done when:* all seven return correct envelopes.
 
+*As implemented (commit `f356824`).* All seven handlers added.
+**Correction to §10.3:** `engineeringStateRationaleDTO` carries no
+`readiness` entry. `application.ReadinessResult` has no `Rule`-style
+rationale field the way `ResolutionRationale` and `LifecycleRationale` do —
+every rationale elsewhere in this codebase is application-owned, never
+transport-synthesized, and inventing one here would itself violate §10.2's
+"no derived field is invented" rule. The per-requirement `verdict_reason`
+values already carry the readiness explanation FF-011 requires. This is a
+narrow, evidence-grounded correction to this document's own prior wording,
+not a contradiction between FF-018 and repository behaviour, so it did not
+warrant halting implementation — it is recorded here and in a doc comment on
+the type.
+
 **Step 8 — `cmd/featureforge`.**
 *Files:* `cmd/featureforge/main.go`.
 *Behaviour:* §17. *Tests:* architecture tests from step 1 now cover it; a
 smoke test only if a composition helper warrants one.
 *Depends on:* step 7. *Done when:* the binary starts on both adapters and
 shuts down gracefully.
+
+*As implemented (commit `2f6026f`).* **N1 resolved: no direct `pgx` import.**
+`postgres.Connect`'s `*pgxpool.Pool` is carried only through `:=` type
+inference into `postgres.Migrate`/`NewUnitOfWork` and a `Close` method
+value; `cmd/featureforge/main.go` never names a pgx type.
+`TestOnlyPostgresInfrastructureImportsDriver` passes unchanged, confirming
+it. No `main_test.go` was warranted — verified instead with a built smoke
+binary: the memory adapter starts, serves a real request, and exits 0 on
+`SIGINT`; a `postgres` adapter run without `FEATUREFORGE_POSTGRES_DSN` and
+an unknown adapter value both fail fast with exit 1 and a clear message.
 
 **Step 9 — Memory scenario-through-HTTP.**
 *Files:* `internal/transport/http/scenario_http_test.go`.
@@ -1314,6 +1396,21 @@ requests against an in-memory-backed handler, asserting the same end state
 *Depends on:* step 8. *Done when:* it passes. **This is the single
 highest-value test in Phase A.**
 
+*As implemented.* `assertCanonicalEndState` itself is unexported test code
+in `internal/scenario`, and FF-018 does not authorize modifying that
+package, so its checks are reproduced in
+`assertCanonicalEndStateThroughHTTP` rather than imported — sourced from the
+Q1–Q7 HTTP responses wherever an endpoint exposes the answer, and from a
+direct query on the shared `uow` only for the facts no Phase A query
+endpoint surfaces (content digests, raw claim/correction fields, lifecycle
+transition history). One act — recording the decision's supporting
+evidence — has no HTTP command by design (FF-010 §3 fixes the act surface
+at ten acts / twelve commands; every other piece of evidence arrives
+bundled with an execution via `RecordValidationRunCommand`), so this one act
+is performed directly against the shared `uow`/recorder, exactly as
+`internal/scenario.Run` itself does internally. `TestCanonicalScenarioThroughHTTP`
+passed on its first run.
+
 **Step 10 — PostgreSQL scenario-through-HTTP.**
 *Files:* the same test, parameterised by adapter.
 *Behaviour:* the identical scenario against PostgreSQL, gated on
@@ -1321,9 +1418,32 @@ highest-value test in Phase A.**
 *Depends on:* step 9. *Done when:* `make postgres-test` passes with it
 included.
 
+*As implemented.* The scenario-driving body was factored into
+`runScenarioThroughHTTP(t, ctx, uow, rec, clock) http.Handler`, shared by
+`TestCanonicalScenarioThroughHTTP` (memory) and the new
+`TestCanonicalScenarioThroughHTTPPostgres` in
+`internal/transport/http/scenario_http_postgres_test.go`, which mirrors
+`internal/scenario/scenario_postgres_test.go`'s per-test schema isolation
+(`newPostgresFixtureHTTP`). `Makefile`'s `postgres-test` target was extended
+to include `./internal/transport/http/...`. Run against a real PostgreSQL
+container via `make postgres-test`: exit 0, zero failures, both the memory
+and PostgreSQL variants passing in the same run.
+
 **Step 11 — Documentation evidence and full verification.**
-*Behaviour:* update FF-015 and FF-018 status/evidence per §24; run the full
-gate (§25). *Done when:* everything passes and the tree is clean.
+*Behaviour:* update FF-015 and FF-018 status/evidence per §20; run the full
+gate (§18 criterion 19). *Done when:* everything passes and the tree is clean.
+
+*As implemented.* FF-015's status line, §17 table, and closing paragraph
+updated to record AD-022/023/024 as accepted and implemented, each pointing
+to this document and to its own decision-log entry; FF-015's own status
+notes Phase A is implemented and Phase B is not. AD-022, AD-023, and AD-024
+were materialized as standalone entries in `docs/decisions/README.md`
+(between AD-021 and AD-025), each with Context/Decision/Alternatives/
+Consequences and a pointer back to this document's §2 for full text. This
+document's own status line and §22 record the full verification gate.
+`docs/reports/m5-contract-investigation.md`, `docs/reports/ff016-architecture-review.md`,
+and AD-025/AD-026's history were not rewritten. See §22 for the gate
+results.
 
 ---
 
@@ -1452,3 +1572,98 @@ discipline applies.
   carry forward unchanged.
 - **Whether any query needs materialization** — still open, still requiring
   measured evidence, per AD-006.
+
+---
+
+## 22. Implementation evidence
+
+**Commits.** §17's seven-commit plan landed exactly as specified:
+
+1. `8e43f45` — `test(architecture): narrow import guards and cover cmd/` (step 1)
+2. `267de0e` — `feat(engineering,application): add ParseEvidenceKey and discovery composition` (steps 2–3)
+3. `27ba08e` — `feat(transport): HTTP skeleton, DTOs, router, centralized errors` (steps 4–5)
+4. `ea919cc` — `feat(transport): command endpoints` (step 6)
+5. `f356824` — `feat(transport): query endpoints (Q1-Q7)` (step 7)
+6. `2f6026f` — `feat(cmd): featureforge server composition` (step 8)
+7. `test(transport): canonical scenario through HTTP on both adapters` + documentation evidence (steps 9–11) — this commit
+
+No genuine contradiction between repository behaviour and this document was
+found. Every discrepancy implementation surfaced (§16 step 7's
+`readiness` rationale correction; three pre-existing bugs in the guard this
+document replaced) was narrow, evidence-grounded, and resolved within the
+scope FF-018 already authorized, and is recorded at its own step rather than
+silently swept aside.
+
+**Acceptance criteria (§18), confirmed:**
+
+1. Nineteen routes registered in `internal/transport/http/router.go`: twelve
+   `POST` command routes, seven `GET` query routes. No other route.
+2. `grep -n 'PUT\|PATCH\|DELETE' router.go` matches nothing but this
+   sentence's own history in commit messages; `TestNoRouteRegistersUnsupportedMethods`
+   proves the three methods all return `405`.
+3. Every handler in `handlers_command.go`/`handlers_query.go` calls exactly
+   one `application.*Command.Execute` or `application.Get*`/`List*`
+   function; none holds `application.Repositories`; none calls
+   `UnitOfWork.Do` — the package cannot, since `Dependencies` exposes only
+   the `UnitOfWork` interface, never a concrete adapter.
+4. `TestTransportDoesNotImportPEOS` and `TestNoPEOSTypeIsCopied`
+   (`internal/architecture`) pass; no `dto_*.go` file imports
+   `github.com/aleka7sk/PEOS`.
+5. `ParseEvidenceKey` implemented and tested
+   (`internal/engineering/refkeys.go`, `refkeys_test.go`); `EvidenceKey`'s
+   format is untouched — only a parser was added.
+6. `DiscoverDecisionIDs`, `DiscoverExecutionAndClaimIDs`,
+   `DiscoverEvidenceArtifactIDs` proven deterministic and deduplicated in
+   `internal/application/discovery_test.go`.
+7. / 7a. `TestResolveApplicableValidationPlanIDZero/One/Many/OrderingDoesNotResolveAmbiguity`
+   cover all four cases; `TestCanonicalScenarioThroughHTTP` reaches Q3/Q4/Q5
+   with no plan or requirement identifier supplied by the test beyond a
+   `FeatureCardID`/`artifactID` path value.
+8. `TestDiscoverRequirementArtifactIDsIsIndependentOfClaims` (carried from
+   FF-016/AD-025, re-verified here) plus `TestCanonicalScenarioThroughHTTP`'s
+   Q4 assertion of exactly four effective requirements, including `REQ-4`,
+   which has no claim.
+9. `TestErrorMappingIsExhaustive` parses `internal/application/errors.go` via
+   `go/ast` at test time — 24 sentinels observed (23 pre-existing +
+   `ErrValidationPlanAmbiguous`) — and was verified to fail when a sentinel
+   is added without a mapping (deliberate-violation proof, reverted).
+10. `internalErrorMessage` fallback in `errors.go`; no `err.Error()` string
+    ever reaches a response body for an unmapped error.
+11. `TestCommandIdempotentReplay` (`201`) and `TestCommandConflictingReplay`
+    (`409`, code `immutable_value_conflict`).
+12. `TestCommandEndpointsCanonicalOrder` exercises `AcceptCapabilityRevision`
+    against two distinct revisions under AD-026's `SubjectKey`-aware
+    equality; `TestCanonicalScenarioThroughHTTP`'s CLM-2/CLM-4 assertions
+    exercise the same conflict/correction machinery end to end.
+13. `TestCanonicalScenarioThroughHTTP`'s Q4 assertion: `REQ-4` present with
+    `has_claim=false`; overall `readiness.status = not-ready`, never `ready`.
+14. `TestGetFeatureStateHandler` and `TestCanonicalScenarioThroughHTTP` assert
+    `rationale.current_revision.rule` is non-empty on Q4; Q5's per-event
+    `rationale` field is asserted present on every dated event, and its
+    absence at the envelope's top level is asserted directly.
+15. `TestCanonicalScenarioThroughHTTP` (memory) and
+    `TestCanonicalScenarioThroughHTTPPostgres` (PostgreSQL, gated on
+    `FEATUREFORGE_POSTGRES_TEST_DSN`) both pass; confirmed together via
+    `make postgres-test`, exit `0`, zero failures.
+16. `TestOnlyTransportAndCommandImportNetHTTP` narrows rather than removes
+    the prior blanket guard; every one of the four replacement tests and the
+    widened `TestNoTimeNowOutsideClock` allowlist was verified against a
+    deliberate violation (introduced, confirmed failing for the right
+    reason, reverted) during steps 1 and 4.
+17. `allPackagesIncludingCmd` / `CmdPackages()` cover `cmd/featureforge`;
+    `TestOnlyPostgresInfrastructureImportsDriver` passes with
+    `cmd/featureforge` holding no direct `pgx` import (N1, resolved in
+    favour of type inference).
+18. No file under `internal/transport/http` or `cmd/` imports
+    `html/template` or `text/template`; `TestOnlyUIImportsHTMLTemplate`
+    passes with no holder registered.
+19. Full gate, run after step 10 landed:
+
+    ```
+    gofmt -l .                        → clean
+    go vet ./...                      → clean
+    go build ./...                    → clean
+    go test ./... -count=1            → ok, all packages
+    go test ./... -race -count=1      → ok, all packages
+    make postgres-test                → exit 0, zero failures
+    ```
