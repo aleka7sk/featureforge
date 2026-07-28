@@ -1,9 +1,13 @@
 package http
 
 import (
+	"encoding/json"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -40,6 +44,45 @@ func TestErrorMappingIsExhaustive(t *testing.T) {
 	}
 	if len(declared) != len(errorMappings) {
 		t.Errorf("internal/application declares %d Err* sentinels, but errorMappings has %d rows -- one list is stale", len(declared), len(errorMappings))
+	}
+}
+
+// TestUnmappedErrorFallsBackOpaque proves an application error absent from
+// errorMappings -- one the registry was never told about -- maps to 500
+// internal_error with the generic fallback message, and that the error's
+// own text never reaches the response body (FF-018 §8.3, §16 step 5,
+// §18 criterion 10). TestErrorMappingIsExhaustive above proves every
+// *declared* sentinel is mapped; this proves what happens to one that
+// is not, which is the case the exhaustiveness test cannot exercise --
+// exhaustiveness policies the registry's completeness, not its fallback
+// path.
+func TestUnmappedErrorFallsBackOpaque(t *testing.T) {
+	unmapped := errors.New("a sensitive internal detail that must never reach a client")
+
+	status, code, exposeMessage := statusFor(unmapped)
+	if status != http.StatusInternalServerError || code != "internal_error" || exposeMessage {
+		t.Fatalf("statusFor(unmapped) = (%d, %q, %v), want (500, internal_error, false)", status, code, exposeMessage)
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	writeAppError(w, r, Dependencies{}, unmapped)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", w.Code)
+	}
+	var body errorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decoding response: %v; body = %s", err, w.Body.String())
+	}
+	if body.Error.Code != "internal_error" {
+		t.Errorf("code = %q, want internal_error", body.Error.Code)
+	}
+	if body.Error.Message != internalErrorMessage {
+		t.Errorf("message = %q, want the generic fallback %q", body.Error.Message, internalErrorMessage)
+	}
+	if strings.Contains(w.Body.String(), "sensitive internal detail") {
+		t.Error("the unmapped error's own text leaked into the response body")
 	}
 }
 

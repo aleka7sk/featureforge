@@ -3,6 +3,7 @@ package http_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -360,6 +361,98 @@ func TestCommandConflictingReplay(t *testing.T) {
 	}
 	if code := errorCode(t, second); code != "immutable_value_conflict" {
 		t.Errorf("code = %q, want immutable_value_conflict", code)
+	}
+}
+
+// TestAssignLifecycleReplayHonorsAD026SubjectKeyEquality proves AD-026's
+// RevisionEnvelope.Equal -- which compares RevisionKey, Payload, AND
+// SubjectKey -- governs conflict detection through HTTP, isolating each
+// component in turn. Post-implementation audit finding MINOR-2.
+//
+// C6's entry-assignment path (IsEntry: true) is used rather than a
+// revision-family command like C3/C4/C7/C9: those revisions' families
+// (capability, requirement) either define no SubjectKey at all (FF-016
+// §3.2 -- "capability: the revision *is* the subject") or embed the
+// subject inside their own Payload as PEOS content (requirement), so
+// varying the subject there also changes the Payload and cannot isolate
+// AD-026's contribution from the pre-existing Payload-equality check.
+// BuildEntryAssignment's Transition Record Revision is content-free
+// (AD-014): its Payload is a function of TransitionRecordArtifactID,
+// TransitionRecordRevisionID, and RecordedAt alone (codec_lifecycle.go),
+// while SubjectKey is set independently from SubjectArtifactID -- the
+// {artifactID} path segment C6 maps to it. This is the exact shape FF-016
+// architecture review finding F-001 identified as unrecoverable from
+// Payload alone, which is what AD-026 corrected.
+func TestAssignLifecycleReplayHonorsAD026SubjectKeyEquality(t *testing.T) {
+	clock := application.NewFixedClock(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC))
+	deps := transporthttp.Dependencies{
+		UOW: memory.NewUnitOfWork(memory.NewStore()), Recorder: peos.NewRecorder(), Clock: clock,
+	}
+	handler := transporthttp.NewHandler(deps)
+
+	// AD-021: RecordEnvelopeRepository.Put verifies a record's SubjectKey
+	// resolves to a real Artifact, so both subjects named below (CAP-1,
+	// CAP-2) must exist before an entry assignment can name them. Each gets
+	// its own feature card: a FeatureCard links at most one capability
+	// (ErrCapabilityAlreadyLinked).
+	postJSON(t, handler, "/api/v1/projects", map[string]any{"project_id": "PRJ-1", "name": "Pilot"}, nil)
+	content := map[string]any{"schema_version": 1, "title": "Homework", "problem_statement": "No follow-up today."}
+	for i, artifactID := range []string{"CAP-1", "CAP-2"} {
+		featureCardID := fmt.Sprintf("FC-%d", i+1)
+		postJSON(t, handler, "/api/v1/features", map[string]any{
+			"feature_card_id": featureCardID, "project_id": "PRJ-1", "title": "Homework", "description": "",
+		}, nil)
+		rr := postJSON(t, handler, "/api/v1/capabilities", map[string]any{
+			"feature_card_id": featureCardID, "artifact_id": artifactID, "revision_id": artifactID + "-REV-1", "content": content,
+		}, nil)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("seeding %s: status = %d, want 201; body = %s", artifactID, rr.Code, rr.Body.String())
+		}
+	}
+
+	entry := func(assignmentID string) map[string]any {
+		return map[string]any{
+			"assignment_id": assignmentID, "state": "drafting", "is_entry": true,
+			"transition_record_artifact_id": "TR-1", "transition_record_revision_id": "TR-1-REV-0",
+		}
+	}
+
+	// 1. Identical replay -- same RevisionKey (TR-1/TR-1-REV-0), same
+	// content-free Payload (clock unchanged), same SubjectKey (path CAP-1)
+	// -- succeeds as a no-op.
+	first := postJSON(t, handler, "/api/v1/capabilities/CAP-1/lifecycle", entry("SA-1"), nil)
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first entry assignment: status = %d, want 201; body = %s", first.Code, first.Body.String())
+	}
+	second := postJSON(t, handler, "/api/v1/capabilities/CAP-1/lifecycle", entry("SA-1"), nil)
+	if second.Code != http.StatusCreated {
+		t.Errorf("identical replay: status = %d, want 201 (idempotent no-op)", second.Code)
+	}
+
+	// 2. Same RevisionKey and byte-identical Payload (same
+	// transition_record_artifact_id/transition_record_revision_id, clock
+	// still unchanged), but a different SubjectKey -- the {artifactID}
+	// path segment is CAP-2, not CAP-1. AD-026 requires this to conflict
+	// even though every other component matches.
+	subjectConflict := postJSON(t, handler, "/api/v1/capabilities/CAP-2/lifecycle", entry("SA-2"), nil)
+	if subjectConflict.Code != http.StatusConflict {
+		t.Fatalf("SubjectKey-varying replay: status = %d, want 409; body = %s", subjectConflict.Code, subjectConflict.Body.String())
+	}
+	if code := errorCode(t, subjectConflict); code != "immutable_value_conflict" {
+		t.Errorf("SubjectKey-varying replay: code = %q, want immutable_value_conflict", code)
+	}
+
+	// 3. Same RevisionKey and same SubjectKey (path CAP-1 again), but the
+	// clock has advanced -- RecordedAt is embedded in the content-free
+	// revision's Payload, so this changes Payload alone. Conflicts on the
+	// pre-AD-026 check: payload inequality.
+	clock.Advance(time.Hour)
+	payloadConflict := postJSON(t, handler, "/api/v1/capabilities/CAP-1/lifecycle", entry("SA-3"), nil)
+	if payloadConflict.Code != http.StatusConflict {
+		t.Fatalf("payload-varying replay: status = %d, want 409; body = %s", payloadConflict.Code, payloadConflict.Body.String())
+	}
+	if code := errorCode(t, payloadConflict); code != "immutable_value_conflict" {
+		t.Errorf("payload-varying replay: code = %q, want immutable_value_conflict", code)
 	}
 }
 

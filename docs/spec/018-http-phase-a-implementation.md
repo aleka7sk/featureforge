@@ -127,8 +127,8 @@ asking for it.
 
 **Consequences.** The route table is a readable list of the engineering acts
 the system supports. `TestNoUpdateOrDeleteOnEngineeringTables`'s intent gains a
-transport-level analogue (§18.5). Adding an act means adding a command *and* a
-route, both visible in review.
+transport-level analogue (§18 criterion 2). Adding an act means adding a
+command *and* a route, both visible in review.
 
 **Scope boundary.** Governs the Phase A API surface only. It decides nothing
 about Phase B's UI routes, which FF-015 §6.4 sketches and which remain
@@ -182,8 +182,8 @@ shortcut import is most tempting and least visible.
 **Consequences.** Four focused tests replace one broad one, each failing with a
 message naming its own boundary. `cmd/` gains architecture coverage it has
 never had. Each new test must be verified against a deliberate violation before
-being trusted (§18.5) — the discipline the M.4 review confirmed and FF-017
-re-applied.
+being trusted (§18 criterion 16) — the discipline the M.4 review confirmed and
+FF-017 re-applied.
 
 **Scope boundary.** Governs import permissions and architecture-test shape.
 It decides nothing about Phase B's UI package beyond reserving
@@ -414,8 +414,8 @@ internal/transport/http/
 
 `NewHandler` returns `http.Handler`, not `*http.Server` — the package builds a
 handler; `cmd/featureforge` builds the server. That split is what keeps
-`httptest` usage (§18.1) trivial and keeps lifecycle out of the transport
-package.
+`httptest` usage trivial for every handler test this document requires and
+keeps lifecycle out of the transport package.
 
 **Why `internal/engineering` is a permitted import.** Query response DTOs read
 projected fields from `engineering.RevisionEnvelope` and
@@ -893,7 +893,7 @@ FF-015 §7's envelope, unchanged:
 
 `rationale` is **omitted when absent, never rendered empty** —
 `json:"rationale,omitempty"` with a pointer. A derived answer without rationale
-is a bug, and §18.1's test asserts it.
+is a bug, and §18 criterion 14's test asserts it.
 
 ### 10.2 Conventions
 
@@ -957,14 +957,25 @@ ApplicableDecisions, Readiness, Lifecycle}`:
 - `data.lifecycle`: `found`; when found — `state_id`, `assignment_id`,
   `subject_key`, `occurred_at`.
 - `rationale.current_revision`: from `ResolutionRationale` — `rule`,
-  `selected_key`, `selected_sequence`, `considered[]` (`key`, `sequence`,
-  `acceptance_state`), `rejected[]` (`key`, `reason`), `warnings[]`.
+  `selected_artifact_id`/`selected_revision_id` (omitted together when no
+  revision was selected), `selected_sequence`, `considered[]`
+  (`artifact_id`, `revision_id`, `sequence`, `acceptance_state`),
+  `rejected[]` (`artifact_id`, `revision_id`, `reason`), `warnings[]`. The
+  split `artifact_id`/`revision_id` form is §10.2's own convention (*"the
+  DTO carries both `artifact_id` and `revision_id` as separate fields
+  rather than asking the client to split a composite"*) applied to this
+  rationale, not a single composite `key` field.
 - `rationale.lifecycle`: from `LifecycleRationale` — `rule`, `total`,
   `duplicate`.
-- `rationale.readiness`: the per-requirement `verdict_reason` values are
-  already inside `data`; `rationale.readiness` carries the precedence rule
-  string only. Stated explicitly so an implementer does not duplicate the
-  per-requirement list into `rationale`.
+- **No `rationale.readiness`.** `application.ReadinessResult` carries no
+  `Rule`-style rationale field the way `ResolutionRationale` and
+  `LifecycleRationale` do — every rationale elsewhere in this codebase is
+  application-owned, never transport-synthesized, and inventing one here
+  would itself violate §10.2's "no derived field is invented" rule. The
+  per-requirement `verdict_reason` values already inside `data.readiness`
+  carry the explanation FF-011 requires. (Corrected during implementation,
+  §16 step 7's "As implemented" note; this replaces this section's original
+  wording, which called for a synthesized precedence-rule string here.)
 
 **Q3 `GET /features/{featureCardID}`** — `data.feature` (as Q2's element) plus
 the whole of Q4's `data` under `data.state`; `rationale` identical to Q4's.
@@ -989,9 +1000,15 @@ test asserts the per-event form for this endpoint and the envelope form for the
 others.
 
 **Q6 `GET /capabilities/{artifactID}/revisions`** — `data.revisions[]` (each as
-Q4's `current_revision` payload, plus `sequence` where order metadata exists),
-`data.current` (the resolved current revision key, omitted when none is
-accepted). `rationale` from `ResolutionRationale`, as in Q4.
+Q4's `current_revision` payload; `sequence` is populated only for the entry
+matching `data.current`'s revision, since `GetCapabilityRevisions` returns no
+per-revision order metadata for the rest — every revision's sequence remains
+recoverable from `rationale.considered[]`, which lists every considered
+revision with its own `sequence`), `data.current` (the resolved current
+revision key, omitted when none is accepted). `rationale` from
+`ResolutionRationale`, as in Q4. (Corrected during the post-implementation
+audit, finding MINOR-6; the original wording overstated per-revision sequence
+coverage in `data`.)
 
 **Q7 `GET /capabilities/{artifactID}/revisions/{revisionID}`** — `data`: one
 revision object as above. No rationale — a single fetched revision is not
@@ -1079,8 +1096,8 @@ exception. There is no evidence the standard library is insufficient.
 - **Trailing slash:** patterns are registered without one; `ServeMux`'s default
   redirect behaviour for `{$}`-free patterns is acceptable and untested beyond
   one assertion that `/api/v1/projects/` does not 500.
-- **No `PUT`, `PATCH`, or `DELETE` pattern is ever registered.** §18.5's
-  architecture test asserts this by scanning `router.go`.
+- **No `PUT`, `PATCH`, or `DELETE` pattern is ever registered.** §18
+  criterion 2's test (`TestNoRouteRegistersUnsupportedMethods`) asserts this.
 
 ### 12.3 Narrowed architecture guards
 
@@ -1195,7 +1212,8 @@ deployment manifests, daemon supervisors, production observability platforms.
 - panic recovery middleware logs and returns `500`. It does **not** interfere
   with `UnitOfWork.Do`'s panic path: `Do` rolls back and re-panics *first*, and
   the middleware catches what escapes, so rollback still happens. The contract
-  suite's `RollbackOnPanic` proves the `Do` half; §18.1 adds the transport half.
+  suite's `RollbackOnPanic` proves the `Do` half; §18 criterion 10's
+  `TestRecoverMiddlewarePreservesHTTPContract` proves the transport half.
 
 ---
 
@@ -1598,9 +1616,9 @@ silently swept aside.
 
 1. Nineteen routes registered in `internal/transport/http/router.go`: twelve
    `POST` command routes, seven `GET` query routes. No other route.
-2. `grep -n 'PUT\|PATCH\|DELETE' router.go` matches nothing but this
-   sentence's own history in commit messages; `TestNoRouteRegistersUnsupportedMethods`
-   proves the three methods all return `405`.
+2. No `PUT`, `PATCH`, or `DELETE` pattern appears in `router.go`;
+   `TestNoRouteRegistersUnsupportedMethods` proves the three methods all
+   return `405` against the live handler.
 3. Every handler in `handlers_command.go`/`handlers_query.go` calls exactly
    one `application.*Command.Execute` or `application.Get*`/`List*`
    function; none holds `application.Repositories`; none calls
@@ -1627,14 +1645,20 @@ silently swept aside.
    `go/ast` at test time — 24 sentinels observed (23 pre-existing +
    `ErrValidationPlanAmbiguous`) — and was verified to fail when a sentinel
    is added without a mapping (deliberate-violation proof, reverted).
-10. `internalErrorMessage` fallback in `errors.go`; no `err.Error()` string
-    ever reaches a response body for an unmapped error.
+10. `internalErrorMessage` fallback in `errors.go`; `TestUnmappedErrorFallsBackOpaque`
+    proves an unmapped error yields `500 internal_error` with the generic
+    message and no leaked `err.Error()` text; `TestRecoverMiddlewarePreservesHTTPContract`
+    proves a panicking handler yields the same, through `withMiddleware`.
 11. `TestCommandIdempotentReplay` (`201`) and `TestCommandConflictingReplay`
     (`409`, code `immutable_value_conflict`).
-12. `TestCommandEndpointsCanonicalOrder` exercises `AcceptCapabilityRevision`
-    against two distinct revisions under AD-026's `SubjectKey`-aware
-    equality; `TestCanonicalScenarioThroughHTTP`'s CLM-2/CLM-4 assertions
-    exercise the same conflict/correction machinery end to end.
+12. `TestAssignLifecycleReplayHonorsAD026SubjectKeyEquality` isolates all
+    three components `RevisionEnvelope.Equal` compares, through C6's entry-
+    assignment path (chosen because its Transition Record Revision is
+    content-free per AD-014, so `SubjectKey`'s contribution is isolable from
+    `Payload`, unlike C3/C4/C7/C9): identical replay is a `201` no-op; a
+    differing `SubjectKey` alone (same `RevisionKey`, byte-identical
+    `Payload`) is `409`; a differing `Payload` alone (same `RevisionKey`,
+    same `SubjectKey`) is `409`. Post-implementation audit finding MINOR-2.
 13. `TestCanonicalScenarioThroughHTTP`'s Q4 assertion: `REQ-4` present with
     `has_claim=false`; overall `readiness.status = not-ready`, never `ready`.
 14. `TestGetFeatureStateHandler` and `TestCanonicalScenarioThroughHTTP` assert
@@ -1650,14 +1674,21 @@ silently swept aside.
     widened `TestNoTimeNowOutsideClock` allowlist was verified against a
     deliberate violation (introduced, confirmed failing for the right
     reason, reverted) during steps 1 and 4.
-17. `allPackagesIncludingCmd` / `CmdPackages()` cover `cmd/featureforge`;
-    `TestOnlyPostgresInfrastructureImportsDriver` passes with
-    `cmd/featureforge` holding no direct `pgx` import (N1, resolved in
-    favour of type inference).
+17. `allPackagesIncludingCmd`/`CmdPackages()` cover `cmd/featureforge`, and
+    (post-implementation audit finding MAJOR-1, closed) `TestOnlyIntegrationPackageImportsPEOS`
+    and `TestOnlyPostgresInfrastructureImportsDriver` were extended from
+    `InternalPackages()` to `allPackagesIncludingCmd(t)` so the PEOS and
+    driver boundaries genuinely inspect `cmd/`, not just the four AD-023
+    guards — both still pass with no allow-list entry needed, confirming
+    `cmd/featureforge` holds no direct PEOS-SDK or `pgx` import (N1, resolved
+    in favour of type inference); each verified against a deliberate
+    violation (a blank `github.com/aleka7sk/PEOS` / `github.com/jackc/pgx/v5`
+    import added to `cmd/featureforge/main.go`, confirmed failing and naming
+    `cmd/featureforge`, reverted).
 18. No file under `internal/transport/http` or `cmd/` imports
     `html/template` or `text/template`; `TestOnlyUIImportsHTMLTemplate`
     passes with no holder registered.
-19. Full gate, run after step 10 landed:
+19. Full gate, confirmed green after §23's corrections (below):
 
     ```
     gofmt -l .                        → clean
@@ -1667,3 +1698,26 @@ silently swept aside.
     go test ./... -race -count=1      → ok, all packages
     make postgres-test                → exit 0, zero failures
     ```
+
+## 23. Post-implementation architecture audit
+
+A read-only audit against this document, FF-015, and AD-022/023/024/025/026
+was performed after §22's commit landed, treating the repository as an
+external reviewer would. It found the transport substantially conformant and
+one major, seven minor findings, all closed in a single corrective pass:
+
+| Finding | What it found | Resolution |
+|---|---|---|
+| MAJOR-1 | `TestOnlyIntegrationPackageImportsPEOS` and `TestOnlyPostgresInfrastructureImportsDriver` iterated `InternalPackages()`, never `allPackagesIncludingCmd(t)` — `cmd/` was invisible to the PEOS and driver boundaries despite §13's and AD-023's claim otherwise | Both switched to `allPackagesIncludingCmd(t)`; both still pass with no allow-list entry needed (§18 criterion 17) |
+| MINOR-1 | §16 step 5's fallback-opacity test and §14.3's transport-half panic-recovery test were never written | `TestUnmappedErrorFallsBackOpaque` (`errors_test.go`), `TestRecoverMiddlewarePreservesHTTPContract` (`middleware_test.go`) |
+| MINOR-2 | §18 criterion 12 (AD-026 through HTTP) had no test isolating `SubjectKey`; the only conflicting-replay test was C1's `domain.Project` conflict, which never reaches `RevisionEnvelope.Equal` | `TestAssignLifecycleReplayHonorsAD026SubjectKeyEquality` (`commands_test.go`), via C6's content-free entry-assignment path |
+| MINOR-3 | Five dangling `§18.1`/`§18.5` cross-references, left over from a `Required tests` section folded into §18 without renumbering | Repointed to §18's actual criteria (2, 10, 14, 16) |
+| MINOR-4 | §10.3 still specified a `rationale.readiness` precedence-rule string that §16 step 7's implementation had already correctly omitted | §10.3 amended in place; the field does not exist |
+| MINOR-5 | §10.3 specified composite `key` fields (`selected_key`, `considered[].key`, `rejected[].key`); the implementation correctly follows §10.2's own split `artifact_id`/`revision_id` convention instead | §10.3 amended to the split form |
+| MINOR-6 | §10.3 overstated Q6's per-revision `sequence` coverage; only the current revision's entry carries it | §10.3 amended to state where the rest is recoverable (`rationale.considered[]`) |
+| MINOR-7 | §22 criterion 2's evidence line was internally incoherent (a `grep` over `router.go` cannot match commit messages) | Replaced with a plain, checkable statement |
+
+No architecture decision was reopened. AD-022, AD-024, AD-025, and AD-026 were
+found correctly realized as specified; AD-023's decision was found correct,
+with only its enforcement extension to `cmd/` incomplete (MAJOR-1) — an
+implementation gap against an accepted decision, not grounds to revisit it.

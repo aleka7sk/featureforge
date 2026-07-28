@@ -57,12 +57,12 @@ func assertNoTransitivePEOS(t *testing.T, importPath string) {
 }
 
 // TestOnlyIntegrationPackageImportsPEOS (FF-012 §12): exactly one package
-// in the module directly imports the PEOS SDK.
+// in the module directly imports the PEOS SDK. Covers cmd/ too (AD-023,
+// FF-018 §13): cmd/featureforge imports internal/engineering/peos, the
+// FeatureForge-owned wrapper, never the PEOS SDK path itself, so no
+// allow-list entry is needed to keep this single-holder.
 func TestOnlyIntegrationPackageImportsPEOS(t *testing.T) {
-	all, err := InternalPackages()
-	if err != nil {
-		t.Fatal(err)
-	}
+	all := allPackagesIncludingCmd(t)
 	var importers []string
 	for _, p := range all {
 		for _, imp := range p.Imports {
@@ -80,11 +80,12 @@ func TestOnlyIntegrationPackageImportsPEOS(t *testing.T) {
 // TestOnlyPostgresInfrastructureImportsDriver (AD-020): exactly one package
 // in the module directly imports the PostgreSQL driver, so "PostgreSQL is a
 // replaceable adapter" is structurally true rather than merely intended.
+// Covers cmd/ too (AD-023, FF-018 §13): cmd/featureforge obtains its
+// *pgxpool.Pool through postgres.Connect's return, carried only by :=
+// type inference, so it holds no direct driver import and needs no
+// allow-list entry to keep this single-holder (open question N1).
 func TestOnlyPostgresInfrastructureImportsDriver(t *testing.T) {
-	all, err := InternalPackages()
-	if err != nil {
-		t.Fatal(err)
-	}
+	all := allPackagesIncludingCmd(t)
 	var importers []string
 	for _, p := range all {
 		for _, imp := range p.Imports {
