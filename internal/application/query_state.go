@@ -57,6 +57,39 @@ func DiscoverRequirementArtifactIDs(ctx context.Context, repos Repositories, cap
 	return discoverArtifactIDsBySubject(ctx, repos, engineering.RevisionFamilyRequirement, capabilityArtifactID)
 }
 
+// DiscoverDecisionIDs finds every decision naming any revision of
+// capabilityArtifactID as its subject, returning their decision IDs
+// (FF-018 §6.3). A decision's subject is a capability *revision*
+// (RecordEnvelope.SubjectKey uses ArtifactRevisionSubjectKey), so every
+// revision of the artifact is consulted, not only the current one -- a
+// decision recorded against an earlier revision remains part of the
+// feature's history after a later revision exists. Deduplicated and sorted
+// ascending, matching discoverArtifactIDsBySubject's determinism guarantee.
+func DiscoverDecisionIDs(ctx context.Context, repos Repositories, capabilityArtifactID string) ([]string, error) {
+	revisions, err := repos.Revisions.ListByArtifact(ctx, capabilityArtifactID)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(revisions))
+	for _, rev := range revisions {
+		subjectKey := engineering.ArtifactRevisionSubjectKey(rev.Key.ArtifactID, rev.Key.RevisionID)
+		decisions, err := repos.Records.ListByKindAndSubject(ctx, engineering.RecordKindDecision, subjectKey)
+		if err != nil {
+			return nil, err
+		}
+		for _, dec := range decisions {
+			if seen[dec.Key.ID] {
+				continue
+			}
+			seen[dec.Key.ID] = true
+			out = append(out, dec.Key.ID)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // ApplicableDecision is one decision found to name the capability as a
 // subject, with the rationale for how it was matched (FF-004 §3.3).
 type ApplicableDecision struct {

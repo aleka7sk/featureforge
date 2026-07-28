@@ -105,6 +105,116 @@ func DiscoverValidationPlanArtifactIDs(ctx context.Context, repos Repositories, 
 	return discoverArtifactIDsBySubject(ctx, repos, engineering.RevisionFamilyValidationPlan, capabilityArtifactID)
 }
 
+// ResolveApplicableValidationPlanID applies the exactly-one contract
+// (FF-018 §6.6) to a capability's discovered validation-plan population:
+// zero is legal and yields an empty PlanArtifactID -- a young feature has
+// no plan events yet, which GetFeatureTimeline already treats as a normal
+// input; exactly one is used; more than one is ErrValidationPlanAmbiguous,
+// because the model defines no acceptance or order metadata for plans and
+// therefore no mechanism to rank two. Sort order never selects a plan --
+// DiscoverValidationPlanArtifactIDs sorts only for deterministic discovery
+// output, and this function fails identically for two plans regardless of
+// the order they were discovered or recorded in.
+func ResolveApplicableValidationPlanID(ctx context.Context, repos Repositories, capabilityArtifactID string) (string, error) {
+	plans, err := DiscoverValidationPlanArtifactIDs(ctx, repos, capabilityArtifactID)
+	if err != nil {
+		return "", err
+	}
+	switch len(plans) {
+	case 0:
+		return "", nil
+	case 1:
+		return plans[0], nil
+	default:
+		return "", fmt.Errorf("%w: capability %s has %d applicable validation plans: %v", ErrValidationPlanAmbiguous, capabilityArtifactID, len(plans), plans)
+	}
+}
+
+// DiscoverExecutionAndClaimIDs finds every execution and claim naming the
+// given capability revision as subject, returning their IDs independently
+// deduplicated and sorted ascending (FF-018 §6.3). Executions and claims
+// both project a capability revision as their subject
+// (RecordEnvelope.SubjectKey uses ArtifactRevisionSubjectKey), so this is
+// scoped to one revision rather than iterated across every revision the
+// way DiscoverDecisionIDs is -- the caller passes the revision it means,
+// typically the current one from ResolveCurrentRevision.
+func DiscoverExecutionAndClaimIDs(ctx context.Context, repos Repositories, capabilityArtifactID, capabilityRevisionID string) (executionIDs, claimIDs []string, err error) {
+	subjectKey := engineering.ArtifactRevisionSubjectKey(capabilityArtifactID, capabilityRevisionID)
+
+	executions, err := repos.Records.ListByKindAndSubject(ctx, engineering.RecordKindExecution, subjectKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	executionIDs = make([]string, 0, len(executions))
+	for _, e := range executions {
+		executionIDs = append(executionIDs, e.Key.ID)
+	}
+	sort.Strings(executionIDs)
+
+	claims, err := repos.Records.ListByKindAndSubject(ctx, engineering.RecordKindClaim, subjectKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	claimIDs = make([]string, 0, len(claims))
+	for _, c := range claims {
+		claimIDs = append(claimIDs, c.Key.ID)
+	}
+	sort.Strings(claimIDs)
+
+	return executionIDs, claimIDs, nil
+}
+
+// DiscoverEvidenceArtifactIDs finds every evidence artifact cited by the
+// given executions and claims, returning their artifact IDs deduplicated
+// and sorted ascending (FF-018 §6.3). Both record kinds project
+// EvidenceKeys; ParseEvidenceKey recovers the artifact ID from each. A
+// malformed key, or an executionID/claimID that does not resolve to a
+// stored record, is an error rather than a silent skip -- both indicate the
+// store is in a state no answer can be derived from, matching
+// ErrTimelineSourceInvalid's existing use for the same class of condition.
+func DiscoverEvidenceArtifactIDs(ctx context.Context, repos Repositories, executionIDs, claimIDs []string) ([]string, error) {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(executionIDs)+len(claimIDs))
+
+	collect := func(kind engineering.RecordKind, ids []string) error {
+		for _, id := range ids {
+			key, err := engineering.NewRecordKey(kind, id)
+			if err != nil {
+				return err
+			}
+			rec, found, err := repos.Records.Get(ctx, key)
+			if err != nil {
+				return err
+			}
+			if !found {
+				return fmt.Errorf("%w: %s does not exist", ErrTimelineSourceInvalid, key)
+			}
+			for _, evidenceKey := range rec.EvidenceKeys {
+				artifactID, _, err := engineering.ParseEvidenceKey(evidenceKey)
+				if err != nil {
+					return err
+				}
+				if seen[artifactID] {
+					continue
+				}
+				seen[artifactID] = true
+				out = append(out, artifactID)
+			}
+		}
+		return nil
+	}
+
+	if err := collect(engineering.RecordKindExecution, executionIDs); err != nil {
+		return nil, err
+	}
+	if err := collect(engineering.RecordKindClaim, claimIDs); err != nil {
+		return nil, err
+	}
+
+	sort.Strings(out)
+	return out, nil
+}
+
 // GetFeatureTimeline computes a feature's complete engineering timeline
 // (FF-010 §9). It is read-only and deterministic: repeated calls on
 // unchanged data return byte-identical results. No source value is mutated.

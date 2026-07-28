@@ -41,6 +41,15 @@ var (
 	ErrTimelineSourceInvalid         = errors.New("application: timeline source invalid")
 	ErrAmbiguousLifecycleState       = errors.New("application: lifecycle state ambiguous")
 	ErrUnknownDefinitionVersion      = errors.New("application: unknown lifecycle definition version")
+	// ErrValidationPlanAmbiguous reports that a capability's discovered
+	// validation-plan population has more than one member. The composition
+	// that builds TimelineInput.PlanArtifactID (FF-018 §6.6) requires
+	// exactly one applicable plan; the model defines no acceptance or
+	// order metadata for plans (unlike capability and requirement
+	// revisions), so there is no mechanism to rank two, and none is
+	// invented here. Sort order is deterministic for discovery output but
+	// is never used to select a plan.
+	ErrValidationPlanAmbiguous = errors.New("application: validation plan ambiguous")
 )
 
 // Command validation errors.

@@ -90,6 +90,26 @@ func EvidenceKey(artifactID, revisionID string) string {
 	return "evidence:" + artifactID + "/" + revisionID
 }
 
+// ParseEvidenceKey is the inverse of EvidenceKey. It exists so a caller
+// holding only a claim's or an execution's projected EvidenceKeys can
+// recover the evidence artifact ID using the one shared definition of the
+// key's shape, rather than re-deriving the prefix convention independently
+// at the call site (FF-018 §7, mirroring ParseSubjectKey under AD-021).
+//
+// A key that does not name evidence:<artifact>/<revision>, or whose
+// identity part is malformed, is ErrInvalidEnvelope.
+func ParseEvidenceKey(key string) (artifactID, revisionID string, err error) {
+	after, found := strings.CutPrefix(key, "evidence:")
+	if !found {
+		return "", "", fmt.Errorf("%w: evidence key %q must name evidence:<artifact>/<revision>", ErrInvalidEnvelope, key)
+	}
+	artifactID, revisionID, split := strings.Cut(after, "/")
+	if !split || artifactID == "" || revisionID == "" {
+		return "", "", fmt.Errorf("%w: evidence key %q must name evidence:<artifact>/<revision>", ErrInvalidEnvelope, key)
+	}
+	return artifactID, revisionID, nil
+}
+
 // ExecutionKey is the key for a ValidationExecutionRecordRef.
 func ExecutionKey(executionID string) string {
 	return "execution:" + executionID
