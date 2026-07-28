@@ -1,8 +1,11 @@
 # FF-015 — M.5 HTTP API and Minimal UI: Engineering Plan
 
 Status: Phase A accepted and implemented via
-[FF-018](018-http-phase-a-implementation.md); Phase B (minimal UI) remains
-proposed
+[FF-018](018-http-phase-a-implementation.md); Phase B (minimal UI) accepted and
+implemented via [FF-020](020-read-surface-extension.md) (the read-surface
+extension Phase B required first) and
+[FF-021](021-ui-phase-b-implementation.md). M.5 is complete; M.6 (AI
+Context-Pack Demonstration) is next.
 Governs: the M.5 transport and interface layer — objectives, scope, HTTP
 contracts, and implementation order. Produced before any code is written.
 
@@ -331,6 +334,17 @@ GET /features/{featureCardID}/timeline       Timeline            (§3.7)
 Screens submit HTML forms to the same API endpoints. The UI is a client of the
 API, not a parallel path to the application layer — which is what makes it
 evidence that the API is usable.
+
+**As implemented (FF-021, [AD-028](../decisions/README.md#ad-028--browser-writes-go-through-the-existing-api-handler-in-process-never-a-second-network-hop)):** "the same
+API endpoints" is preserved in substance, not literally — a browser cannot
+send the frozen JSON contract directly, so each UI route invokes the
+existing, unmodified API `http.Handler` in-process rather than issuing a
+second HTTP request. The API remains the single owner of decoding, mapping,
+application invocation, and error semantics; the UI adds no parallel path.
+This sentence is left as originally written because it correctly states the
+intent FF-018 §11 and this section then found unimplementable against the
+frozen Phase A contract — the finding that FF-021 §2 records as evidence for
+AD-028, not a plan this document silently abandoned.
 
 ## 7. Request and response conventions
 

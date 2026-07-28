@@ -1182,6 +1182,88 @@ client error, and maps to an opaque `500`.
 
 ---
 
+## AD-028 — Browser writes go through the existing API handler in-process, never a second network hop
+
+Status: Accepted and implemented
+Date: 2026-07-28
+Phase: M.5 Phase B (Minimal UI)
+
+**Context.** FF-015 §6.4 originally said "screens submit HTML forms to the
+same API endpoints." That sentence is not implementable against the frozen
+Phase A contract, verified directly rather than assumed: `decodeJSON`
+(`internal/transport/http/decode.go`) returns `415` for any request whose
+`Content-Type` is not `application/json`, and a browser's native `<form>`
+submission is `application/x-www-form-urlencoded`. Every command's success
+response is `201` plus a JSON envelope, which a browser renders as raw text
+with no navigation. Changing the API to accept form encoding or to redirect
+was rejected outright: FF-018's Phase A contract is frozen, and content
+negotiation was already rejected by FF-015 §11 as a needless second shape
+for the same operation. FF-015 §19 left this decision open on purpose,
+"pending Phase B. If a screen proves unreadable without it, that is
+implementation evidence and gets a decision" — this is that evidence, and
+this is that decision, made on the schedule FF-015 itself set.
+
+**Decision.** `internal/ui` owns its own `POST` routes, one per command,
+accepting `application/x-www-form-urlencoded`. Each route: (1) parses form
+*syntax* only — no domain validation; (2) builds the API's exact JSON
+request shape; (3) invokes the existing, unmodified API `http.Handler`
+**in-process** through `ServeHTTP` against a hand-rolled
+`http.ResponseWriter` capture — never a real network socket, never
+`net/http/httptest` in production code; (4) interprets the real status code
+and response body the API handler wrote; (5) issues a `303 See Other`
+(POST-Redirect-GET) on success, or re-renders the originating screen with
+submitted values preserved and the API's own client-safe message on a
+correctable failure. Reads use the identical in-process mechanism with
+`GET`. No JavaScript is written anywhere in the UI.
+
+**Why not the alternatives.**
+
+- *Minimal vanilla JS `fetch` → API over a real network request* — rejected
+  on a hard constraint, not a preference: the write path could then only be
+  proven by a headless browser, a dependency
+  `TestGoModHasOnlyApprovedRequirements` would reject and CLAUDE.md forbids
+  adding without a recorded decision. It also contradicts FF-015 §19's own
+  stated default (no client-side interactivity assumed) and FF-015 §3's
+  exclusion of a JavaScript framework.
+- *UI routes calling `internal/application` directly* — rejected: the UI
+  would become a second transport, duplicating both DTO mapping and FF-018's
+  24-row error-to-status-code table, and would be exactly the "parallel path
+  to the application layer" FF-015 §6.4 already rejects.
+
+**Consequence — the strictest import boundary in the codebase.** Because the
+UI speaks only HTTP to the engine it drives, `internal/ui` imports nothing
+under this module's `internal/` tree besides itself: not
+`internal/application`, not `internal/engineering`, not `internal/domain`,
+no infrastructure adapter, no PEOS. This is structurally stronger than a
+typical test-enforced boundary and is asserted directly by
+`TestUIDoesNotImportApplicationOrInfrastructure` and
+`TestUIDoesNotImportPEOS`.
+
+**Cost, stated honestly.** One JSON encode/decode per screen that would
+otherwise be a direct in-process call, and a small in-process
+request/response shim. Both are accepted deliberately: they are what makes
+the UI *evidence that the API is usable*, per FF-015 §1's own framing,
+rather than a second front door into the engineering model. A change to the
+API's conflict semantics, error codes, or response shape is observed by the
+UI automatically, with no UI-side code change, because AD-028's bridge calls
+the same handler FF-018 built and tested — proven directly by
+`TestCallAPIDelegatesErrorOutcome` (`internal/ui/apiclient_test.go`), which
+swaps a fake handler's response and shows the UI's outcome follows it with
+zero UI-side logic touched.
+
+**Alternatives considered and rejected are listed above; no other design was
+seriously entertained** once the frozen-contract and no-headless-browser
+constraints were established as facts about the existing system, not
+preferences about the new one.
+
+**Consequences.** No repository, `UnitOfWork`, or PEOS access from
+`internal/ui`. No new HTTP endpoint on the API surface (nineteen operations,
+unchanged). No new dependency. Full implementation evidence, including the
+package layout, route table, error-UX mapping, and test coverage, is in
+[FF-021](../spec/021-ui-phase-b-implementation.md).
+
+---
+
 ## Open questions
 
 None. Every material architecture decision for M.1 through M.4 is resolved, as
