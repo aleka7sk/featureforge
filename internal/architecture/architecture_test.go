@@ -395,32 +395,78 @@ func TestOperationalTypesDoNotEmbedEnvelopes(t *testing.T) {
 	}
 }
 
-// TestNoHTTPDatabaseUIOrAIPackage (FF-012 §12).
-func TestNoHTTPDatabaseUIOrAIPackage(t *testing.T) {
-	forbiddenImports := []string{"net/http", "database/sql", "html/template", "text/template"}
-	err := walkGoFiles(filepath.Join(ModuleRoot(), "internal"), func(path string, file *ast.File) error {
-		for _, imp := range file.Imports {
-			value := strings.Trim(imp.Path.Value, `"`)
-			for _, bad := range forbiddenImports {
-				if value == bad || strings.Contains(value, "sql/driver") {
-					t.Errorf("%s imports %q, which M.3 must not use", path, value)
-				}
-			}
-		}
-		return nil
-	})
+// allPackagesIncludingCmd returns InternalPackages() plus CmdPackages(), for
+// guards that must also cover the composition root (AD-023, FF-018 §13).
+func allPackagesIncludingCmd(t *testing.T) []PackageInfo {
+	t.Helper()
+	internal, err := InternalPackages()
 	if err != nil {
 		t.Fatal(err)
 	}
-	all, err := InternalPackages()
+	cmd, err := CmdPackages()
 	if err != nil {
 		t.Fatal(err)
+	}
+	return append(internal, cmd...)
+}
+
+// TestOnlyTransportAndCommandImportNetHTTP (AD-023): net/http is permitted
+// only in the HTTP transport package and the cmd composition root that
+// builds the server around it. Replaces the net/http half of the former
+// TestNoHTTPDatabaseUIOrAIPackage with a named-holder test, mirroring
+// TestOnlyIntegrationPackageImportsPEOS and
+// TestOnlyPostgresInfrastructureImportsDriver.
+func TestOnlyTransportAndCommandImportNetHTTP(t *testing.T) {
+	all := allPackagesIncludingCmd(t)
+	allowed := map[string]bool{
+		ModulePath + "/internal/transport/http": true,
+		ModulePath + "/cmd/featureforge":        true,
 	}
 	for _, p := range all {
-		rel := strings.TrimPrefix(p.ImportPath, ModulePath+"/internal/")
-		if strings.HasPrefix(rel, "http") || strings.HasPrefix(rel, "ui") || strings.HasPrefix(rel, "ai") ||
-			strings.HasPrefix(rel, "postgres") || strings.HasPrefix(rel, "sql") {
-			t.Errorf("forbidden package present for M.3: %s", p.ImportPath)
+		for _, imp := range p.Imports {
+			if imp == "net/http" && !allowed[p.ImportPath] {
+				t.Errorf("%s imports net/http, which only internal/transport/http and cmd/featureforge may import (AD-023)", p.ImportPath)
+			}
+		}
+	}
+}
+
+// TestOnlyUIImportsHTMLTemplate (AD-023): html/template is reserved for the
+// Phase B UI package. No holder exists yet in Phase A, so this test
+// currently asserts absence everywhere.
+func TestOnlyUIImportsHTMLTemplate(t *testing.T) {
+	all := allPackagesIncludingCmd(t)
+	for _, p := range all {
+		for _, imp := range p.Imports {
+			if imp == "html/template" {
+				t.Errorf("%s imports html/template; no Phase A package may (AD-023, reserved for the Phase B UI package)", p.ImportPath)
+			}
+		}
+	}
+}
+
+// TestDatabaseSQLIsNeverImported (AD-020, AD-023): absolute -- no package,
+// anywhere including cmd/, may import database/sql or a database/sql driver.
+// AD-020 chose native pgx precisely to keep this prohibition absolute.
+func TestDatabaseSQLIsNeverImported(t *testing.T) {
+	all := allPackagesIncludingCmd(t)
+	for _, p := range all {
+		for _, imp := range p.Imports {
+			if imp == "database/sql" || strings.Contains(imp, "sql/driver") {
+				t.Errorf("%s imports %q; database/sql is never permitted (AD-020)", p.ImportPath, imp)
+			}
+		}
+	}
+}
+
+// TestNoAIPackage (FF-012 §12): no package path segment is "ai", under
+// internal/ or cmd/.
+func TestNoAIPackage(t *testing.T) {
+	all := allPackagesIncludingCmd(t)
+	for _, p := range all {
+		rel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, ModulePath+"/internal/"), ModulePath+"/cmd/")
+		if strings.HasPrefix(rel, "ai") {
+			t.Errorf("forbidden package present: %s", p.ImportPath)
 		}
 	}
 }

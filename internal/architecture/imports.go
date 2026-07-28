@@ -8,6 +8,7 @@ package architecture
 import (
 	"go/build"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -37,6 +38,50 @@ type PackageInfo struct {
 // imports, which is what the boundary rules govern).
 func InternalPackages() ([]PackageInfo, error) {
 	root := filepath.Join(ModuleRoot(), "internal")
+	var pkgs []PackageInfo
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		pkg, ierr := build.ImportDir(path, 0)
+		if ierr != nil {
+			if _, ok := ierr.(*build.NoGoError); ok {
+				return nil
+			}
+			return ierr
+		}
+		rel, rerr := filepath.Rel(ModuleRoot(), path)
+		if rerr != nil {
+			return rerr
+		}
+		pkgs = append(pkgs, PackageInfo{
+			ImportPath: ModulePath + "/" + filepath.ToSlash(rel),
+			Dir:        path,
+			Imports:    pkg.Imports,
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return pkgs, nil
+}
+
+// CmdPackages returns every Go package under cmd/, each with its direct,
+// non-test imports (FF-018 §13). It returns an empty slice, not an error,
+// when cmd/ does not exist -- Phase A's architecture guards must pass before
+// cmd/featureforge is written (implementation step 1 precedes step 8).
+func CmdPackages() ([]PackageInfo, error) {
+	root := filepath.Join(ModuleRoot(), "cmd")
+	if _, err := os.Stat(root); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
 	var pkgs []PackageInfo
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
