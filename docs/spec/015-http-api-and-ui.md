@@ -335,16 +335,31 @@ Screens submit HTML forms to the same API endpoints. The UI is a client of the
 API, not a parallel path to the application layer — which is what makes it
 evidence that the API is usable.
 
-**As implemented (FF-021, [AD-028](../decisions/README.md#ad-028--browser-writes-go-through-the-existing-api-handler-in-process-never-a-second-network-hop)):** "the same
-API endpoints" is preserved in substance, not literally — a browser cannot
-send the frozen JSON contract directly, so each UI route invokes the
-existing, unmodified API `http.Handler` in-process rather than issuing a
-second HTTP request. The API remains the single owner of decoding, mapping,
-application invocation, and error semantics; the UI adds no parallel path.
-This sentence is left as originally written because it correctly states the
-intent FF-018 §11 and this section then found unimplementable against the
-frozen Phase A contract — the finding that FF-021 §2 records as evidence for
-AD-028, not a plan this document silently abandoned.
+**Superseded by [AD-028](../decisions/README.md#ad-028--browser-writes-go-through-the-existing-api-handler-in-process-never-a-second-network-hop).**
+The sentence above is left exactly as originally written — the record of
+what this plan intended before any code existed — rather than rewritten as
+though AD-028 had already been decided. It is not the as-built contract.
+The as-built contract, exactly:
+
+- browsers `POST` to `internal/ui`'s own form routes, one per command, not
+  to `/api/v1`;
+- `internal/ui` performs syntax-only form decoding — no domain validation
+  (§9's three validation layers are unchanged; the UI adds none of its own);
+- `internal/ui` builds the API's exact JSON request shape from the decoded
+  form fields;
+- `internal/ui` invokes the existing, unmodified API `http.Handler`
+  in-process through `ServeHTTP`, never a second network hop and never
+  `net/http/httptest` in production code;
+- no second business path exists: the API remains the single owner of
+  decoding, mapping, application invocation, and error semantics: exactly
+  one command implementation, reached two ways.
+
+This is why FF-018 §11 and this section's original sentence turned out to
+be unimplementable against the frozen Phase A contract — a browser's native
+`<form>` submission is `application/x-www-form-urlencoded`, and
+`decodeJSON` rejects any `Content-Type` that is not `application/json` —
+the finding FF-021 §2 records as evidence for AD-028, not a plan this
+document silently abandoned.
 
 ## 7. Request and response conventions
 

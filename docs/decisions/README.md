@@ -815,6 +815,34 @@ tests (`TestOnlyTransportAndCommandImportNetHTTP`, `TestOnlyUIImportsHTMLTemplat
 deliberate violation before being trusted. `cmd/featureforge` is covered by
 the PEOS and driver import guards for the first time.
 
+**Later bounded extension (recorded here, decided in AD-028).** Phase B
+(FF-021) added `internal/ui` as a third permitted `net/http` holder
+alongside `internal/transport/http` and `cmd/featureforge` above — a caller
+this decision's Phase A holder list did not anticipate, because
+`internal/ui` did not exist yet. `TestOnlyTransportAndCommandImportNetHTTP`
+enforces exactly these three names, and no others. The extension itself,
+and why `internal/ui` needs `net/http` at all, is AD-028's decision, not a
+reopening of this one; see AD-028's consequences for the exact statement,
+and FF-021 §9 for the test evidence. This decision's own Phase A holder
+table above is left as originally written — the record of what Phase A
+decided when Phase A decided it — rather than rewritten as though
+`internal/ui` had already existed.
+
+**M.5 publication-remediation correction (M-2).** A post-implementation
+audit of this milestone's local commit chain found that the four-way
+decomposition above silently dropped `text/template`'s prohibition:
+`TestNoHTTPDatabaseUIOrAIPackage` forbade it absolutely (see Context, above),
+and none of the four replacement tests names it, so no test in the
+repository failed when a deliberate `text/template` import was introduced
+into a non-UI package during the audit. This decision's own text was never
+wrong — it says plainly that "`html/template`/`text/template` remain
+forbidden everywhere in Phase A" — but the implementation did not carry
+that second half through. `TestTextTemplateIsNeverImported`
+(`internal/architecture/architecture_test.go`) restores it as an absolute,
+named guard, mirroring `TestDatabaseSQLIsNeverImported`'s shape: no holder,
+anywhere, including `cmd/`. Full evidence in
+[m5-publication-remediation.md](../reports/m5-publication-remediation.md).
+
 ---
 
 ## AD-024 — `cmd/featureforge` is the sole composition root; identity generation is deferred to Phase B
@@ -1262,6 +1290,82 @@ unchanged). No new dependency. Full implementation evidence, including the
 package layout, route table, error-UX mapping, and test coverage, is in
 [FF-021](../spec/021-ui-phase-b-implementation.md).
 
+**Bounded extension to AD-023.** This decision's in-process bridge
+(`internal/ui/apiclient.go`) constructs a real `*http.Request` and a
+hand-rolled `http.ResponseWriter` capture to call the API handler; every
+page and form handler in `internal/ui` does the same for its own inbound
+request. `internal/ui` is therefore a third permitted `net/http` holder,
+alongside `internal/transport/http` and `cmd/featureforge` — an addition to
+[AD-023](#ad-023--the-nethttptemplate-import-prohibition-is-narrowed-into-named-holder-permissions)'s
+Phase A holder list, not a reopening of it: AD-023 froze what Phase A knew;
+this decision is the reason Phase B needed one more holder.
+`TestOnlyTransportAndCommandImportNetHTTP` enforces exactly these three
+names, and no others (FF-021 §9).
+
+---
+
+## AD-029 — Command identities are required at the client edge
+
+Status: Accepted and implemented
+Date: 2026-07-31
+Phase: M.5 (publication remediation)
+
+**Context.** [AD-024](#ad-024--cmdfeatureforge-is-the-sole-composition-root-identity-generation-is-deferred-to-phase-b)
+deferred identity generation to "Phase B... will use `crypto/rand` with a
+project-defined format when it is needed." Phase B ([FF-021](../spec/021-ui-phase-b-implementation.md))
+landed and did not need it: every command form resolves an identifier the
+UI already knows from a prior query (`capabilityContext`, FF-021 §6) and
+asks the person filling the form only for a genuinely new identity. AD-024's
+generation contingency was therefore never exercised, and both FF-015 §10
+and this log's Open Questions table kept naming "random identity generation
+at the transport edge" as owned by M.5 after M.5's own implementation had
+already made a different, undocumented choice. A post-implementation
+publication-readiness audit of this milestone's local commit chain raised
+this as finding M-1's neighbor: if a server ever did generate an identity
+whenever a client omitted one, repeating the same request after a lost
+response could create a second record, contradicting the idempotency every
+other command surface guarantees. Full evidence in
+[m5-publication-remediation.md](../reports/m5-publication-remediation.md).
+
+**Decision.** All twelve command surfaces require their existing
+authoritative identity field(s), unchanged from FF-018/FF-021. API clients
+supply them; browser forms supply genuinely new identities and reuse
+context-derived existing identities, exactly as FF-021 §6 already
+specifies. The server does not generate an identity when one is omitted:
+omission is invalid input and maps to the existing `400 ErrInvalidCommand`
+response. Replaying the same identity and identical content remains
+idempotent (a no-op, per the contract suite's `IdempotentIdenticalPut`);
+replaying the same identity with different content remains `409
+ErrImmutableValueConflict` (`ConflictingPut`). No `crypto/rand`,
+`math/rand`, UUID package, idempotency-key mechanism, or deterministic
+server-side generator is introduced. Any future convenience generation
+requires a new accepted decision that explicitly covers lost-response
+retries and identity ownership — the exact gap a silently-added generator
+would otherwise reopen.
+
+**Alternatives.** Server generates an identity when the client omits one
+(AD-024's original contingency) — rejected: a client that sends a command,
+loses the response, and retries the same omitted-identity request would
+receive a second freshly-generated identity and create a second record,
+silently breaking the idempotency guarantee every other command surface
+has. A dedicated idempotency-key mechanism alongside client-supplied
+identity — rejected: it would duplicate a guarantee client-supplied
+identity already provides for free (FF-010 §1), for no caller this
+milestone has. Client-side (browser) identity generation — rejected:
+AD-028's no-JavaScript constraint leaves no place to generate one, and it
+would not change the server's own omission handling regardless of where an
+identity came from.
+
+**Consequences.** Supersedes only AD-024's unimplemented "server-generated
+when omitted" contingency; AD-024's composition-root provisions and its
+"client-supplied identity is accepted and is the default" statement remain
+valid and unchanged. The Open Questions entry "Random identity generation at
+the transport edge" is resolved below: not used in M.5; client-supplied
+identities are required. No code change was required by this decision —
+FF-018's and FF-021's identity handling already matched it; this decision
+records, rather than changes, the as-built contract, closing the gap where
+implementation had silently outpaced its own governing decision.
+
 ---
 
 ## Open questions
@@ -1275,7 +1379,7 @@ later phase, with the phase that owns them:
 | Whether any query needs materialization | Still open — only with measured evidence, and none has been gathered |
 | Connection-pool sizing, timeouts, and retry tuning under load | M.5, with measurement |
 | Whether `RelationEnvelope` is ever required | Deferred until a relation is |
-| Random identity generation at the transport edge | M.5 |
+| Random identity generation at the transport edge | Resolved — not used; client-supplied identities are required (AD-029, see below) |
 | Whether revision subject references should be existence-verified at write time | Deferred; AD-021 is the precedent that would govern it, and it needs its own evidence (FF-016 §3.6) |
 | Whether a subject backfill tool is ever required | Deferred until a durable FeatureForge database exists (FF-016 §7) |
 | Which patterns Belcanto reuses or redesigns | M.7 freeze artifacts |
@@ -1296,8 +1400,16 @@ Resolved in M.5 planning and implemented ahead of the general M.5 HTTP work:
 revision subject projection and discovery (AD-025,
 [FF-016](../spec/016-revision-subject-discovery.md)). This clears the
 prerequisite the M.5 queries needed for a complete requirement or
-validation-plan population; the HTTP API and UI implementation §16 of FF-015
-orders is separate work and remains open.
+validation-plan population; **at the time AD-025 landed**, the HTTP API and
+UI implementation §16 of FF-015 orders was separate work and remained open.
+It is no longer open: FF-018 (Phase A), FF-020 (read-surface extension),
+and FF-021 (Phase B UI) have since landed, and FF-015 records M.5 as
+complete. The paragraph above is left as originally written — the record of
+what was true when AD-025 landed — rather than rewritten as though Phase A
+and Phase B already existed at that point. As of this remediation, the
+resulting local commit chain is a **candidate** awaiting the publication
+re-audit `m5-publication-remediation.md` records; see that report for
+current status.
 
 Resolved and implemented after Phase A, ahead of Phase B UI planning: the
 read-surface content gap Phase B UI planning found blocking (AD-027,
@@ -1305,3 +1417,15 @@ read-surface content gap Phase B UI planning found blocking (AD-027,
 FF-001 §3's usability acceptance needs — every screen now has a query
 answering it — so Phase B UI planning can resume against a complete read
 contract.
+
+Resolved in M.5 publication remediation: whether the transport edge should
+generate an identity when a client omits one (AD-024's deferred
+contingency). It does not — client-supplied identity remains required, and
+omission is `400 ErrInvalidCommand` (AD-029,
+[m5-publication-remediation.md](../reports/m5-publication-remediation.md)).
+The same report also records the restoration of the `text/template`
+architecture guard AD-023 specified but the Phase A/B decomposition dropped
+(M-2), and the correction to `GetFeatureTimelineForCard`'s execution/claim/
+evidence discovery so prior-revision validation activity remains visible
+after a later capability revision becomes current (M-1), per FF-006 §1 and
+FF-007's M.5 exit criterion.

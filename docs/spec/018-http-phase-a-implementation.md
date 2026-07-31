@@ -520,7 +520,11 @@ Scoped to the revision the caller names:
 The caller passes the *current* revision ID, obtained from
 `ResolveCurrentRevision`. Where a history-wide view is wanted (the timeline),
 the caller iterates revisions as decision discovery does; §6.4's handler
-sequence specifies which each endpoint uses.
+sequence specifies which each endpoint uses. **§24 records that the initial
+implementation did not actually do this for Q5, and corrects it** —
+`DiscoverExecutionAndClaimIDsAllRevisions` is the history-wide function the
+timeline uses; this function remains exactly Q3/Q4's current-revision-scoped
+one.
 
 **Evidence discovery.** Executions and claims both project `EvidenceKeys`
 (verified: `RecordEnvelope.EvidenceKeys []string`, populated with
@@ -555,8 +559,14 @@ the handler (§4) — the sequence is:
 5. `DiscoverValidationPlanArtifactIDs(ctx, repos, artifactID)` →
    `PlanArtifactID`, resolved by the exactly-one contract in §6.6. **Sort order
    never selects a plan.**
-6. `DiscoverDecisionIDs`, `DiscoverExecutionAndClaimIDs`,
-   `DiscoverEvidenceArtifactIDs`.
+6. `DiscoverDecisionIDs`, plus execution/claim/evidence discovery scoped to
+   this endpoint's own population: Q3/Q4 use the per-revision
+   `DiscoverExecutionAndClaimIDs` against the current revision only; Q5
+   uses the history-wide `DiscoverExecutionAndClaimIDsAllRevisions` (§24 —
+   corrected in M.5 publication remediation; the original text of this step
+   named only the per-revision function for all three endpoints, which was
+   the defect §24 fixes). `DiscoverEvidenceArtifactIDs` is unchanged and
+   consumes whichever execution/claim population its caller discovered.
 7. Build `EngineeringStateInput` / `TimelineInput`; call
    `GetFeatureEngineeringState` / `GetFeatureTimeline`.
 
@@ -1116,6 +1126,14 @@ The stale M.3 wording is corrected in the new messages. The inert
 `postgres`/`sql` prefix check is dropped — the import-based tests state the
 real boundary, and `TestOnlyPostgresInfrastructureImportsDriver` already
 enforces the driver.
+
+**§24 records a defect in this table's coverage, found and fixed in M.5
+publication remediation.** `TestOnlyUIImportsHTMLTemplate` above asserts
+only the `html/template` half of the Phase A prohibition this document's
+§2.2 states (both `html/template` and `text/template` "remain forbidden
+everywhere in Phase A"); no test asserted the `text/template` half.
+`TestTextTemplateIsNeverImported` restores it, mirroring
+`TestDatabaseSQLIsNeverImported`'s absolute, no-holder shape.
 
 **No existing internal check is weakened.** `TestNoForbiddenPackageNames`
 (verified list: `workflow`, `engine`, `framework`, `shared`, `common`, `util`,
@@ -1733,3 +1751,66 @@ reader to see. That gap and its closure are recorded in
 an additive extension to the response DTOs above, not an amendment. The HTTP
 surface remains the nineteen operations this document specifies; FF-020 added
 no endpoint.
+
+## 24. M.5 publication-remediation correction — Q5 is history-wide, Q3/Q4 are not
+
+A read-only publication-readiness audit of this milestone's local commit
+chain, performed before any of it was pushed, found that §6.3 and §6.4 above
+say one thing and `discoverEngineeringStateComponents`
+(`internal/application/query_reads.go`) did another. Full evidence,
+including the executable red/green regression, is in
+[m5-publication-remediation.md](../reports/m5-publication-remediation.md);
+this section states the corrected contract in place.
+
+**What §6.3 already said.** "Where a history-wide view is wanted (the
+timeline), the caller iterates revisions as decision discovery does." That
+is correct and remains the rule.
+
+**What the implementation actually did.** `discoverEngineeringStateComponents`
+is called by both the current-state queries (Q3 `GetFeatureOverview`, Q4
+`GetFeatureEngineeringStateForCard`) and the timeline query (Q5
+`GetFeatureTimelineForCard`). It resolved the capability's *current*
+revision once and scoped execution, claim, and evidence discovery to that
+one revision — correct for Q3/Q4, silently wrong for Q5. An execution, a
+piece of evidence, or a claim recorded against an earlier capability
+revision disappeared from the timeline the moment a later revision became
+current, though nothing corrected or withdrew it. This is exactly the
+"visible, not hidden" exit criterion FF-007 states for M.5, and FF-006 §1
+defines the timeline as computed over *every* immutable record — not the
+current revision's alone.
+
+**The corrected contract.**
+
+| Query | Population |
+|---|---|
+| Q3 `GetFeatureOverview`, Q4 `GetFeatureEngineeringStateForCard` | Executions, claims: scoped to the **current** capability revision only (unchanged — these are current-*state* queries, and broadening them would let a stale claim read as satisfying the current revision, which FF-010 §7 forbids) |
+| Q5 `GetFeatureTimelineForCard` | Executions and claims: unioned across **every** capability revision, enumerated via `Revisions.ListByArtifact` exactly as `DiscoverDecisionIDs` already does, then deduplicated by their own record ID. Evidence: the deduplicated union of evidence referenced by that history-wide execution/claim population (`DiscoverEvidenceArtifactIDs`, unchanged) |
+
+`DiscoverExecutionAndClaimIDsAllRevisions` (`internal/application/query_timeline.go`)
+is the new, dedicated, history-wide discovery function Q5 uses; the
+existing per-revision `DiscoverExecutionAndClaimIDs` (§6.3) is unchanged and
+remains what Q3/Q4's current-state population would use if they ever needed
+one — today they do not consume it at all, since readiness resolves claims
+independently through `ResolveCurrentClaim`, scoped to the current
+revision's subject key. Requirement, decision, and validation-plan discovery
+were already history-wide (or plan-cardinality-appropriate) and are
+unaffected. No repository method, port, adapter operation, migration, or
+stored projection was added; the fix is confined to
+`internal/application`'s existing discovery/composition layer, inside the
+same single `UnitOfWork.Do` each query already used.
+
+**Architecture guards, restated exactly.** §12.3's table above is Phase
+A's, before `internal/ui` existed; it is not rewritten. As currently
+required, restoring the `text/template` half §12.3 already specified but
+the four-way decomposition silently dropped (AD-023, M-2):
+
+- `html/template` — permitted only in `internal/ui`; forbidden everywhere
+  else, including `cmd/` (`TestOnlyUIImportsHTMLTemplate`, unchanged).
+- `text/template` — forbidden absolutely: no holder, anywhere under
+  `internal/` or `cmd/` (`TestTextTemplateIsNeverImported`, restored by this
+  remediation, mirroring `TestDatabaseSQLIsNeverImported`'s shape).
+
+**No architecture decision is reopened.** AD-022, AD-024, AD-025, AD-026,
+AD-027, and AD-028 are unaffected; AD-023's own decision text already said
+`text/template` remains forbidden — only its test coverage had drifted from
+it, restored here.
