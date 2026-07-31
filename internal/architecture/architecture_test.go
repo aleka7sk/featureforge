@@ -462,6 +462,29 @@ func TestOnlyUIImportsHTMLTemplate(t *testing.T) {
 	}
 }
 
+// TestTextTemplateIsNeverImported (AD-023, FF-018 §24, M.5 publication
+// remediation M-2): text/template has no permitted holder anywhere under
+// internal/ or cmd/ -- unlike html/template above, which internal/ui alone
+// may import. AD-023's own decision text already said
+// "html/template/text/template remain forbidden everywhere in Phase A",
+// but the four-test decomposition that replaced the original
+// TestNoHTTPDatabaseUIOrAIPackage carried only the html/template half
+// forward; this restores the other half as its own named, absolute guard,
+// mirroring TestDatabaseSQLIsNeverImported's no-holder shape rather than
+// folding it into TestOnlyUIImportsHTMLTemplate, so a failure here names
+// the actual defect (an unwanted text/template import) rather than an
+// ambiguous "some template package" message.
+func TestTextTemplateIsNeverImported(t *testing.T) {
+	all := allPackagesIncludingCmd(t)
+	for _, p := range all {
+		for _, imp := range p.Imports {
+			if imp == "text/template" {
+				t.Errorf("%s imports text/template, which no package may import (AD-023)", p.ImportPath)
+			}
+		}
+	}
+}
+
 // TestUIDoesNotImportPEOS (AD-005, FF-021): internal/ui speaks to the
 // engineering model only through the existing HTTP API, in-process
 // (AD-028), never through PEOS directly.
