@@ -164,6 +164,54 @@ func DiscoverExecutionAndClaimIDs(ctx context.Context, repos Repositories, capab
 	return executionIDs, claimIDs, nil
 }
 
+// DiscoverExecutionAndClaimIDsAllRevisions finds every execution and claim
+// naming ANY revision of capabilityArtifactID as subject -- the
+// history-wide counterpart to DiscoverExecutionAndClaimIDs above, which
+// scopes to one revision. This is Q5's population, not Q3/Q4's (FF-018
+// §24, M.5 publication remediation D1/D2): FF-006 §1 defines the timeline
+// as computed over every immutable record, and FF-007's M.5 exit criterion
+// requires "superseded claims and prior revisions are visible, not
+// hidden" -- an execution, a piece of evidence, or a claim recorded
+// against an earlier capability revision must remain on the timeline
+// after a later revision becomes current. Revisions are enumerated with
+// Revisions.ListByArtifact, exactly as DiscoverDecisionIDs already does;
+// each revision's executions and claims are found via the existing
+// per-revision DiscoverExecutionAndClaimIDs and unioned by their own
+// authoritative record ID, deduplicated and sorted ascending, matching
+// discoverArtifactIDsBySubject's determinism guarantee. Used only by
+// GetFeatureTimelineForCard -- Q3/Q4's current-state population
+// (discoverEngineeringStateComponents) is unaffected and remains scoped to
+// the current revision alone: readiness must never let a claim against a
+// superseded revision satisfy the current one (FF-010 §7).
+func DiscoverExecutionAndClaimIDsAllRevisions(ctx context.Context, repos Repositories, capabilityArtifactID string) (executionIDs, claimIDs []string, err error) {
+	revisions, err := repos.Revisions.ListByArtifact(ctx, capabilityArtifactID)
+	if err != nil {
+		return nil, nil, err
+	}
+	execSeen, claimSeen := map[string]bool{}, map[string]bool{}
+	for _, rev := range revisions {
+		revExecIDs, revClaimIDs, err := DiscoverExecutionAndClaimIDs(ctx, repos, capabilityArtifactID, rev.Key.RevisionID)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, id := range revExecIDs {
+			if !execSeen[id] {
+				execSeen[id] = true
+				executionIDs = append(executionIDs, id)
+			}
+		}
+		for _, id := range revClaimIDs {
+			if !claimSeen[id] {
+				claimSeen[id] = true
+				claimIDs = append(claimIDs, id)
+			}
+		}
+	}
+	sort.Strings(executionIDs)
+	sort.Strings(claimIDs)
+	return executionIDs, claimIDs, nil
+}
+
 // DiscoverEvidenceArtifactIDs finds every evidence artifact cited by the
 // given executions and claims, returning their artifact IDs deduplicated
 // and sorted ascending (FF-018 §6.3). Both record kinds project

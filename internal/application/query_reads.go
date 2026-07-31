@@ -179,7 +179,13 @@ func GetFeatureEngineeringStateForCard(ctx context.Context, uow UnitOfWork, proj
 }
 
 // GetFeatureTimelineForCard composes GetFeatureTimeline for a caller
-// holding only a FeatureCardID (FF-018 §6.4, Q5).
+// holding only a FeatureCardID (FF-018 §6.4, Q5). Unlike Q3/Q4's
+// discoverEngineeringStateComponents, execution, claim, and evidence
+// discovery here is history-wide, not scoped to the current revision
+// (FF-018 §24, M.5 publication remediation D1/D2) -- an empty artifactID
+// (no linked capability) yields no execution/claim/evidence population,
+// matching discoverEngineeringStateComponents's own empty-but-well-formed
+// rule for that case.
 func GetFeatureTimelineForCard(ctx context.Context, uow UnitOfWork, featureCardID domain.FeatureCardID) (TimelineResult, error) {
 	var result TimelineResult
 	err := uow.Do(ctx, func(r Repositories) error {
@@ -192,15 +198,26 @@ func GetFeatureTimelineForCard(ctx context.Context, uow UnitOfWork, featureCardI
 		if err != nil {
 			return err
 		}
+		var executionIDs, claimIDs, evidenceArtifactIDs []string
+		if artifactID != "" {
+			executionIDs, claimIDs, err = DiscoverExecutionAndClaimIDsAllRevisions(ctx, r, artifactID)
+			if err != nil {
+				return err
+			}
+			evidenceArtifactIDs, err = DiscoverEvidenceArtifactIDs(ctx, r, executionIDs, claimIDs)
+			if err != nil {
+				return err
+			}
+		}
 		timeline, err := GetFeatureTimeline(ctx, r, TimelineInput{
 			Project: project, FeatureCard: card,
 			CapabilityArtifactID:   artifactID,
 			RequirementArtifactIDs: components.requirementArtifactIDs,
 			DecisionIDs:            components.decisionIDs,
 			PlanArtifactID:         components.planArtifactID,
-			ExecutionIDs:           components.executionIDs,
-			EvidenceArtifactIDs:    components.evidenceArtifactIDs,
-			ClaimIDs:               components.claimIDs,
+			ExecutionIDs:           executionIDs,
+			EvidenceArtifactIDs:    evidenceArtifactIDs,
+			ClaimIDs:               claimIDs,
 		})
 		if err != nil {
 			return err
@@ -263,20 +280,21 @@ func resolveProjectAndCard(ctx context.Context, repos Repositories, featureCardI
 	return project, card, nil
 }
 
-// engineeringStateComponents holds the identifier lists FF-018 §6.4's
-// composition sequence discovers, shared by every Q3/Q4/Q5 entry point so
-// the discovery logic exists exactly once.
+// engineeringStateComponents holds the identifier lists shared by every
+// Q3/Q4/Q5 entry point so this discovery logic exists exactly once
+// (FF-018 §6.4 steps 3-5). Execution, claim, and evidence discovery are
+// deliberately not included here: Q3/Q4 do not consume them (readiness
+// resolves claims independently, scoped to the current revision, via
+// ResolveCurrentClaim), and Q5's population must be history-wide, not
+// current-revision-scoped -- a distinct concern GetFeatureTimelineForCard
+// owns directly (FF-018 §24, M.5 publication remediation D1/D2).
 type engineeringStateComponents struct {
-	currentRevision        CurrentRevisionResult
 	requirementArtifactIDs []string
 	decisionIDs            []string
 	planArtifactID         string
-	executionIDs           []string
-	claimIDs               []string
-	evidenceArtifactIDs    []string
 }
 
-// discoverEngineeringStateComponents runs FF-018 §6.4 steps 3-6. An empty
+// discoverEngineeringStateComponents runs FF-018 §6.4 steps 3-5. An empty
 // capabilityArtifactID (a feature card with no linked capability) returns
 // the zero value without error, matching step 2's "empty-but-well-formed
 // state" rule.
@@ -285,12 +303,6 @@ func discoverEngineeringStateComponents(ctx context.Context, repos Repositories,
 	if capabilityArtifactID == "" {
 		return c, nil
 	}
-
-	currentRevision, err := ResolveCurrentRevision(ctx, repos, capabilityArtifactID)
-	if err != nil {
-		return engineeringStateComponents{}, err
-	}
-	c.currentRevision = currentRevision
 
 	requirementIDs, err := DiscoverRequirementArtifactIDs(ctx, repos, capabilityArtifactID)
 	if err != nil {
@@ -309,21 +321,6 @@ func discoverEngineeringStateComponents(ctx context.Context, repos Repositories,
 		return engineeringStateComponents{}, err
 	}
 	c.planArtifactID = planID
-
-	if currentRevision.Found {
-		executionIDs, claimIDs, err := DiscoverExecutionAndClaimIDs(ctx, repos, capabilityArtifactID, currentRevision.Revision.Key.RevisionID)
-		if err != nil {
-			return engineeringStateComponents{}, err
-		}
-		c.executionIDs = executionIDs
-		c.claimIDs = claimIDs
-
-		evidenceIDs, err := DiscoverEvidenceArtifactIDs(ctx, repos, executionIDs, claimIDs)
-		if err != nil {
-			return engineeringStateComponents{}, err
-		}
-		c.evidenceArtifactIDs = evidenceIDs
-	}
 
 	return c, nil
 }
