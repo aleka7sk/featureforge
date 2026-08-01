@@ -1,6 +1,6 @@
 # FF-023 — Domain and lifecycle conformance closure
 
-Status: Accepted (implementation pending)
+Status: Implemented (domain and lifecycle conformance closure)
 Date: 2026-08-01
 Phase: post-M.5 closure before M.6
 Governs: AD-031/AD-032/AD-033 implementation, adapter parity, structured
@@ -401,7 +401,24 @@ Direct contradictions are corrected forward in FF-001/002/003/004/005/006/
 007/009/010/011/012/014/015/018/022, the glossary, README and decision log.
 Historical reports remain unchanged and are cited as historical evidence.
 
-Implementation is complete only after:
+Implementation was closed with the following evidence:
+
+| Evidence | Verified result |
+|---|---|
+| Locally audited implementation commit | `b99a1bda558dd94df96b813677619d2f0431681c` |
+| Published implementation commit | `7193084ccae7cf8bc2c9c724852675e20792f473` |
+| Exact tree shared by both commits | `1774b5929b6a0c6f94312478e90ab2324871f883` |
+| Canonical GitHub workflow | [Verify run 30683706791](https://github.com/aleka7sk/featureforge/actions/runs/30683706791): `success`, including formatting, vet, build, PostgreSQL tests and PostgreSQL race tests |
+| Independent read-only audit | `READY`; no BLOCKER or MAJOR finding |
+
+The workflow first exposed two adapter/fixture defects rather than hiding
+them: the PostgreSQL timeline-history fixture did not initialize the governed
+lifecycle pair, and PostgreSQL trace insertion could skip foreign-key
+validation on the `ON CONFLICT` path. Both were corrected, covered by the
+shared contracts, independently re-audited and then proven by the successful
+workflow above.
+
+The completion gate required:
 
 1. all proof above passes locally or in the canonical GitHub workflow;
 2. an independent read-only reviewer reports no BLOCKER or MAJOR finding;
@@ -409,4 +426,4 @@ Implementation is complete only after:
 4. this document records those hashes, workflow evidence and review result;
 5. status changes to `Implemented`.
 
-Only then may M.6 begin.
+All five conditions are met. M.6 may begin from this recorded baseline.

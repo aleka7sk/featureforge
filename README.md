@@ -13,8 +13,9 @@ corrections, and history. It does not implement the capability itself.
 
 ## Status
 
-Phase **M.5 — HTTP API and Minimal UI** and its command-replay correctness
-closure are implemented. [AD-030](docs/decisions/ad-030-command-idempotency-and-replay-conformance.md)
+Phase **M.5 — HTTP API and Minimal UI**, its command-replay correctness
+closure, and the final domain/lifecycle conformance gate are implemented.
+[AD-030](docs/decisions/ad-030-command-idempotency-and-replay-conformance.md)
 records the command-replay and aggregate-integrity correction;
 [FF-022](docs/spec/022-command-replay-and-aggregate-integrity.md) records its
 advancing-clock, zero-write, memory/PostgreSQL and independent-audit evidence.
@@ -22,9 +23,9 @@ The final pre-M.6 domain/lifecycle conformance scope is accepted in
 [AD-031](docs/decisions/ad-031-bounded-operational-establishment.md),
 [AD-032](docs/decisions/ad-032-persisted-lifecycle-policy-and-linear-history.md),
 [AD-033](docs/decisions/ad-033-requirement-criterion-trace-is-structured-state.md),
-and [FF-023](docs/spec/023-domain-and-lifecycle-conformance.md). Its
-implementation is in progress; M.6 does not begin until FF-023 records its
-completion evidence.
+and [FF-023](docs/spec/023-domain-and-lifecycle-conformance.md). FF-023 records
+the exact published tree, successful PostgreSQL/race workflow and independent
+audit that permit M.6 to begin.
 
 The M.4 canonical scenario continues to run end to end against a real PEOS
 v1.0.0 SDK on both an in-memory store and PostgreSQL. Historical milestone
