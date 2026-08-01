@@ -3,6 +3,7 @@ package proposal
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -296,6 +297,49 @@ func TestDeterministicGeneratorIsByteStableAndNamesGaps(t *testing.T) {
 	}
 	if _, err := generator.Generate(ContextPack{}); !errors.Is(err, ErrInvalidContextPack) {
 		t.Fatalf("zero pack error = %v", err)
+	}
+}
+
+func TestDeterministicGeneratorHandlesEveryValidCriterionAtMaximumCardinality(t *testing.T) {
+	criteria := make([]engineering.AcceptanceCriterion, 64)
+	uncovered := make([]UncoveredCriterion, 64)
+	current := revision("CAP-MAX-CONTEXT", "CAP-MAX-CONTEXT-REV-1")
+	for index := range criteria {
+		key := fmt.Sprintf("AC-%02d-%s", index+1, strings.Repeat("X", 96))
+		criteria[index] = mustCriterion(t, key, "A valid criterion at the governed list boundary.")
+		uncovered[index] = mustUncovered(
+			t,
+			current,
+			key,
+			criteria[index].Text(),
+			UncoveredNoRequirementTrace,
+			nil,
+		)
+	}
+	content := mustContent(t, criteria, nil)
+	capability, err := NewCapabilityContext(current, 1, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack, err := NewContextPack(capability, nil, nil, nil, nil, uncovered, nil)
+	if err != nil {
+		t.Fatalf("NewContextPack(maximum valid criteria): %v", err)
+	}
+
+	generated, err := NewDeterministicGenerator().Generate(pack)
+	if err != nil {
+		t.Fatalf("Generate(maximum valid criteria): %v", err)
+	}
+	if err := generated.ValidateAgainst(pack); err != nil {
+		t.Fatalf("generated Proposal.ValidateAgainst: %v", err)
+	}
+	if len(generated.Rationale()) <= 4000 {
+		t.Fatalf("boundary fixture did not exceed the former invalid 4000-byte limit: %d", len(generated.Rationale()))
+	}
+	for _, criterion := range []engineering.AcceptanceCriterion{criteria[0], criteria[len(criteria)-1]} {
+		if !strings.Contains(generated.Rationale(), criterion.Key()) {
+			t.Fatalf("rationale omitted boundary criterion %q", criterion.Key())
+		}
 	}
 }
 

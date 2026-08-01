@@ -10,8 +10,6 @@ import (
 	"github.com/aleka7sk/featureforge/internal/engineering"
 )
 
-const maxRationaleBytes = 4000
-
 // Proposal is transient proposed capability content bound to an exact
 // ContextPack by content addresses and exact source witnesses.
 type Proposal struct {
@@ -45,9 +43,6 @@ func newProposal(content engineering.CapabilitySpecificationContent, rationale s
 	}
 	if strings.TrimSpace(rationale) == "" {
 		return Proposal{}, invalidProposal("rationale", "must not be empty")
-	}
-	if len(rationale) > maxRationaleBytes {
-		return Proposal{}, invalidProposal("rationale", fmt.Sprintf("must not exceed %d bytes", maxRationaleBytes))
 	}
 	if contextDigest.IsZero() {
 		return Proposal{}, invalidProposal("context digest", "must not be zero")
@@ -118,7 +113,7 @@ func (p Proposal) Validate() error {
 	if p.IsZero() {
 		return invalidProposal("proposal", "must not be zero")
 	}
-	if strings.TrimSpace(p.rationale) == "" || len(p.rationale) > maxRationaleBytes || len(p.sources) == 0 {
+	if strings.TrimSpace(p.rationale) == "" || len(p.sources) == 0 {
 		return invalidProposal("proposal", "contains invalid rationale or sources")
 	}
 	for index, source := range p.sources {
