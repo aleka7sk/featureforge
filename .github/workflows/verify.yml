@@ -16,7 +16,7 @@ jobs:
   test:
     name: Go and PostgreSQL gate
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     services:
       postgres:
@@ -65,9 +65,9 @@ jobs:
         run: go test ./... -count=1
 
       - name: Race test with PostgreSQL
-        # The PostgreSQL browser journey runs in roughly 3.5 minutes on the
-        # hosted runner by itself. Under the full race suite it can start late
-        # enough to exceed Go's 10-minute package default despite continuing
-        # to make progress; keep the job's existing 30-minute outer bound and
-        # give the complete race package set an explicit inner bound.
-        run: go test ./... -race -count=1 -timeout=20m
+        # The PostgreSQL browser journey is the tail of a large UI package. On
+        # the hosted runner the M.7 suite was still making progress when the
+        # package reached the previous 20-minute inner bound. Keep a finite
+        # package timeout while allowing the complete, unsharded race suite to
+        # finish under the job's outer bound.
+        run: go test ./... -race -count=1 -timeout=30m
