@@ -1460,11 +1460,40 @@ Revision 2's AC-1..AC-4; AC-4 is uncovered because REQ-4 has no current Claim.
 
 ---
 
+## AD-034 — AI-assisted proposals are transient reviewed input
+
+Status: Accepted
+Date: 2026-08-01
+Phase: M.6 AI context-pack demonstration
+
+Recorded in
+[ad-034-ai-assisted-proposals-are-transient-reviewed-input.md](ad-034-ai-assisted-proposals-are-transient-reviewed-input.md).
+
+FeatureForge assembles one exact, source-bearing ContextPack in a read-only
+UnitOfWork and invokes a deterministic `internal/proposal` generator only after
+that transaction closes. Context and Proposal digests are transient content
+addresses, not engineering identities or stored records. Explicit acceptance
+revalidates a genuinely new proposal's context in its write UnitOfWork and
+creates one ordinary draft capability Revision with local-user actor,
+AI-assisted provenance method, source-bearing Origin, caller-owned Revision ID,
+and no acceptance append. Exact occupied replay remains `201` with zero writes
+before freshness. UI continues through AD-028's in-process HTTP API boundary;
+it receives no Generator or application dependency.
+
+Implementation and M.6 exit evidence are governed by
+[FF-024](../spec/024-ai-assisted-proposal-workflow.md). Authentication,
+provider/model integration, proposal persistence, autonomous writes, and the
+actual product application/login surface remain out of scope until after M.7's
+independent audit and freeze gate.
+
+---
+
 ## Open questions
 
-None. Every material architecture decision for M.1 through M.4 is resolved, as
-is the one M.5 planning reopened on evidence (AD-025). Questions deferred to a
-later phase, with the phase that owns them:
+None for the accepted M.6 implementation boundary. Every material architecture
+decision through M.6 is resolved; FF-024 implementation and evidence remain to
+be completed before M.7. Questions deferred to a later phase, with the phase
+that owns them:
 
 | Question | Owned by |
 |---|---|

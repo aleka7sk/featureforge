@@ -25,7 +25,16 @@ The final pre-M.6 domain/lifecycle conformance scope is accepted in
 [AD-033](docs/decisions/ad-033-requirement-criterion-trace-is-structured-state.md),
 and [FF-023](docs/spec/023-domain-and-lifecycle-conformance.md). FF-023 records
 the exact published tree, successful PostgreSQL/race workflow and independent
-audit that permit M.6 to begin.
+audit that close the entrance gate to M.6.
+
+Phase **M.6 — AI Context-Pack Demonstration** is accepted and ready to
+implement. [AD-034](docs/decisions/ad-034-ai-assisted-proposals-are-transient-reviewed-input.md)
+selects a transient, deterministic, explicitly reviewed proposal boundary;
+[FF-024](docs/spec/024-ai-assisted-proposal-workflow.md) is its implementation
+and evidence contract. M.6 adds no authentication, provider/model integration,
+proposal persistence, network AI call, or autonomous engineering write. The
+actual product application and login/authentication work begin only after the
+M.7 independent audit and freeze gate.
 
 The M.4 canonical scenario continues to run end to end against a real PEOS
 v1.0.0 SDK on both an in-memory store and PostgreSQL. Historical milestone
@@ -71,6 +80,7 @@ Start with the [product overview](docs/spec/000-product-overview.md).
 | [FF-021 Phase B Minimal UI](docs/spec/021-ui-phase-b-implementation.md) | How does the no-JavaScript UI reuse the API handler? |
 | [FF-022 Command Replay and Aggregate Integrity](docs/spec/022-command-replay-and-aggregate-integrity.md) | How will all C1–C12 retries and C7/C9 aggregate integrity be proven before domain analysis? |
 | [FF-023 Domain and Lifecycle Conformance](docs/spec/023-domain-and-lifecycle-conformance.md) | How are bounded operational establishment, persisted lifecycle policy, and legal linear history closed before M.6? |
+| [FF-024 AI-Assisted Proposal Workflow](docs/spec/024-ai-assisted-proposal-workflow.md) | How does M.6 generate, review, discard, and accept transient source-bound proposals without AI write authority? |
 | [Decision log](docs/decisions/README.md) | What was decided, and why? |
 | [Glossary](docs/glossary.md) | What does this word mean here? |
 
