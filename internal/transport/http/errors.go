@@ -31,7 +31,13 @@ type errorBody struct {
 func writeJSON(w http.ResponseWriter, status int, data, rationale any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(envelope{Data: data, Rationale: rationale})
+	encoder := json.NewEncoder(w)
+	// Canonical proposal/context values deliberately preserve characters such
+	// as <, >, and & in their exact JSON bytes. Escaping them in the outer HTTP
+	// envelope would make the object no longer parse as the canonical value the
+	// generate endpoint promises to round-trip.
+	encoder.SetEscapeHTML(false)
+	_ = encoder.Encode(envelope{Data: data, Rationale: rationale})
 }
 
 // writeError writes the FF-018 §8.3 error body directly, for
@@ -62,6 +68,7 @@ var errorMappings = []errorMapping{
 	{application.ErrInvalidCommand, http.StatusBadRequest, "invalid_command", true},
 	{application.ErrNotFound, http.StatusNotFound, "not_found", true},
 	{application.ErrImmutableValueConflict, http.StatusConflict, "immutable_value_conflict", true},
+	{application.ErrProposalContextStale, http.StatusConflict, "proposal_context_stale", true},
 	{application.ErrCapabilityAlreadyLinked, http.StatusConflict, "capability_already_linked", true},
 	{application.ErrRevisionSequenceConflict, http.StatusConflict, "revision_sequence_conflict", true},
 	{application.ErrRevisionSequenceInvalid, http.StatusConflict, "revision_sequence_invalid", true},

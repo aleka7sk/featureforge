@@ -1,11 +1,13 @@
 package http
 
 import (
+	"encoding/json"
+
 	"github.com/aleka7sk/featureforge/internal/application"
 	"github.com/aleka7sk/featureforge/internal/engineering"
 )
 
-// The request DTOs below mirror their command struct field-for-field
+// The Phase A request DTOs below mirror their command struct field-for-field
 // (FF-018 §3.1, §7): no transport type aliases or embeds an application,
 // domain, or engineering type. For C4, C5, C6 the {artifactID} path value
 // is authoritative and the DTO omits an artifact ID field entirely
@@ -301,4 +303,25 @@ type correctClaimRequest struct {
 
 type correctClaimResponse struct {
 	ClaimKey string `json:"claim_key"`
+}
+
+// --- M.6 reviewed AI-assisted capability proposal ---
+
+// Canonical ContextPack and Proposal values remain complete JSON objects in
+// the response. RawMessage avoids aliasing transport DTOs to internal value
+// types while preserving their already-validated canonical representation.
+type generateCapabilityProposalResponse struct {
+	ContextPack json.RawMessage `json:"context_pack"`
+	Proposal    json.RawMessage `json:"proposal"`
+}
+
+type acceptCapabilityProposalRequest struct {
+	RevisionID string          `json:"revision_id"`
+	Proposal   json.RawMessage `json:"proposal"`
+}
+
+type acceptCapabilityProposalResponse struct {
+	ArtifactID string `json:"artifact_id"`
+	RevisionID string `json:"revision_id"`
+	Sequence   int    `json:"sequence"`
 }

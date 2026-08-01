@@ -34,6 +34,8 @@ func newRouter(deps Dependencies) http.Handler {
 	mux.HandleFunc("POST /features/{featureCardID}/lifecycle", handleAssignLifecycle(deps))
 	mux.HandleFunc("POST /features/{featureCardID}/revisions", handleReviseCapability(deps))
 	mux.HandleFunc("POST /features/{featureCardID}/revisions/{revisionID}/acceptance", handleAcceptRevision(deps))
+	mux.HandleFunc("POST /features/{featureCardID}/ai-proposals", handleGenerateAIProposal(deps))
+	mux.HandleFunc("POST /features/{featureCardID}/ai-proposals/accept", handleAcceptAIProposal(deps))
 	mux.HandleFunc("POST /features/{featureCardID}/requirements", handleEstablishRequirement(deps))
 	mux.HandleFunc("POST /features/{featureCardID}/decisions", handleRecordDecision(deps))
 	mux.HandleFunc("POST /features/{featureCardID}/validation-plan", handleEstablishPlan(deps))

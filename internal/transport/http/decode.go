@@ -19,6 +19,17 @@ const maxRequestBody = 1 << 20 // 1 MiB
 // the caller returns immediately without invoking the application layer
 // (FF-018 §9.2: "not invoked after a decode failure").
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	return decodeJSONWithCode(w, r, v, "bad_request")
+}
+
+// decodeProposalJSON applies the same strict transport parsing as decodeJSON,
+// but uses FF-024's invalid_command machine code for the reviewed-proposal
+// command boundary.
+func decodeProposalJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	return decodeJSONWithCode(w, r, v, "invalid_command")
+}
+
+func decodeJSONWithCode(w http.ResponseWriter, r *http.Request, v any, code string) bool {
 	if ct := r.Header.Get("Content-Type"); ct != "" && !isJSONContentType(ct) {
 		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "Content-Type must be application/json")
 		return false
@@ -27,12 +38,24 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "malformed request body: "+err.Error())
+		writeError(w, http.StatusBadRequest, code, "malformed request body: "+err.Error())
 		return false
 	}
 	var extra json.RawMessage
 	if err := dec.Decode(&extra); err != io.EOF {
-		writeError(w, http.StatusBadRequest, "bad_request", "request body must contain exactly one JSON value")
+		writeError(w, http.StatusBadRequest, code, "request body must contain exactly one JSON value")
+		return false
+	}
+	return true
+}
+
+// requireEmptyBody enforces FF-024's body-free generate request. Whitespace is
+// still a body and is rejected rather than silently ignored.
+func requireEmptyBody(w http.ResponseWriter, r *http.Request) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+	data, err := io.ReadAll(r.Body)
+	if err != nil || len(data) != 0 {
+		writeError(w, http.StatusBadRequest, "invalid_command", "generate request body must be empty")
 		return false
 	}
 	return true

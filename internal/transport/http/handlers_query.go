@@ -118,14 +118,29 @@ func handleListCapabilityRevisions(deps Dependencies) http.HandlerFunc {
 			return
 		}
 		revisions := make([]revisionDTO, 0, len(result.Revisions))
+		currentMethod := ""
 		for _, rev := range result.Revisions {
 			sequence := 0
 			if result.Current.Found && rev.Revision.Key == result.Current.Revision.Key {
 				sequence = result.Current.Sequence
 			}
-			revisions = append(revisions, mapRevisionWithContentDTO(rev.Revision, rev.Content, rev.HasContent, sequence))
+			method, err := capabilityRevisionProvenanceMethod(deps.Inspector, rev)
+			if err != nil {
+				writeAppError(w, r, deps, err)
+				return
+			}
+			dto := mapRevisionWithContentDTO(rev.Revision, rev.Content, rev.HasContent, sequence)
+			dto.ProvenanceMethod = method
+			revisions = append(revisions, dto)
+			if result.Current.Found && rev.Revision.Key == result.Current.Revision.Key {
+				currentMethod = method
+			}
 		}
-		data := capabilityRevisionsResponse{Revisions: revisions, Current: mapCurrentRevisionDTO(result.Current)}
+		current := mapCurrentRevisionDTO(result.Current)
+		if current.Revision != nil {
+			current.Revision.ProvenanceMethod = currentMethod
+		}
+		data := capabilityRevisionsResponse{Revisions: revisions, Current: current}
 		writeJSON(w, http.StatusOK, data, mapResolutionRationaleDTO(result.Current.Rationale))
 	}
 }
@@ -158,8 +173,39 @@ func handleGetCapabilityRevision(deps Dependencies) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "not_found", "no revision matches "+key.String())
 			return
 		}
-		writeJSON(w, http.StatusOK, mapRevisionWithContentDTO(result.Revision, result.Content, result.HasContent, 0), nil)
+		method, err := capabilityRevisionProvenanceMethod(deps.Inspector, result)
+		if err != nil {
+			writeAppError(w, r, deps, err)
+			return
+		}
+		dto := mapRevisionWithContentDTO(result.Revision, result.Content, result.HasContent, 0)
+		dto.ProvenanceMethod = method
+		writeJSON(w, http.StatusOK, dto, nil)
 	}
+}
+
+// capabilityRevisionProvenanceMethod first performs the same authoritative
+// revision/content validation used for ordinary capability reads, then asks
+// the narrow M.6 inspector to classify the only additional provenance form.
+// The empty return value is the valid ordinary form and is omitted from JSON.
+func capabilityRevisionProvenanceMethod(inspector application.ProposalReplayInspector, revision application.RevisionWithContent) (string, error) {
+	var err error
+	if revision.HasContent {
+		err = inspector.ValidateCapabilityContent(revision.Revision, revision.Content)
+	} else {
+		err = inspector.ValidateRevision(revision.Revision)
+	}
+	if err != nil {
+		return "", err
+	}
+	_, _, _, found, err := inspector.InspectAIAssistedCapabilityRevision(revision.Revision)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", nil
+	}
+	return engineering.AIAssistedMethod, nil
 }
 
 // requireFeatureCardID reads and validates the {featureCardID} path value,

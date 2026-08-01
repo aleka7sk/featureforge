@@ -1,0 +1,150 @@
+{{define "proposal-content"}}
+  <dl>
+    <dt>Schema version</dt><dd>{{.SchemaVersion}}</dd>
+    <dt>Title</dt><dd>{{.Title}}</dd>
+    <dt>Problem statement</dt><dd>{{.ProblemStatement}}</dd>
+    <dt>User outcome</dt><dd>{{if .UserOutcome}}{{.UserOutcome}}{{else}}—{{end}}</dd>
+  </dl>
+  <h3>Functional behaviours</h3>
+  {{if .FunctionalBehaviours}}<ul>{{range .FunctionalBehaviours}}<li>{{.}}</li>{{end}}</ul>{{else}}{{template "empty-state" "None."}}{{end}}
+  <h3>Constraints</h3>
+  {{if .Constraints}}<ul>{{range .Constraints}}<li>{{.}}</li>{{end}}</ul>{{else}}{{template "empty-state" "None."}}{{end}}
+  <h3>Acceptance criteria</h3>
+  {{if .AcceptanceCriteria}}<ul>{{range .AcceptanceCriteria}}<li><strong>{{.Key}}</strong>: {{.Text}}</li>{{end}}</ul>{{else}}{{template "empty-state" "None."}}{{end}}
+  <h3>Dependencies</h3>
+  {{if .Dependencies}}<ul>{{range .Dependencies}}<li>{{.}}</li>{{end}}</ul>{{else}}{{template "empty-state" "None."}}{{end}}
+  <h3>Open questions</h3>
+  {{if .OpenQuestions}}<ol>{{range .OpenQuestions}}<li>{{.}}</li>{{end}}</ol>{{else}}{{template "empty-state" "None."}}{{end}}
+{{end}}
+
+{{define "ai_proposal"}}
+{{template "shared-head" .}}
+{{template "nav" .}}
+<main id="main-content">
+  <h1>Review AI-assisted proposal</h1>
+  {{template "feature-nav" .FeatureCardID}}
+  <p>This proposal is transient. It becomes an ordinary draft revision only after explicit acceptance.</p>
+
+  <section class="panel" aria-labelledby="proposal-identity-heading">
+    <h2 id="proposal-identity-heading">Proposal identity and rationale</h2>
+    <dl>
+      <dt>Capability revision</dt>
+      <dd><code>{{.Capability.Revision.ArtifactID}}/{{.Capability.Revision.RevisionID}}</code> (sequence {{.Capability.Sequence}})</dd>
+      <dt>Capability content digest</dt><dd><code>{{.Capability.ContentDigest}}</code></dd>
+      <dt>Context digest</dt><dd><code>{{.ContextDigest}}</code></dd>
+      <dt>Proposal digest</dt><dd><code>{{.ProposalDigest}}</code></dd>
+    </dl>
+    {{template "rationale" .Rationale}}
+  </section>
+
+  <section class="panel" aria-labelledby="current-content-heading">
+    <h2 id="current-content-heading">Current capability content</h2>
+    {{template "proposal-content" .CurrentContent}}
+  </section>
+
+  <section class="panel" aria-labelledby="proposed-content-heading">
+    <h2 id="proposed-content-heading">Proposed capability content</h2>
+    {{template "proposal-content" .ProposedContent}}
+  </section>
+
+  <section class="panel" aria-labelledby="proposal-requirements-heading">
+    <h2 id="proposal-requirements-heading">Effective requirements</h2>
+    {{range .Requirements}}
+      <article>
+        <h3>{{.Revision.ArtifactID}}/{{.Revision.RevisionID}} (sequence {{.Sequence}})</h3>
+        <p>{{.Statement}}</p>
+        <p class="rationale">Trace: <code>{{.SourceCapabilityRevision.ArtifactID}}/{{.SourceCapabilityRevision.RevisionID}}#{{.SourceCriterionKey}}</code></p>
+      </article>
+    {{else}}
+      {{template "empty-state" "No effective requirements."}}
+    {{end}}
+  </section>
+
+  <section class="panel" aria-labelledby="proposal-claims-heading">
+    <h2 id="proposal-claims-heading">Current claims</h2>
+    {{range .Claims}}
+      <article>
+        <h3>{{.Record.Kind}}/{{.Record.RecordID}} {{template "status-badge" .Outcome}}</h3>
+        <p>Requirement: <code>{{.RequirementRevision.ArtifactID}}/{{.RequirementRevision.RevisionID}}</code></p>
+        <p>Capability: <code>{{.CapabilityRevision.ArtifactID}}/{{.CapabilityRevision.RevisionID}}</code>; scope: <code>{{.ScopeArtifactID}}</code></p>
+        <p>Criteria: {{range $index, $value := .CriterionKeys}}{{if $index}}, {{end}}<code>{{$value}}</code>{{end}}</p>
+        <p>Reasoning: {{if .Reasoning}}{{.Reasoning}}{{else}}—{{end}}</p>
+        <p>Executions: {{range $index, $value := .ExecutionReferences}}{{if $index}}, {{end}}<code>{{$value.Kind}}/{{$value.RecordID}}</code>{{else}}none{{end}}</p>
+        <p>Evidence: {{range $index, $value := .EvidenceReferences}}{{if $index}}, {{end}}<code>{{$value.ArtifactID}}/{{$value.RevisionID}}</code>{{else}}none{{end}}</p>
+      </article>
+    {{else}}
+      {{template "empty-state" "No current claims."}}
+    {{end}}
+  </section>
+
+  <section class="panel" aria-labelledby="proposal-decisions-heading">
+    <h2 id="proposal-decisions-heading">Applicable decisions</h2>
+    {{range .Decisions}}
+      <article>
+        <h3>{{.DecisionID}}</h3>
+        <p>Subject: <code>{{.Subject.Kind}}:{{.Subject.ArtifactID}}{{if .Subject.RevisionID}}/{{.Subject.RevisionID}}{{end}}</code></p>
+        <p>{{.OutcomeStatement}}</p>
+      </article>
+    {{else}}
+      {{template "empty-state" "No applicable decisions."}}
+    {{end}}
+  </section>
+
+  <section class="panel" aria-labelledby="proposal-questions-heading">
+    <h2 id="proposal-questions-heading">Open questions</h2>
+    {{if .OpenQuestions}}
+      <ol>{{range .OpenQuestions}}<li value="{{.Ordinal}}">{{.Text}} <small>(<code>{{.CapabilityRevision.ArtifactID}}/{{.CapabilityRevision.RevisionID}}</code>)</small></li>{{end}}</ol>
+    {{else}}
+      {{template "empty-state" "No open questions."}}
+    {{end}}
+  </section>
+
+  <section class="panel" aria-labelledby="proposal-uncovered-heading">
+    <h2 id="proposal-uncovered-heading">Uncovered criteria</h2>
+    {{range .UncoveredCriteria}}
+      <article>
+        <h3>{{.CriterionKey}}: {{.CriterionText}}</h3>
+        <p>{{template "status-badge" .Reason}}</p>
+        <p>Affected requirements: {{range $index, $value := .RequirementRevisions}}{{if $index}}, {{end}}<code>{{$value.ArtifactID}}/{{$value.RevisionID}}</code>{{else}}none{{end}}</p>
+      </article>
+    {{else}}
+      {{template "empty-state" "No uncovered criteria."}}
+    {{end}}
+  </section>
+
+  <section class="panel" aria-labelledby="proposal-findings-heading">
+    <h2 id="proposal-findings-heading">Validation findings</h2>
+    {{range .Findings}}
+      <article>
+        <h3>{{.CriterionKey}} {{template "status-badge" .Outcome}}</h3>
+        <p>Requirement: <code>{{.RequirementRevision.ArtifactID}}/{{.RequirementRevision.RevisionID}}</code>; Claim: <code>{{.ClaimRecord.Kind}}/{{.ClaimRecord.RecordID}}</code></p>
+        <p>Reasoning: {{if .Reasoning}}{{.Reasoning}}{{else}}—{{end}}</p>
+      </article>
+    {{else}}
+      {{template "empty-state" "No negative or inconclusive findings."}}
+    {{end}}
+  </section>
+
+  <section class="panel" aria-labelledby="proposal-sources-heading">
+    <h2 id="proposal-sources-heading">Exact sources</h2>
+    <h3>Context sources</h3>
+    <ul>{{range .ContextSources}}<li><code>{{.}}</code></li>{{else}}<li>None.</li>{{end}}</ul>
+    <h3>Proposal sources</h3>
+    <ul>{{range .ProposalSources}}<li><code>{{.}}</code></li>{{else}}<li>None.</li>{{end}}</ul>
+  </section>
+
+  <section class="panel" aria-labelledby="proposal-accept-heading">
+    <h2 id="proposal-accept-heading">Accept as a draft revision</h2>
+    <form class="command-form" method="post" action="/features/{{.FeatureCardID}}/ai-proposals/accept">
+      <div class="field">
+        <label for="revision_id">Revision ID</label>
+        <input type="text" id="revision_id" name="revision_id" required>
+      </div>
+      <input type="hidden" name="proposal" value="{{.CanonicalProposal}}">
+      <button type="submit">Accept reviewed proposal</button>
+    </form>
+    <p><a class="button secondary" href="/features/{{.FeatureCardID}}/revisions">Discard proposal</a></p>
+  </section>
+</main>
+{{template "footer" .}}
+{{end}}

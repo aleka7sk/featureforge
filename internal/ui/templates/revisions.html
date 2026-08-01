@@ -17,6 +17,16 @@
 
   {{template "error-notice" .FormError}}
 
+  {{if .ArtifactID}}
+  <section class="panel" aria-labelledby="ai-proposal-heading">
+    <h2 id="ai-proposal-heading">AI-assisted proposal</h2>
+    <p>Generate a transient proposal from the exact current engineering context. Generation does not write engineering state.</p>
+    <form class="command-form" method="post" action="/features/{{.FeatureCardID}}/ai-proposals">
+      <button type="submit">Generate AI-assisted proposal</button>
+    </form>
+  </section>
+  {{end}}
+
   {{range .Revisions}}
   <section class="panel" aria-labelledby="rev-{{.RevisionID}}">
     <h2 id="rev-{{.RevisionID}}">
@@ -24,7 +34,7 @@
       {{if .IsCurrent}}{{template "status-badge" "current"}}{{end}}
       {{template "status-badge" .AcceptanceState}}
     </h2>
-    <p class="when">Recorded {{.RecordedAt.Format "2006-01-02 15:04"}}{{if .ProvenanceActor}} by {{.ProvenanceActor}}{{end}}</p>
+    <p class="when">Recorded {{.RecordedAt.Format "2006-01-02 15:04"}}{{if .ProvenanceActor}} by {{.ProvenanceActor}}{{end}}{{if .ProvenanceMethod}} via {{.ProvenanceMethod}}{{end}}</p>
     {{if .HasContent}}
       <h3>{{.Title}}</h3>
       <p>{{.ProblemStatement}}</p>

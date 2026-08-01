@@ -75,6 +75,7 @@ type revisionDTO struct {
 	RecordedAt           time.Time   `json:"recorded_at"`
 	ProvenanceActor      string      `json:"provenance_actor,omitempty"`
 	ProvenanceRecordedAt *time.Time  `json:"provenance_recorded_at,omitempty"`
+	ProvenanceMethod     string      `json:"provenance_method,omitempty"`
 	Content              *contentDTO `json:"content,omitempty"`
 }
 

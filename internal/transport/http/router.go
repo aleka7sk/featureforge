@@ -2,8 +2,8 @@ package http
 
 import "net/http"
 
-// newRouter registers every Phase A route (FF-018 §3): GET and POST only,
-// all under /api/v1, in the §3 matrix's order. No PUT, PATCH, or DELETE
+// newRouter registers every governed API route (FF-018 §3, FF-024 §8.1):
+// GET and POST only, all under /api/v1. No PUT, PATCH, or DELETE
 // pattern is ever registered (FF-018 §12.2, §18 criterion 2).
 func newRouter(deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
@@ -25,6 +25,8 @@ func newRouter(deps Dependencies) http.Handler {
 	mux.HandleFunc("POST /api/v1/capabilities", handleEstablishCapability(deps))
 	mux.HandleFunc("POST /api/v1/capabilities/{artifactID}/revisions", handleReviseCapability(deps))
 	mux.HandleFunc("POST /api/v1/capabilities/{artifactID}/acceptances", handleAcceptRevision(deps))
+	mux.HandleFunc("POST /api/v1/capabilities/{artifactID}/ai-proposals", handleGenerateCapabilityProposal(deps))
+	mux.HandleFunc("POST /api/v1/capabilities/{artifactID}/ai-proposals/accept", handleAcceptCapabilityProposal(deps))
 	mux.HandleFunc("POST /api/v1/requirements", handleEstablishRequirement(deps))
 	mux.HandleFunc("POST /api/v1/decisions", handleRecordDecision(deps))
 	mux.HandleFunc("POST /api/v1/validation/plans", handleEstablishPlan(deps))

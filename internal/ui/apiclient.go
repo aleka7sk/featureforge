@@ -65,11 +65,16 @@ func callAPI(ctx context.Context, api http.Handler, method, path string, body an
 	// the standard library's own sentinel for exactly this case.
 	reqBody := io.Reader(http.NoBody)
 	if body != nil {
-		encoded, err := json.Marshal(body)
-		if err != nil {
+		var encoded bytes.Buffer
+		encoder := json.NewEncoder(&encoded)
+		// A reviewed Proposal is already canonical JSON embedded as a
+		// json.RawMessage. Escaping <, >, or & while wrapping it in the API
+		// accept request would mutate the exact value the review page returns.
+		encoder.SetEscapeHTML(false)
+		if err := encoder.Encode(body); err != nil {
 			return apiResult{}, err
 		}
-		reqBody = bytes.NewReader(encoded)
+		reqBody = bytes.NewReader(bytes.TrimSuffix(encoded.Bytes(), []byte{'\n'}))
 	}
 	req, err := http.NewRequestWithContext(ctx, method, path, reqBody)
 	if err != nil {

@@ -39,8 +39,13 @@ var (
 var (
 	ErrEngineeringStateIndeterminate = errors.New("application: engineering state indeterminate")
 	ErrTimelineSourceInvalid         = errors.New("application: timeline source invalid")
-	ErrLifecycleTransitionInvalid    = errors.New("application: lifecycle transition invalid")
-	ErrLifecycleHeadConflict         = errors.New("application: lifecycle head conflict")
+	// ErrProposalContextStale reports that a transient, reviewed proposal was
+	// derived from a different complete ContextPack than the one visible in
+	// the genuinely-new acceptance transaction (AD-034, FF-024). An exact
+	// occupied target replay is classified before this state-dependent check.
+	ErrProposalContextStale       = errors.New("application: proposal context is stale")
+	ErrLifecycleTransitionInvalid = errors.New("application: lifecycle transition invalid")
+	ErrLifecycleHeadConflict      = errors.New("application: lifecycle head conflict")
 	// ErrValidationPlanAmbiguous reports that a capability's discovered
 	// validation-plan population spans more than one Plan Artifact. The composition
 	// that builds TimelineInput.PlanArtifactID (FF-018 §6.6) requires

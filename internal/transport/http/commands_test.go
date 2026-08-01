@@ -15,6 +15,7 @@ import (
 	"github.com/aleka7sk/featureforge/internal/engineering"
 	"github.com/aleka7sk/featureforge/internal/engineering/peos"
 	"github.com/aleka7sk/featureforge/internal/infrastructure/memory"
+	"github.com/aleka7sk/featureforge/internal/proposal"
 	"github.com/aleka7sk/featureforge/internal/testsupport/replaygate"
 	transporthttp "github.com/aleka7sk/featureforge/internal/transport/http"
 )
@@ -39,6 +40,7 @@ func newTestDeps() transporthttp.Dependencies {
 		Recorder:  recorder,
 		Inspector: recorder,
 		Projector: recorder,
+		Generator: proposal.NewDeterministicGenerator(),
 		Clock:     application.NewFixedClock(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)),
 	}
 }

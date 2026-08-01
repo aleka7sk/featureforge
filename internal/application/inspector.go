@@ -32,3 +32,16 @@ type EngineeringReplayInspector interface {
 	ExecutionPlanActivity(engineering.RecordEnvelope) (plan engineering.RevisionKey, activityKey, method string, err error)
 	ClaimMethod(engineering.RecordEnvelope) (string, error)
 }
+
+// ProposalReplayInspector is the M.6 read authority for the one additional
+// valid capability-Revision representation. A false found value means an
+// otherwise valid ordinary capability Revision. A true value returns the
+// strictly decoded AI-assisted provenance/origin witness. Malformed pairings
+// (method without the governed Origin, or vice versa) return an error and are
+// stored-state integrity at the application boundary.
+type ProposalReplayInspector interface {
+	EngineeringReplayInspector
+	InspectAIAssistedCapabilityRevision(
+		engineering.RevisionEnvelope,
+	) (proposalDigest engineering.Digest, contextDigest engineering.Digest, sources []string, found bool, err error)
+}

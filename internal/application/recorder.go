@@ -25,3 +25,17 @@ type EngineeringRecorder interface {
 	RecordTransition(in engineering.TransitionInput) (engineering.ArtifactEnvelope, engineering.RevisionEnvelope, engineering.RecordEnvelope, error)
 	VerifyContentDigest(rev engineering.RevisionEnvelope, content engineering.CapabilitySpecificationContent) error
 }
+
+// ProposalEngineeringRecorder is the narrow M.6 construction extension used
+// only after a transient proposal has been reviewed against a fresh ContextPack
+// (AD-034, FF-024). The concrete PEOS adapter owns provenance/origin encoding;
+// application supplies only PEOS-free content-address witnesses.
+type ProposalEngineeringRecorder interface {
+	EngineeringRecorder
+	RecordAIAssistedCapabilityRevision(
+		in engineering.CapabilityRevisionInput,
+		proposalDigest engineering.Digest,
+		contextDigest engineering.Digest,
+		sources []string,
+	) (engineering.RevisionEnvelope, error)
+}

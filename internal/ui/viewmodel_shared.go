@@ -101,6 +101,7 @@ type revisionRow struct {
 	AcceptanceState      string
 	RecordedAt           time.Time
 	ProvenanceActor      string
+	ProvenanceMethod     string
 	HasContent           bool
 	Title                string
 	ProblemStatement     string
@@ -115,7 +116,7 @@ type revisionRow struct {
 func mapRevisionRow(r apiRevisionDTO, isCurrent bool) revisionRow {
 	row := revisionRow{
 		ArtifactID: r.ArtifactID, RevisionID: r.RevisionID, Sequence: r.Sequence, IsCurrent: isCurrent,
-		RecordedAt: r.RecordedAt, ProvenanceActor: r.ProvenanceActor,
+		RecordedAt: r.RecordedAt, ProvenanceActor: r.ProvenanceActor, ProvenanceMethod: r.ProvenanceMethod,
 	}
 	if r.Content != nil {
 		row.HasContent = true

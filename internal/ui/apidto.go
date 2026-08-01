@@ -1,6 +1,9 @@
 package ui
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // The types below are UI-owned JSON decode targets, mirroring
 // internal/transport/http's response DTOs field for field where this
@@ -16,6 +19,7 @@ type apiAcceptanceCriterionDTO struct {
 }
 
 type apiContentDTO struct {
+	SchemaVersion        int                         `json:"schema_version"`
 	Title                string                      `json:"title"`
 	ProblemStatement     string                      `json:"problem_statement"`
 	UserOutcome          string                      `json:"user_outcome"`
@@ -35,6 +39,7 @@ type apiRevisionDTO struct {
 	SubjectKey           string         `json:"subject_key"`
 	RecordedAt           time.Time      `json:"recorded_at"`
 	ProvenanceActor      string         `json:"provenance_actor"`
+	ProvenanceMethod     string         `json:"provenance_method"`
 	ProvenanceRecordedAt *time.Time     `json:"provenance_recorded_at"`
 	Content              *apiContentDTO `json:"content"`
 }
@@ -181,4 +186,110 @@ type apiTimelineEventDTO struct {
 	References     []string   `json:"references"`
 	Corrected      string     `json:"corrected"`
 	Rationale      string     `json:"rationale"`
+}
+
+// The proposal DTOs below are UI-owned render/delegation shapes for FF-024.
+// They deliberately contain only JSON primitives and other UI DTOs: the UI
+// does not import proposal, application, engineering, or PEOS values.
+
+type apiProposalRevisionKeyDTO struct {
+	ArtifactID string `json:"artifact_id"`
+	RevisionID string `json:"revision_id"`
+}
+
+type apiProposalRecordKeyDTO struct {
+	Kind     string `json:"kind"`
+	RecordID string `json:"record_id"`
+}
+
+type apiProposalCapabilityDTO struct {
+	Revision      apiProposalRevisionKeyDTO `json:"revision"`
+	Sequence      int                       `json:"sequence"`
+	Content       apiContentDTO             `json:"content"`
+	ContentDigest string                    `json:"content_digest"`
+}
+
+type apiProposalRequirementDTO struct {
+	Revision                 apiProposalRevisionKeyDTO `json:"revision"`
+	Sequence                 int                       `json:"sequence"`
+	Statement                string                    `json:"statement"`
+	SourceCapabilityRevision apiProposalRevisionKeyDTO `json:"source_capability_revision"`
+	SourceCriterionKey       string                    `json:"source_criterion_key"`
+}
+
+type apiProposalClaimDTO struct {
+	Record              apiProposalRecordKeyDTO     `json:"record"`
+	RequirementRevision apiProposalRevisionKeyDTO   `json:"requirement_revision"`
+	CapabilityRevision  apiProposalRevisionKeyDTO   `json:"capability_revision"`
+	ScopeArtifactID     string                      `json:"scope_artifact_id"`
+	CriterionKeys       []string                    `json:"criterion_keys"`
+	Outcome             string                      `json:"outcome"`
+	Reasoning           string                      `json:"reasoning"`
+	ExecutionReferences []apiProposalRecordKeyDTO   `json:"execution_references"`
+	EvidenceReferences  []apiProposalRevisionKeyDTO `json:"evidence_references"`
+}
+
+type apiProposalDecisionSubjectDTO struct {
+	Kind       string `json:"kind"`
+	ArtifactID string `json:"artifact_id"`
+	RevisionID string `json:"revision_id"`
+}
+
+type apiProposalDecisionDTO struct {
+	DecisionID       string                        `json:"decision_id"`
+	Subject          apiProposalDecisionSubjectDTO `json:"subject"`
+	OutcomeStatement string                        `json:"outcome_statement"`
+}
+
+type apiProposalOpenQuestionDTO struct {
+	CapabilityRevision apiProposalRevisionKeyDTO `json:"capability_revision"`
+	Ordinal            int                       `json:"ordinal"`
+	Text               string                    `json:"text"`
+}
+
+type apiProposalUncoveredCriterionDTO struct {
+	CapabilityRevision   apiProposalRevisionKeyDTO   `json:"capability_revision"`
+	CriterionKey         string                      `json:"criterion_key"`
+	CriterionText        string                      `json:"criterion_text"`
+	Reason               string                      `json:"reason"`
+	RequirementRevisions []apiProposalRevisionKeyDTO `json:"requirement_revisions"`
+}
+
+type apiProposalFindingDTO struct {
+	CapabilityRevision  apiProposalRevisionKeyDTO `json:"capability_revision"`
+	CriterionKey        string                    `json:"criterion_key"`
+	RequirementRevision apiProposalRevisionKeyDTO `json:"requirement_revision"`
+	ClaimRecord         apiProposalRecordKeyDTO   `json:"claim_record"`
+	Outcome             string                    `json:"outcome"`
+	Reasoning           string                    `json:"reasoning"`
+}
+
+type apiProposalContextPackDTO struct {
+	Capability        apiProposalCapabilityDTO           `json:"capability"`
+	Requirements      []apiProposalRequirementDTO        `json:"requirements"`
+	Claims            []apiProposalClaimDTO              `json:"claims"`
+	Decisions         []apiProposalDecisionDTO           `json:"decisions"`
+	OpenQuestions     []apiProposalOpenQuestionDTO       `json:"open_questions"`
+	UncoveredCriteria []apiProposalUncoveredCriterionDTO `json:"uncovered_criteria"`
+	Findings          []apiProposalFindingDTO            `json:"findings"`
+	Sources           []string                           `json:"sources"`
+	ContextDigest     string                             `json:"context_digest"`
+}
+
+type apiCapabilityProposalDTO struct {
+	Content        apiContentDTO `json:"content"`
+	Rationale      string        `json:"rationale"`
+	Sources        []string      `json:"sources"`
+	ContextDigest  string        `json:"context_digest"`
+	ProposalDigest string        `json:"proposal_digest"`
+}
+
+type apiGenerateCapabilityProposalDTO struct {
+	ContextPack json.RawMessage `json:"context_pack"`
+	Proposal    json.RawMessage `json:"proposal"`
+}
+
+type apiAcceptCapabilityProposalDTO struct {
+	RevisionID string          `json:"revision_id"`
+	Proposal   json.RawMessage `json:"proposal"`
 }

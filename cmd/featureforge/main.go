@@ -19,6 +19,7 @@ import (
 	"github.com/aleka7sk/featureforge/internal/engineering/peos"
 	"github.com/aleka7sk/featureforge/internal/infrastructure/memory"
 	"github.com/aleka7sk/featureforge/internal/infrastructure/postgres"
+	"github.com/aleka7sk/featureforge/internal/proposal"
 	transporthttp "github.com/aleka7sk/featureforge/internal/transport/http"
 	"github.com/aleka7sk/featureforge/internal/ui"
 )
@@ -45,6 +46,7 @@ func run(logger *slog.Logger) error {
 	defer closeAdapter()
 
 	recorder := peos.NewRecorder()
+	generator := proposal.NewDeterministicGenerator()
 	if err := application.EnsureLifecycleConfiguration(ctx, uow, recorder, recorder); err != nil {
 		return fmt.Errorf("initialize lifecycle configuration: %w", err)
 	}
@@ -53,6 +55,7 @@ func run(logger *slog.Logger) error {
 		Recorder:  recorder,
 		Inspector: recorder,
 		Projector: recorder,
+		Generator: generator,
 		Clock:     application.SystemClock{},
 		Logger:    logger,
 	}

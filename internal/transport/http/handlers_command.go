@@ -5,14 +5,16 @@ import (
 
 	"github.com/aleka7sk/featureforge/internal/application"
 	"github.com/aleka7sk/featureforge/internal/engineering"
+	"github.com/aleka7sk/featureforge/internal/proposal"
 )
 
 // Every handler below performs exactly the six steps FF-018 §4 specifies:
 // decode, transport-syntax-validate, map to application input, invoke
 // exactly one application entry point, map the result, map any error
 // centrally. None holds application.Repositories or calls UnitOfWork.Do.
-// Every command's success status is 201 Created (FF-018 §3): each command
-// creates an immutable record.
+// Every persisted Phase A command's success status is 201 Created (FF-018
+// §3). M.6 generate is the sole 200 exception: it returns transient values
+// and writes no record; reviewed acceptance remains 201.
 
 // handleCreateProject implements C1.
 func handleCreateProject(deps Dependencies) http.HandlerFunc {
@@ -301,5 +303,81 @@ func handleCorrectClaim(deps Dependencies) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusCreated, correctClaimResponse{ClaimKey: result.Key.String()}, nil)
+	}
+}
+
+// handleGenerateCapabilityProposal assembles one authoritative ContextPack in
+// application, then invokes the authority-free Generator after the read-only
+// UnitOfWork has closed. Neither value is persisted.
+func handleGenerateCapabilityProposal(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		artifactID, ok := requirePathValue(w, r, "artifactID")
+		if !ok {
+			return
+		}
+		if !requireEmptyBody(w, r) {
+			return
+		}
+		result, err := application.GenerateCapabilityProposal(
+			r.Context(), deps.UOW, deps.Projector, deps.Inspector, deps.Generator, artifactID,
+		)
+		if err != nil {
+			writeAppError(w, r, deps, err)
+			return
+		}
+		contextJSON, err := result.ContextPack.CanonicalJSON()
+		if err != nil {
+			writeAppError(w, r, deps, err)
+			return
+		}
+		proposalJSON, err := result.Proposal.CanonicalJSON()
+		if err != nil {
+			writeAppError(w, r, deps, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, generateCapabilityProposalResponse{
+			ContextPack: contextJSON,
+			Proposal:    proposalJSON,
+		}, nil)
+	}
+}
+
+// handleAcceptCapabilityProposal reparses the complete canonical Proposal and
+// recomputes its digest before application sees it. The path Artifact identity
+// is authoritative; RevisionID remains caller supplied in the request body.
+func handleAcceptCapabilityProposal(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		artifactID, ok := requirePathValue(w, r, "artifactID")
+		if !ok {
+			return
+		}
+		var req acceptCapabilityProposalRequest
+		if !decodeProposalJSON(w, r, &req) {
+			return
+		}
+		parsed, err := proposal.ParseProposal(req.Proposal)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_command", err.Error())
+			return
+		}
+		result, err := application.AcceptCapabilityProposal(
+			r.Context(), deps.UOW, deps.Recorder, deps.Projector, deps.Inspector, deps.Clock,
+			application.AcceptCapabilityProposalInput{
+				ArtifactID: artifactID,
+				RevisionID: req.RevisionID,
+				Proposal:   parsed,
+			},
+		)
+		if err != nil {
+			writeAppError(w, r, deps, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, acceptCapabilityProposalResponse{
+			ArtifactID: result.ArtifactKey.ArtifactID,
+			RevisionID: result.RevisionKey.RevisionID,
+			Sequence:   result.Sequence,
+		}, nil)
 	}
 }
