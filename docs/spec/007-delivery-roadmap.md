@@ -12,7 +12,7 @@ M.2  Architecture and In-Memory Vertical Slice Specification
 M.3  In-Memory Vertical Slice Implementation
 M.4  PostgreSQL Persistence and Current-State Queries
 M.5  HTTP API and Minimal UI
-M.6  AI Context-Pack Demonstration
+M.6  AI Context-Pack Demonstration                           ← complete
 M.7  Independent End-to-End PEOS Consumer Audit
 ────────────────────────────────────────────────  FeatureForge frozen
 B.0  Belcanto Product Architecture and PEOS Integration Boundary
@@ -237,6 +237,15 @@ verification.
 - the no-write-access test passes.
 
 **Model.** Claude Opus. **Mode.** Bounded capability implementation.
+
+**Status: complete (2026-08-01).** The implementation is published at
+`395e163180649dcb5735b006ef6e225c80570a69` (tree
+`e2960d8504fdaf9ef39ce748bde5dce2174aa89f`). The independent read-only audit
+reported no BLOCKER or MAJOR, and the publication-gate
+[workflow run](https://github.com/aleka7sk/featureforge/actions/runs/30690421922)
+passed formatting, vet, build, the complete PostgreSQL suite and the complete
+race suite at verification commit
+`64cd1a5a7c37cfe632fbc3f2f28a9eb046830ffc`.
 
 ---
 

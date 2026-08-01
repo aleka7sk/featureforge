@@ -1,6 +1,6 @@
 # FF-024 — AI-assisted proposal workflow
 
-Status: Accepted (implementation pending)
+Status: Implemented
 Date: 2026-08-01
 Phase: M.6 AI context-pack demonstration
 Governs: AD-034 implementation, exact context-pack assembly, transient proposal
@@ -825,3 +825,28 @@ Only then may M.7 begin. M.7 is the independent end-to-end PEOS consumer audit
 and freeze gate. Authentication, provider-backed generation and the actual
 application/login experience begin only after that gate and are not implied by
 M.6 completion.
+
+### 12.1 Completion evidence
+
+M.6 was implemented and published on 2026-08-01 at commit
+`395e163180649dcb5735b006ef6e225c80570a69` with tree
+`e2960d8504fdaf9ef39ce748bde5dce2174aa89f`. An independent read-only audit of
+that implementation concluded:
+
+```text
+M.6 INDEPENDENT READ-ONLY AUDIT COMPLETE — NO BLOCKER OR MAJOR / READY FOR PUBLICATION GATE
+```
+
+The first hosted run exposed only Go's default ten-minute per-package timeout
+while the race-enabled PostgreSQL UI package was still making progress. Commit
+`64cd1a5a7c37cfe632fbc3f2f28a9eb046830ffc` (tree
+`57fb48d8094c931510c80609b4919dc4b8b51895`) gave the complete race command an
+explicit twenty-minute inner timeout while retaining the workflow's existing
+thirty-minute outer bound. The resulting
+[GitHub Actions run](https://github.com/aleka7sk/featureforge/actions/runs/30690421922)
+passed formatting, `go vet ./...`, `go build ./...`, the full PostgreSQL test
+suite, and `go test ./... -race -count=1 -timeout=20m`.
+
+This evidence satisfies all twelve exit conditions above. M.7 began only after
+the successful publication gate; neither authentication nor product-application
+implementation was started as part of M.6.

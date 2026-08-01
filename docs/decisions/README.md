@@ -1462,7 +1462,7 @@ Revision 2's AC-1..AC-4; AC-4 is uncovered because REQ-4 has no current Claim.
 
 ## AD-034 — AI-assisted proposals are transient reviewed input
 
-Status: Accepted
+Status: Accepted and implemented
 Date: 2026-08-01
 Phase: M.6 AI context-pack demonstration
 
@@ -1486,14 +1486,21 @@ provider/model integration, proposal persistence, autonomous writes, and the
 actual product application/login surface remain out of scope until after M.7's
 independent audit and freeze gate.
 
+M.6 implementation is published at
+`395e163180649dcb5735b006ef6e225c80570a69` (tree
+`e2960d8504fdaf9ef39ce748bde5dce2174aa89f`). The independent audit found no
+BLOCKER or MAJOR. Verification commit
+`64cd1a5a7c37cfe632fbc3f2f28a9eb046830ffc` passed the complete PostgreSQL and
+race-enabled [GitHub Actions gate](https://github.com/aleka7sk/featureforge/actions/runs/30690421922).
+
 ---
 
 ## Open questions
 
-None for the accepted M.6 implementation boundary. Every material architecture
-decision through M.6 is resolved; FF-024 implementation and evidence remain to
-be completed before M.7. Questions deferred to a later phase, with the phase
-that owns them:
+None for the implemented M.6 boundary. Every material architecture decision
+through M.6 is resolved, and FF-024's implementation and publication evidence
+are complete. M.7 owns the independent consumer audit and freeze decision.
+Questions deferred to a later phase, with the phase that owns them:
 
 | Question | Owned by |
 |---|---|
