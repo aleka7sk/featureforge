@@ -65,4 +65,9 @@ jobs:
         run: go test ./... -count=1
 
       - name: Race test with PostgreSQL
-        run: go test ./... -race -count=1
+        # The PostgreSQL browser journey runs in roughly 3.5 minutes on the
+        # hosted runner by itself. Under the full race suite it can start late
+        # enough to exceed Go's 10-minute package default despite continuing
+        # to make progress; keep the job's existing 30-minute outer bound and
+        # give the complete race package set an explicit inner bound.
+        run: go test ./... -race -count=1 -timeout=20m
