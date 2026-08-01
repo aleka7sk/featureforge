@@ -1483,8 +1483,9 @@ it receives no Generator or application dependency.
 Implementation and M.6 exit evidence are governed by
 [FF-024](../spec/024-ai-assisted-proposal-workflow.md). Authentication,
 provider/model integration, proposal persistence, autonomous writes, and the
-actual product application/login surface remain out of scope until after M.7's
-independent audit and freeze gate.
+actual product application/login surface remain outside FeatureForge. M.7 is
+complete; those concerns belong to Belcanto's own product and architecture
+decisions rather than a continuation of this POC.
 
 M.6 implementation is published at
 `395e163180649dcb5735b006ef6e225c80570a69` (tree
@@ -1495,12 +1496,29 @@ race-enabled [GitHub Actions gate](https://github.com/aleka7sk/featureforge/acti
 
 ---
 
+## M.7 freeze disposition
+
+FeatureForge's independent consumer audit is complete. The original
+`5 MAJOR · 4 MINOR` findings are closed by the published remediation tree; the
+final independent result is `READY — 0 BLOCKER · 0 MAJOR · 0 MINOR`. The exact
+three-document handover is:
+
+- [M.7 Independent End-to-End PEOS Consumer Audit](../reports/m7-independent-consumer-audit.md);
+- [Reusable Patterns](../reports/reusable-patterns.md);
+- [FeatureForge Lessons Learned for Belcanto](../reports/lessons-learned.md).
+
+This freeze records no new shared-library decision. FeatureForge remains a
+consumer and proof vehicle; Belcanto may reuse its reasoning only after making
+Belcanto-owned product, domain, identity, authorization, API, UI, persistence,
+and operational decisions.
+
 ## Open questions
 
-None for the implemented M.6 boundary. Every material architecture decision
-through M.6 is resolved, and FF-024's implementation and publication evidence
-are complete. M.7 owns the independent consumer audit and freeze decision.
-Questions deferred to a later phase, with the phase that owns them:
+None for the frozen FeatureForge scope. Every material architecture decision
+through M.6 is resolved, FF-024's implementation and publication evidence are
+complete, and M.7 has closed the independent consumer audit. Questions below
+are deliberately deferred beyond FeatureForge, with the context that owns
+them:
 
 | Question | Owned by |
 |---|---|
@@ -1510,7 +1528,7 @@ Questions deferred to a later phase, with the phase that owns them:
 | Random identity generation at the transport edge | Resolved — not used; client-supplied identities are required (AD-029, see below) |
 | Whether revision subject references should be existence-verified at write time | Deferred; AD-021 is the precedent that would govern it, and it needs its own evidence (FF-016 §3.6) |
 | Whether a subject backfill tool is ever required | Deferred until a durable FeatureForge database exists (FF-016 §7) |
-| Which patterns Belcanto reuses or redesigns | M.7 freeze artifacts |
+| Which patterns Belcanto reuses or redesigns | Resolved as a handover boundary: the freeze artifacts classify transferable rationale; each Belcanto adoption still requires a Belcanto-owned decision |
 
 Resolved since M.1: canonical JSON serialization rules
 ([FF-009 §4.1](../spec/009-in-memory-persistence.md#41-capabilityspecificationcontent))

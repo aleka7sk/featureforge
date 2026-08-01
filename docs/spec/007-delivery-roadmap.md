@@ -273,6 +273,18 @@ the claims in [FF-001 §6](001-poc-acceptance-contract.md#6-acceptance-contract)
 **Model.** Claude Opus. **Mode.** Adversarial independent audit — the auditor
 reads the specifications and the code and attempts to falsify each claim.
 
+**Status: complete (2026-08-01).** The original audit returned
+`0 BLOCKER · 5 MAJOR · 4 MINOR`; remediation is published at
+[`40644fc61859f3ea4173d3904680161e01e048ec`](https://github.com/aleka7sk/featureforge/commit/40644fc61859f3ea4173d3904680161e01e048ec)
+(tree `bd1468fdaf4d3164df0c96cd582067d96585b2e9`). The final independent
+remediation re-audit returned `READY — 0 BLOCKER · 0 MAJOR · 0 MINOR`, and an
+independent freeze-artifact review returned no BLOCKER, MAJOR, or MINOR. The
+entire handover is exactly the three documents required by FF-001 §7:
+[audit](../reports/m7-independent-consumer-audit.md),
+[patterns](../reports/reusable-patterns.md), and
+[lessons learned](../reports/lessons-learned.md). Their exact publication gate
+is recorded in the audit ledger.
+
 **On freeze:** FeatureForge development stops.
 
 ---

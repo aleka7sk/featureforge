@@ -235,79 +235,79 @@ FeatureForge is successful only when **all** of the following are demonstrated.
 
 ### 6.1 Architecture
 
-- [ ] The PEOS SDK is unchanged — no file in the PEOS module is modified, and no
+- [x] The PEOS SDK is unchanged — no file in the PEOS module is modified, and no
       `replace` directive points at a local PEOS checkout.
-- [ ] The FeatureForge domain does not import PEOS, directly or transitively.
-- [ ] Product vocabulary lives outside PEOS: every FeatureForge vocabulary value
+- [x] The FeatureForge domain does not import PEOS, directly or transitively.
+- [x] Product vocabulary lives outside PEOS: every FeatureForge vocabulary value
       is in the `featureforge` namespace, and no value is constructed in the
       `peos` namespace.
-- [ ] No PEOS type is copied, restated, or shadowed inside FeatureForge.
-- [ ] Package boundaries are enforced by tests that fail the build, not by
+- [x] No PEOS type is copied, restated, or shadowed inside FeatureForge.
+- [x] Package boundaries are enforced by tests that fail the build, not by
       convention ([FF-002 §4](002-domain-boundaries.md#enforcement)).
 
 ### 6.2 History
 
-- [ ] Artifact Revision 1 remains fully inspectable after Revision 2 exists, with
+- [x] Artifact Revision 1 remains fully inspectable after Revision 2 exists, with
       identical content and identical provenance.
-- [ ] No immutable record is ever updated or deleted — proven by an adapter-level
+- [x] No immutable record is ever updated or deleted — proven by an adapter-level
       test asserting that no update or delete path exists for engineering
       records.
-- [ ] A correction creates new history: the corrected claim is unchanged, the
+- [x] A correction creates new history: the corrected claim is unchanged, the
       correcting claim references it, and both are readable.
-- [ ] The timeline explains every engineering act in the scenario.
+- [x] The timeline explains every engineering act in the scenario.
 
 ### 6.3 Persistence
 
-- [ ] Every PEOS value the scenario uses persists and reloads.
-- [ ] JSON round trips preserve values — reloaded values equal the originals, and
+- [x] Every PEOS value the scenario uses persists and reloads.
+- [x] JSON round trips preserve values — reloaded values equal the originals, and
       canonical JSON is byte-identical.
-- [ ] A duplicate identical write is idempotent.
-- [ ] A conflicting immutable write fails with a distinguishable error.
-- [ ] Every mandatory internal reference remains resolvable; C8's exact
+- [x] A duplicate identical write is idempotent.
+- [x] A conflicting immutable write fails with a distinguishable error.
+- [x] Every mandatory internal reference remains resolvable; C8's exact
       Decision-basis evidence citation is the sole governed unresolved-citation
       exception.
-- [ ] PostgreSQL integration works, passing the same contract test suite as the
+- [x] PostgreSQL integration works, passing the same contract test suite as the
       in-memory adapter.
 
 ### 6.4 Queries
 
-- [ ] The current revision is resolved deterministically.
-- [ ] Insertion order does not affect resolution — proven by inserting the same
+- [x] The current revision is resolved deterministically.
+- [x] Insertion order does not affect resolution — proven by inserting the same
       records in several orders and asserting identical output.
-- [ ] Ambiguous histories fail explicitly, naming the conflicting records.
-- [ ] The current claim follows correction chains, including invalidation and
+- [x] Ambiguous histories fail explicitly, naming the conflicting records.
+- [x] The current claim follows correction chains, including invalidation and
       cycle rejection.
-- [ ] Every derived query result includes its rationale; direct stored-value
+- [x] Every derived query result includes its rationale; direct stored-value
       reads Q1, Q2, and Q7 do not invent one.
 
 ### 6.5 Application
 
-- [ ] One complete canonical feature lifecycle works through the API and the UI.
-- [ ] A person who has not seen the code can understand the current state and the
+- [x] One complete canonical feature lifecycle works through the API and the UI.
+- [x] A person who has not seen the code can understand the current state and the
       history from the UI alone ([§3](#3-minimal-user-experience)).
-- [ ] No operational Belcanto entity is required or present.
-- [ ] No generic workflow engine is introduced — no state machine over
+- [x] No operational Belcanto entity is required or present.
+- [x] No generic workflow engine is introduced — no state machine over
       user-defined transitions, no rule engine, no expression evaluator.
 
 ### 6.6 AI
 
-- [ ] A context pack can be generated for the canonical feature.
-- [ ] Every element of the context pack names its exact source reference.
-- [ ] An AI proposal cannot become authoritative without explicit human
+- [x] A context pack can be generated for the canonical feature.
+- [x] Every element of the context pack names its exact source reference.
+- [x] An AI proposal cannot become authoritative without explicit human
       acceptance — proven by a test asserting the proposal path has no write
       access.
-- [ ] Provenance is preserved on an accepted proposal.
+- [x] Provenance is preserved on an accepted proposal.
 
 ### 6.7 Transition to Belcanto
 
-- [ ] Reusable patterns are documented, as patterns and rationale, not as a
+- [x] Reusable patterns are documented, as patterns and rationale, not as a
       library.
-- [ ] FeatureForge-specific code is not treated as shared infrastructure.
-- [ ] No shared PEOS integration package is created prematurely. FeatureForge's
+- [x] FeatureForge-specific code is not treated as shared infrastructure.
+- [x] No shared PEOS integration package is created prematurely. FeatureForge's
       integration layer stays inside FeatureForge. Belcanto will write its own,
       informed by this one; extracting a library from a single consumer would
       generalize from a sample of one.
-- [ ] Lessons learned identify what Belcanto should reuse and what it should
+- [x] Lessons learned identify what Belcanto should reuse and what it should
       redesign.
 
 ## 7. Exit criteria
