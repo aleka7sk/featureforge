@@ -43,7 +43,9 @@ type RequirementInput struct {
 	RecordedAt        time.Time
 }
 
-// DecisionInput records a Decision with its Basis (FF-011 §4.3).
+// DecisionInput records a Decision with its Basis (FF-011 §4.3). An empty
+// SubjectRevisionID names the SubjectArtifactID at Artifact level; otherwise
+// the pair names one exact Artifact Revision (FF-004 §3.3).
 type DecisionInput struct {
 	DecisionID         string
 	SubjectArtifactID  string

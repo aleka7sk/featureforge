@@ -139,6 +139,12 @@ projection, dangling reference, duplicate authoritative identity, mixed family
 or invalid managed history is stored-state integrity. No partial ContextPack is
 returned.
 
+The complete managed-history proof includes the source-integrity members of
+every earlier AI-assisted capability Revision, in governed sequence order. A
+later valid Revision cannot hide a corrupt source witness in an earlier shared
+history member; generate and new-act acceptance both fail closed before using
+that Artifact.
+
 ### 3.2 Wire/value shape
 
 The PEOS-free proposal value is equivalent to:
@@ -222,6 +228,17 @@ forms are unambiguous. The ContextPack source set is the deduplicated union of:
 The Decision subject pair is mandatory even if the subject Revision is older
 than the current Revision. The already-present current Revision source never
 stands in for that exact historical subject.
+
+**C8 subject encoding correction.** FF-004 §3.3 permits a Decision to name
+either the capability Artifact or one exact capability Revision. C8 therefore
+encodes those two governed forms without adding a second discriminator:
+`subject_artifact_id` is always required; an omitted or exact empty
+`subject_revision_id` names the Artifact, while a present non-empty value must
+satisfy the identity grammar and names that exact Revision. This is the one
+state-independent meaning of the field in the application command and HTTP
+DTO. It reconciles FF-018 §3.1, whose original field inventory listed
+`subject_revision_id` but did not encode the Artifact-level form required by
+FF-004. Existing non-empty Revision-subject requests are unchanged.
 
 References are sorted bytewise by their complete canonical string. A dangling
 reference is not included as text; it fails authoritative assembly according
@@ -413,6 +430,13 @@ membership or freshness conclusion is made outside the transaction.
 
 Inside one UnitOfWork, inspect occupancy for
 `P = (ArtifactID, RevisionID)` before reading mutable proposal dependencies.
+The owning capability's complete managed history, including every AI-assisted
+Revision's source members, is validated before an occupied replay is accepted.
+Within one UnitOfWork callback, the implementation may memoize successful PEOS
+inspection results to avoid repeatedly decoding the same graph member. Such a
+memo is retry-local, requires full envelope/value equality rather than identity
+alone, returns defensive copies, and never caches an inspection failure. It is
+only a read optimization and cannot change integrity precedence.
 
 | Occupancy | Required behavior |
 |---|---|
@@ -432,6 +456,44 @@ Revision, structured content and one order row, with:
 - `Provenance.Method == featureforge:ai-assisted`;
 - the deterministic known-Origin note described in §7.4; and
 - no requirement that the Revision be accepted.
+
+Every selected persisted source is also an integrity member of that act for
+replay. It must still resolve and pass authoritative payload/projection checks,
+and it must be rooted in the target capability. The state-based membership
+proof applies these exact rules:
+
+- at least one selected capability Revision precedes the AI-assisted target's
+  stored sequence and has a valid journal containing one historical
+  `accepted` transition; this is the mandatory capability root;
+- another selected capability Revision may be unaccepted only when it is the
+  exact authoritative subject of an otherwise valid applicable Decision;
+- an Artifact source likewise requires an otherwise valid applicable Decision
+  whose exact authoritative subject is that Artifact;
+- a criterion source names an exact criterion in a prior, historically
+  accepted capability Revision;
+- a Requirement Revision or trace has its complete governed C7 history and an
+  exact criterion trace back to this capability;
+- a Claim has this capability's scope, a prior historically accepted capability
+  Revision as subject and a Requirement rooted in this capability;
+- an Execution or Evidence source belongs to a complete validation-run act and
+  is referenced by at least one such target-rooted Claim; and
+- every Claim used directly or as that membership witness has a structurally
+  valid correction graph. A cycle, self-reference, dangling target or malformed
+  chain is integrity failure. Later valid supersession or competing valid heads
+  do not retroactively invalidate a committed proposal source.
+
+A selected Decision record still requires its selected exact subject source.
+The converse is not required: a proposal may select only a subject that entered
+the ContextPack through an applicable Decision. Proposal sources remain the
+§5.2 non-empty subset: replay never demands an unselected ContextPack source,
+reconstructs the historical ContextPack, selects today's current Claim head, or
+compares its ContextDigest with today's changed context.
+
+Cross-act comparison of an acceptance `EffectiveAt` with the AI target's
+`RecordedAt` is not a causality or membership selector. The persisted model
+stores neither transaction commit order nor the historical read snapshot, and
+the Clock has no cross-command monotonicity contract; those timestamps cannot
+prove which accepted Revision was current when the act committed.
 
 An exact occupied replay returns `201` before freshness. Subsequent Requirement,
 Claim or Decision changes do not retroactively invalidate the committed act.

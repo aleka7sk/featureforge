@@ -566,8 +566,13 @@ func (Recorder) ValidateRecord(env engineering.RecordEnvelope) error {
 		if len(subjects) != 1 || value.ID().String() != env.Key.ID {
 			return fmt.Errorf("decision identity/subject mismatch")
 		}
-		subjectRevision, subjectIsRevision := subjects[0].AsArtifactRevision()
-		if !subjectIsRevision || value.Applicability().Kind().String() != CapabilityScopeKind.String() || value.Applicability().Expression() != subjectRevision.ArtifactID().String() {
+		subjectArtifactID := ""
+		if subjectArtifact, subjectIsArtifact := subjects[0].AsArtifact(); subjectIsArtifact {
+			subjectArtifactID = subjectArtifact.ArtifactID().String()
+		} else if subjectRevision, subjectIsRevision := subjects[0].AsArtifactRevision(); subjectIsRevision {
+			subjectArtifactID = subjectRevision.ArtifactID().String()
+		}
+		if subjectArtifactID == "" || value.Applicability().Kind().String() != CapabilityScopeKind.String() || value.Applicability().Expression() != subjectArtifactID {
 			return fmt.Errorf("decision subject and applicability do not use the configured capability scope")
 		}
 		if _, hasQuestion := value.Question(); !hasQuestion || len(value.Roles()) != 0 || len(value.Consequences()) != 0 || !value.Extension().IsZero() {

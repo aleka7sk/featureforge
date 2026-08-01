@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/aleka7sk/featureforge/internal/application"
 	"github.com/aleka7sk/featureforge/internal/engineering"
+	"github.com/aleka7sk/featureforge/internal/engineering/peos"
 	"github.com/aleka7sk/featureforge/internal/proposal"
 	transporthttp "github.com/aleka7sk/featureforge/internal/transport/http"
 )
@@ -388,5 +390,84 @@ func TestCapabilityRevisionReadRejectsUnreadableAIWitness(t *testing.T) {
 				t.Fatalf("opaque 500 leaked witness detail: %s", rr.Body.String())
 			}
 		})
+	}
+}
+
+func TestAIProposalHTTPReturnsOpaqueInternalErrorForCorruptGenerateSource(t *testing.T) {
+	deps := newTestDeps()
+	handler := transporthttp.NewHandler(deps)
+	seedProposalCapability(t, handler, "AI-CORRUPT-SOURCE", "CAP-AI-CORRUPT-SOURCE-REV-1", "A corrupt source must fail the whole generation.")
+
+	recorder := peos.NewRecorder()
+	const corruptRevisionID = "CAP-AI-CORRUPT-SOURCE-REV-PARTIAL"
+	partial, err := recorder.RecordCapabilityRevision(engineering.CapabilityRevisionInput{
+		ArtifactID: "CAP-AI-CORRUPT-SOURCE", RevisionID: corruptRevisionID,
+		ContentDigest: engineering.ComputeDigest([]byte("missing structured content")),
+		RecordedAt:    time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := deps.UOW.Do(context.Background(), func(repos application.Repositories) error {
+		return repos.Revisions.Put(context.Background(), partial)
+	}); err != nil {
+		t.Fatalf("persist partial proposal source: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/capabilities/CAP-AI-CORRUPT-SOURCE/ai-proposals", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError || errorCode(t, rr) != "internal_error" {
+		t.Fatalf("status/code = %d/%s, want 500/internal_error; body = %s", rr.Code, errorCode(t, rr), rr.Body.String())
+	}
+	for _, forbidden := range []string{"partial", "structured content", corruptRevisionID} {
+		if bytes.Contains(rr.Body.Bytes(), []byte(forbidden)) {
+			t.Fatalf("opaque generate 500 leaked %q: %s", forbidden, rr.Body.String())
+		}
+	}
+}
+
+func TestAIProposalHTTPReturnsOpaqueInternalErrorForPartialOccupiedAcceptTargetBeforeConflict(t *testing.T) {
+	deps := newTestDeps()
+	handler := transporthttp.NewHandler(deps)
+	seedProposalCapability(t, handler, "AI-CORRUPT-TARGET", "CAP-AI-CORRUPT-TARGET-REV-1", "A partial occupied target must precede conflict classification.")
+	_, generated := generateProposal(t, handler, "CAP-AI-CORRUPT-TARGET")
+	parsed, err := proposal.ParseProposal(generated.Proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := parsed.Content().Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const targetRevisionID = "CAP-AI-CORRUPT-TARGET-REV-2"
+	partial, err := peos.NewRecorder().RecordCapabilityRevision(engineering.CapabilityRevisionInput{
+		ArtifactID: "CAP-AI-CORRUPT-TARGET", RevisionID: targetRevisionID,
+		ContentDigest: digest,
+		RecordedAt:    time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := deps.UOW.Do(context.Background(), func(repos application.Repositories) error {
+		return repos.Revisions.Put(context.Background(), partial)
+	}); err != nil {
+		t.Fatalf("persist partial proposal target: %v", err)
+	}
+
+	rr := postCanonicalProposalAcceptance(
+		t, handler,
+		"/api/v1/capabilities/CAP-AI-CORRUPT-TARGET/ai-proposals/accept",
+		targetRevisionID,
+		generated.Proposal,
+		nil,
+	)
+	if rr.Code != http.StatusInternalServerError || errorCode(t, rr) != "internal_error" {
+		t.Fatalf("status/code = %d/%s, want 500/internal_error before immutable conflict; body = %s", rr.Code, errorCode(t, rr), rr.Body.String())
+	}
+	for _, forbidden := range []string{"partial", "occupied", targetRevisionID, "immutable"} {
+		if bytes.Contains(rr.Body.Bytes(), []byte(forbidden)) {
+			t.Fatalf("opaque accept 500 leaked %q: %s", forbidden, rr.Body.String())
+		}
 	}
 }

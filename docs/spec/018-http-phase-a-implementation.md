@@ -312,6 +312,12 @@ names. The verified command fields are:
 - **C11** `claim_id`, `scope_artifact_id`, `subject_artifact_id`, `subject_revision_id`, `requirement_artifact_id`, `requirement_revision_id`, `outcome`, `method`, `evidence_artifact_id`, `evidence_revision_id`, `execution_id`, `reasoning`, `timestamp`
 - **C12** as C11, plus `correction_target`, `correction_kind`
 
+**Forward C8 correction (FF-024 §3.3).** The C8 field inventory remains the
+same, but `subject_revision_id` is presence-semantic: omitted or exact empty
+means the required `subject_artifact_id` is the Decision's Artifact-level
+subject; a present non-empty value names the exact Revision-level subject.
+This exposes both Decision subject forms already governed by FF-004 §3.3.
+
 **The `content` field (C3, C4).** `engineering.CapabilitySpecificationContent`
 is an opaque value type with unexported fields and a builder API
 (`NewCapabilitySpecificationContent`, then `WithUserOutcome`,
@@ -518,14 +524,15 @@ determinism after that validation.
 
 ### 6.3 Exact semantics
 
-**Decision discovery.** A decision's subject is a capability *revision*
-(verified: `TestProjectionFidelity_Decision` asserts
-`ArtifactRevisionSubjectKey("CAP-1", "CAP-1-REV-1")`). Enumerate and inspect all
-Revision and Record envelopes first. Build the exact subject set from the
-validated revisions of the requested capability, then select validated
-Decisions whose authoritative subject belongs to that set. Validate each
-Decision's complete capability reference before rendering it; collect
-`Key.ID`, dedupe, and sort ascending.
+**Decision discovery.** A Decision's subject is either the capability Artifact
+or one exact capability Revision (FF-004 §3.3 and the forward C8 correction in
+§3.2). Projection fidelity covers both `ArtifactSubjectKey("CAP-1")` and
+`ArtifactRevisionSubjectKey("CAP-1", "CAP-1-REV-1")`. Enumerate and inspect all
+Artifact, Revision and Record envelopes first. Build the exact subject set from
+the validated capability Artifact plus all validated revisions of that
+Artifact, then select validated Decisions whose authoritative subject belongs
+to that set. Validate each Decision's complete capability reference before
+rendering it; collect `Key.ID`, dedupe, and sort ascending.
 
 Every revision is consulted, not only the current one — a decision recorded
 against revision 1 remains part of the feature's history after revision 2

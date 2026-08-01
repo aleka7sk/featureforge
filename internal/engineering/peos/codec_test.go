@@ -9,6 +9,7 @@ import (
 	"github.com/aleka7sk/PEOS/peos/core"
 	"github.com/aleka7sk/PEOS/peos/lifecycle"
 	"github.com/aleka7sk/PEOS/peos/validation"
+	"github.com/aleka7sk/featureforge/internal/engineering"
 )
 
 var referenceTestTime = time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
@@ -198,6 +199,40 @@ func TestPEOSSentinelsRemainMatchable(t *testing.T) {
 	}
 	if !errors.Is(err, core.ErrEmptyIdentity) {
 		t.Errorf("err = %v, want it to match core.ErrEmptyIdentity", err)
+	}
+}
+
+func TestBuildDecisionSupportsCapabilityArtifactSubject(t *testing.T) {
+	when := fixedTestTime()
+	envelope, err := BuildDecision(DecisionInput{
+		DecisionID:         "DEC-ARTIFACT",
+		SubjectArtifactID:  "CAP-1",
+		Question:           "Which rule governs every revision?",
+		OutcomeStatement:   "Use one capability-wide rule.",
+		EvidenceArtifactID: "EV-1",
+		EvidenceRevisionID: "EV-1-REV-1",
+		RecordedAt:         when,
+	})
+	if err != nil {
+		t.Fatalf("BuildDecision: %v", err)
+	}
+	if envelope.SubjectKey != engineering.ArtifactSubjectKey("CAP-1") {
+		t.Fatalf("SubjectKey = %q, want Artifact subject", envelope.SubjectKey)
+	}
+	if err := (Recorder{}).ValidateRecord(envelope); err != nil {
+		t.Fatalf("ValidateRecord: %v", err)
+	}
+	decoded, err := DecodeDecision(envelope.Payload)
+	if err != nil {
+		t.Fatalf("DecodeDecision: %v", err)
+	}
+	subjects := decoded.Subjects()
+	if len(subjects) != 1 {
+		t.Fatalf("subjects = %d, want 1", len(subjects))
+	}
+	artifact, ok := subjects[0].AsArtifact()
+	if !ok || artifact.ArtifactID().String() != "CAP-1" {
+		t.Fatalf("subject = %#v, want Artifact CAP-1", subjects[0])
 	}
 }
 

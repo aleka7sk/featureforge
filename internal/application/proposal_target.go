@@ -125,6 +125,9 @@ func inspectProposalTarget(
 	if _, err := validateManagedHistory(ctx, repos, inspector, key.ArtifactID, engineering.RevisionFamilyCapability, false); err != nil {
 		return proposalTargetOccupancy{}, err
 	}
+	if err := validatePersistedProposalHistorySources(ctx, repos, inspector, key.ArtifactID); err != nil {
+		return proposalTargetOccupancy{}, err
+	}
 
 	proposalDigest, contextDigest, sources, found, err := inspector.InspectAIAssistedCapabilityRevision(revision)
 	if err != nil {

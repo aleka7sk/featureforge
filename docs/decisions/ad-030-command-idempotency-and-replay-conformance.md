@@ -166,6 +166,14 @@ Execution owner, a complete Decision citation makes it coherent foreign
 occupancy for C10 (`409`); an uncited orphan or corrupt pair is integrity
 failure (`500`).
 
+**FF-024 subject-form clarification.** “Complete capability subject” includes
+both FF-004-governed forms: the capability Artifact and one exact capability
+Revision. C8 always requires `subject_artifact_id`; omitted or exact empty
+`subject_revision_id` selects the Artifact form, while a present value selects
+the exact Revision form and must pass the identity grammar. Replay compares the
+same selected subject form byte-for-byte through the rebuilt PEOS value and
+its authoritative `SubjectKey` projection.
+
 ### 5. C7 uses semantic membership, not historical command origin
 
 For a proposed Requirement pair `P = (artifact_id, revision_id)`:

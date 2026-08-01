@@ -23,7 +23,7 @@ func GenerateCapabilityProposal(
 	ctx context.Context,
 	uow UnitOfWork,
 	projector EngineeringProjector,
-	inspector EngineeringReplayInspector,
+	inspector ProposalReplayInspector,
 	generator proposal.Generator,
 	artifactID string,
 ) (GenerateCapabilityProposalResult, error) {
@@ -90,7 +90,8 @@ func AcceptCapabilityProposal(
 
 	var result AcceptCapabilityProposalResult
 	err = uow.Do(ctx, func(repos Repositories) error {
-		target, err := inspectProposalTarget(ctx, repos, inspector, key)
+		memo := newProposalInspectionMemo(inspector)
+		target, err := inspectProposalTarget(ctx, repos, memo, key)
 		if err != nil {
 			return err
 		}
@@ -131,21 +132,21 @@ func AcceptCapabilityProposal(
 		if artifact.Key.ArtifactID != in.ArtifactID {
 			return integrityError("proposal Artifact lookup returned another identity", nil)
 		}
-		if err := inspectArtifact(inspector, artifact); err != nil {
+		if err := inspectArtifact(memo, artifact); err != nil {
 			return err
 		}
-		family, err := inspector.ArtifactFamily(artifact)
+		family, err := memo.ArtifactFamily(artifact)
 		if err != nil {
 			return integrityError("proposal Artifact family is unreadable", err)
 		}
 		if family != engineering.RevisionFamilyCapability {
-			if err := validateForeignArtifactOccupancy(ctx, repos, inspector, artifact); err != nil {
+			if err := validateForeignArtifactOccupancy(ctx, repos, memo, artifact); err != nil {
 				return err
 			}
 			return immutableConflict("proposal Artifact identity belongs to another family")
 		}
 
-		assembly, err := collectProposalAssembly(ctx, repos, projector, inspector, in.ArtifactID)
+		assembly, err := collectProposalAssembly(ctx, repos, projector, memo, in.ArtifactID)
 		if err != nil {
 			return err
 		}

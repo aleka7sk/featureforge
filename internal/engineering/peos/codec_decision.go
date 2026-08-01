@@ -22,17 +22,32 @@ func BuildDecision(in DecisionInput) (engineering.RecordEnvelope, error) {
 	if err != nil {
 		return engineering.RecordEnvelope{}, wrapPEOS("decision subject artifact id", err)
 	}
-	subjectRevisionID, err := core.NewArtifactRevisionID(in.SubjectRevisionID)
-	if err != nil {
-		return engineering.RecordEnvelope{}, wrapPEOS("decision subject revision id", err)
-	}
-	subjectRevRef, err := core.NewArtifactRevisionRef(subjectArtifactID, subjectRevisionID)
-	if err != nil {
-		return engineering.RecordEnvelope{}, wrapPEOS("decision subject revision ref", err)
-	}
-	subject, err := core.EngineeringSubjectRefFromArtifactRevision(subjectRevRef)
-	if err != nil {
-		return engineering.RecordEnvelope{}, wrapPEOS("decision subject", err)
+	var subject core.EngineeringSubjectRef
+	var subjectKey string
+	if in.SubjectRevisionID == "" {
+		subjectRef, err := core.NewArtifactRef(subjectArtifactID)
+		if err != nil {
+			return engineering.RecordEnvelope{}, wrapPEOS("decision subject artifact ref", err)
+		}
+		subject, err = core.EngineeringSubjectRefFromArtifact(subjectRef)
+		if err != nil {
+			return engineering.RecordEnvelope{}, wrapPEOS("decision subject", err)
+		}
+		subjectKey = engineering.ArtifactSubjectKey(in.SubjectArtifactID)
+	} else {
+		subjectRevisionID, err := core.NewArtifactRevisionID(in.SubjectRevisionID)
+		if err != nil {
+			return engineering.RecordEnvelope{}, wrapPEOS("decision subject revision id", err)
+		}
+		subjectRevRef, err := core.NewArtifactRevisionRef(subjectArtifactID, subjectRevisionID)
+		if err != nil {
+			return engineering.RecordEnvelope{}, wrapPEOS("decision subject revision ref", err)
+		}
+		subject, err = core.EngineeringSubjectRefFromArtifactRevision(subjectRevRef)
+		if err != nil {
+			return engineering.RecordEnvelope{}, wrapPEOS("decision subject", err)
+		}
+		subjectKey = engineering.ArtifactRevisionSubjectKey(in.SubjectArtifactID, in.SubjectRevisionID)
 	}
 
 	outcome, err := decision.NewOutcome(in.OutcomeStatement, decision.CommitmentEffectEstablishes)
@@ -128,7 +143,6 @@ func BuildDecision(in DecisionInput) (engineering.RecordEnvelope, error) {
 	if err != nil {
 		return engineering.RecordEnvelope{}, wrapPEOS("decision marshal", err)
 	}
-	subjectKey := engineering.ArtifactRevisionSubjectKey(in.SubjectArtifactID, in.SubjectRevisionID)
 	evidenceKey := engineering.EvidenceKey(in.EvidenceArtifactID, in.EvidenceRevisionID)
 	occurredAt, hasOccurredAt := projectTimestamp(provenance.RecordedAt())
 

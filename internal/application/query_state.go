@@ -106,14 +106,11 @@ func DiscoverRequirementArtifactIDs(ctx context.Context, repos Repositories, ins
 	return discoverArtifactIDsBySubject(ctx, repos, inspector, engineering.RevisionFamilyRequirement, capabilityArtifactID)
 }
 
-// DiscoverDecisionIDs finds every decision naming any revision of
-// capabilityArtifactID as its subject, returning their decision IDs
-// (FF-018 §6.3). A decision's subject is a capability *revision*
-// (RecordEnvelope.SubjectKey uses ArtifactRevisionSubjectKey), so every
-// revision of the artifact is consulted, not only the current one -- a
-// decision recorded against an earlier revision remains part of the
-// feature's history after a later revision exists. Deduplicated and sorted
-// ascending, matching discoverArtifactIDsBySubject's determinism guarantee.
+// DiscoverDecisionIDs finds every decision naming capabilityArtifactID or any
+// of its revisions as the authoritative subject (FF-018 §6.3). Every revision
+// is consulted, not only the current one, so a decision recorded against an
+// earlier revision remains part of the feature's history after a later
+// revision exists. Results are deduplicated and sorted ascending.
 func DiscoverDecisionIDs(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, capabilityArtifactID string) ([]string, error) {
 	if _, err := validateManagedHistory(ctx, repos, inspector, capabilityArtifactID, engineering.RevisionFamilyCapability, false); err != nil {
 		return nil, err
@@ -126,7 +123,7 @@ func DiscoverDecisionIDs(ctx context.Context, repos Repositories, inspector Engi
 	if err != nil {
 		return nil, err
 	}
-	subjects := make(map[string]struct{})
+	subjects := map[string]struct{}{engineering.ArtifactSubjectKey(capabilityArtifactID): {}}
 	for _, rev := range revisions {
 		if rev.Key.ArtifactID != capabilityArtifactID {
 			continue

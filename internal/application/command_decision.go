@@ -36,8 +36,12 @@ func (c RecordArchitectureDecisionCommand) Execute(ctx context.Context, uow Unit
 	if err := requireIdentity("subject artifact id", c.SubjectArtifactID); err != nil {
 		return RecordArchitectureDecisionResult{}, err
 	}
-	if err := requireIdentity("subject revision id", c.SubjectRevisionID); err != nil {
-		return RecordArchitectureDecisionResult{}, err
+	// An empty Revision ID selects the capability Artifact itself. A present
+	// Revision ID selects that exact capability Revision (FF-004 §3.3).
+	if c.SubjectRevisionID != "" {
+		if err := requireIdentity("subject revision id", c.SubjectRevisionID); err != nil {
+			return RecordArchitectureDecisionResult{}, err
+		}
 	}
 	if err := requireNonEmpty("question", c.Question); err != nil {
 		return RecordArchitectureDecisionResult{}, err

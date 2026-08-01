@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/aleka7sk/featureforge/internal/application"
 	"github.com/aleka7sk/featureforge/internal/engineering"
@@ -119,6 +120,18 @@ func TestDiscoverDecisionIDs(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	artifactDecision := application.RecordArchitectureDecisionCommand{
+		DecisionID: "DEC-ARTIFACT", SubjectArtifactID: "CAP-1",
+		Question: "Which rule governs the capability?", OutcomeStatement: "One rule governs every revision.",
+		EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1",
+	}
+	if _, err := artifactDecision.Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
+		t.Fatalf("record Artifact-subject decision: %v", err)
+	}
+	f.clock.Advance(time.Hour)
+	if _, err := artifactDecision.Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
+		t.Fatalf("replay Artifact-subject decision: %v", err)
+	}
 
 	// An unrelated capability's decision must not appear.
 	if _, err := (application.CreateFeatureCommand{FeatureCardID: "FC-2", ProjectID: "PRJ-1", Title: "Unrelated"}).Execute(ctx, f.uow, f.clock); err != nil {
@@ -141,7 +154,7 @@ func TestDiscoverDecisionIDs(t *testing.T) {
 	got := doDiscovery(t, f.uow, func(r application.Repositories) ([]string, error) {
 		return application.DiscoverDecisionIDs(ctx, r, f.rec, "CAP-1")
 	})
-	assertStringsEqual(t, got, []string{"DEC-1", "DEC-2"})
+	assertStringsEqual(t, got, []string{"DEC-1", "DEC-2", "DEC-ARTIFACT"})
 
 	// Every revision is consulted, not only the current one: revising CAP-1
 	// must not make DEC-1/DEC-2 (recorded against revision 1) disappear.
@@ -158,7 +171,7 @@ func TestDiscoverDecisionIDs(t *testing.T) {
 	gotAfterRevision := doDiscovery(t, f.uow, func(r application.Repositories) ([]string, error) {
 		return application.DiscoverDecisionIDs(ctx, r, f.rec, "CAP-1")
 	})
-	assertStringsEqual(t, gotAfterRevision, []string{"DEC-1", "DEC-2"})
+	assertStringsEqual(t, gotAfterRevision, []string{"DEC-1", "DEC-2", "DEC-ARTIFACT"})
 }
 
 // TestDiscoverExecutionAndClaimIDs proves both are found scoped to one

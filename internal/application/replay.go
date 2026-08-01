@@ -1229,13 +1229,36 @@ func validateStoredDecisionReferences(ctx context.Context, r Repositories, inspe
 	if len(decision.EvidenceKeys) != 1 {
 		return integrityError("decision must project exactly one evidence revision", nil)
 	}
-	subject, err := revisionKeyFromSubject(decision.SubjectKey)
+	subjectKind, artifactID, revisionID, err := engineering.ParseSubjectKey(decision.SubjectKey)
 	if err != nil {
 		return integrityError("decision subject projection", err)
 	}
 	if _, _, err := engineering.ParseEvidenceKey(decision.EvidenceKeys[0]); err != nil {
 		return integrityError("decision evidence projection", err)
 	}
+	if subjectKind == engineering.SubjectKindArtifact {
+		artifact, found, err := r.Artifacts.Get(ctx, engineering.ArtifactKey{ArtifactID: artifactID})
+		if err != nil {
+			return err
+		}
+		if !found {
+			return integrityError("decision Artifact subject reference is dangling", nil)
+		}
+		if err := inspectArtifact(inspector, artifact); err != nil {
+			return err
+		}
+		if err := inspector.ValidateCapabilityArtifact(artifact); err != nil {
+			return integrityError("decision Artifact subject names another family", err)
+		}
+		if _, err := validateManagedHistory(ctx, r, inspector, artifactID, engineering.RevisionFamilyCapability, false); err != nil {
+			return err
+		}
+		return nil
+	}
+	if subjectKind != engineering.SubjectKindArtifactRevision {
+		return integrityError("decision subject projection uses an unsupported kind", nil)
+	}
+	subject := engineering.RevisionKey{ArtifactID: artifactID, RevisionID: revisionID}
 	stored, found, err := r.Revisions.Get(ctx, subject)
 	if err != nil {
 		return err
@@ -1256,6 +1279,23 @@ func validateStoredDecisionReferences(ctx context.Context, r Repositories, inspe
 }
 
 func validateDecisionInputReferences(ctx context.Context, r Repositories, inspector EngineeringReplayInspector, in engineering.DecisionInput) error {
+	if in.SubjectRevisionID == "" {
+		artifact, found, err := r.Artifacts.Get(ctx, engineering.ArtifactKey{ArtifactID: in.SubjectArtifactID})
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("%w: decision subject artifact %s", ErrReferencedValueMissing, in.SubjectArtifactID)
+		}
+		if err := inspectArtifact(inspector, artifact); err != nil {
+			return err
+		}
+		if err := inspector.ValidateCapabilityArtifact(artifact); err != nil {
+			return fmt.Errorf("%w: decision subject is not a capability artifact", ErrReferencedValueMissing)
+		}
+		_, err = validateManagedHistory(ctx, r, inspector, in.SubjectArtifactID, engineering.RevisionFamilyCapability, false)
+		return err
+	}
 	subject := engineering.RevisionKey{ArtifactID: in.SubjectArtifactID, RevisionID: in.SubjectRevisionID}
 	stored, found, err := r.Revisions.Get(ctx, subject)
 	if err != nil {

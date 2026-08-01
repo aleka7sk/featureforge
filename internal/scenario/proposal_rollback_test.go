@@ -39,6 +39,55 @@ func TestAIProposalAcceptRollbackPostgres(t *testing.T) {
 	assertAIProposalAcceptRollback(t, newPostgresFixture)
 }
 
+func TestAIProposalFreshnessConflictMemory(t *testing.T) {
+	assertAIProposalFreshnessConflict(t, func(*testing.T) (application.UnitOfWork, peos.Recorder, *application.FixedClock) {
+		return newFixture()
+	})
+}
+
+func TestAIProposalFreshnessConflictPostgres(t *testing.T) {
+	assertAIProposalFreshnessConflict(t, newPostgresFixture)
+}
+
+func assertAIProposalFreshnessConflict(t *testing.T, fixture proposalRollbackFixture) {
+	t.Helper()
+	ctx := context.Background()
+	uow, recorder, clock := fixture(t)
+	if _, err := scenario.Run(ctx, uow, recorder, recorder, clock); err != nil {
+		t.Fatalf("scenario.Run: %v", err)
+	}
+	generated, err := application.GenerateCapabilityProposal(
+		ctx, uow, recorder, recorder, proposal.NewDeterministicGenerator(), scenario.CapabilityArtifactID,
+	)
+	if err != nil {
+		t.Fatalf("GenerateCapabilityProposal: %v", err)
+	}
+	clock.Advance(time.Hour)
+	acceptanceID := "ACC-REQ-PROPOSAL-FRESHNESS"
+	if _, err := (application.EstablishRequirementCommand{
+		ArtifactID: "REQ-PROPOSAL-FRESHNESS", RevisionID: "REQ-PROPOSAL-FRESHNESS-REV-1",
+		Statement:                    "A newly committed Requirement SHALL invalidate an older proposal context.",
+		SubjectArtifactID:            scenario.CapabilityArtifactID,
+		SourceCapabilityRevisionID:   scenario.CapabilityRevision2,
+		SourceAcceptanceCriterionKey: "AC-1",
+		AcceptanceRecordID:           &acceptanceID,
+	}).Execute(ctx, uow, recorder, recorder, clock); err != nil {
+		t.Fatalf("EstablishRequirementCommand: %v", err)
+	}
+
+	target := engineering.RevisionKey{ArtifactID: scenario.CapabilityArtifactID, RevisionID: "CAP-1-PROPOSAL-STALE"}
+	_, err = application.AcceptCapabilityProposal(
+		ctx, uow, recorder, recorder, recorder, clock,
+		application.AcceptCapabilityProposalInput{
+			ArtifactID: target.ArtifactID, RevisionID: target.RevisionID, Proposal: generated.Proposal,
+		},
+	)
+	if !errors.Is(err, application.ErrProposalContextStale) {
+		t.Fatalf("AcceptCapabilityProposal err = %v, want ErrProposalContextStale", err)
+	}
+	assertProposalTargetAbsent(t, ctx, uow, target)
+}
+
 func assertAIProposalAcceptRollback(t *testing.T, fixture proposalRollbackFixture) {
 	t.Helper()
 	for _, test := range []struct {

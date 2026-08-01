@@ -41,7 +41,7 @@ func collectProposalAssembly(
 	ctx context.Context,
 	repos Repositories,
 	projector EngineeringProjector,
-	inspector EngineeringReplayInspector,
+	inspector ProposalReplayInspector,
 	artifactID string,
 ) (proposalAssembly, error) {
 	if projector == nil {
@@ -78,6 +78,9 @@ func collectProposalAssembly(
 	}
 	historySize, err := validateManagedHistory(ctx, repos, inspector, artifactID, engineering.RevisionFamilyCapability, false)
 	if err != nil {
+		return proposalAssembly{}, err
+	}
+	if err := validatePersistedProposalHistorySources(ctx, repos, inspector, artifactID); err != nil {
 		return proposalAssembly{}, err
 	}
 
@@ -195,7 +198,7 @@ func AssembleProposalContext(
 	ctx context.Context,
 	uow UnitOfWork,
 	projector EngineeringProjector,
-	inspector EngineeringReplayInspector,
+	inspector ProposalReplayInspector,
 	artifactID string,
 ) (proposal.ContextPack, error) {
 	if err := requireIdentity("artifact id", artifactID); err != nil {
@@ -204,7 +207,7 @@ func AssembleProposalContext(
 	var pack proposal.ContextPack
 	err := uow.Do(ctx, func(repos Repositories) error {
 		var err error
-		pack, err = assembleProposalContext(ctx, repos, projector, inspector, artifactID)
+		pack, err = assembleProposalContext(ctx, repos, projector, newProposalInspectionMemo(inspector), artifactID)
 		return err
 	})
 	if err != nil {
@@ -219,7 +222,7 @@ func assembleProposalContext(
 	ctx context.Context,
 	repos Repositories,
 	projector EngineeringProjector,
-	inspector EngineeringReplayInspector,
+	inspector ProposalReplayInspector,
 	artifactID string,
 ) (proposal.ContextPack, error) {
 	assembly, err := collectProposalAssembly(ctx, repos, projector, inspector, artifactID)

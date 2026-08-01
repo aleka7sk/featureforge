@@ -10,11 +10,53 @@ import (
 	"testing"
 )
 
+var proposalImportAllowlist = map[string]struct{}{
+	"bytes":                              {},
+	"encoding/json":                      {},
+	"errors":                             {},
+	"fmt":                                {},
+	"io":                                 {},
+	"regexp":                             {},
+	"slices":                             {},
+	"sort":                               {},
+	"strings":                            {},
+	ModulePath + "/internal/engineering": {},
+}
+
+func proposalImportAllowed(path string) bool {
+	_, ok := proposalImportAllowlist[path]
+	return ok
+}
+
+func proposalImportSpecAllowed(spec *ast.ImportSpec) bool {
+	return spec.Name == nil && proposalImportAllowed(strings.Trim(spec.Path.Value, "\""))
+}
+
+func forbiddenProposalCallName(expr ast.Expr) (string, bool) {
+	switch fun := expr.(type) {
+	case *ast.Ident:
+		if fun.Name == "print" || fun.Name == "println" {
+			return fun.Name, true
+		}
+	case *ast.SelectorExpr:
+		pkg, ok := fun.X.(*ast.Ident)
+		if !ok || pkg.Name != "fmt" {
+			return "", false
+		}
+		for _, prefix := range []string{"Print", "Fprint", "Scan", "Fscan"} {
+			if strings.HasPrefix(fun.Sel.Name, prefix) {
+				return "fmt." + fun.Sel.Name, true
+			}
+		}
+	}
+	return "", false
+}
+
 // TestProposalPackageIsPure pins AD-034's authority boundary mechanically:
-// production proposal code may depend only on the standard library and the
-// PEOS-free engineering package.  In particular, giving a deterministic
-// generator a conveniently named repository, clock or transport helper is a
-// build failure rather than a review convention.
+// production proposal code may depend only on the exact set of pure value-
+// function imports used by the reviewed implementation. In particular, adding
+// another standard-library authority or non-determinism package fails here
+// just as adding an external or internal dependency does.
 func TestProposalPackageIsPure(t *testing.T) {
 	dir := filepath.Join(ModuleRoot(), "internal", "proposal")
 	entries, err := os.ReadDir(dir)
@@ -33,18 +75,12 @@ func TestProposalPackageIsPure(t *testing.T) {
 		}
 		for _, spec := range file.Imports {
 			imp := strings.Trim(spec.Path.Value, "\"")
-			if imp == ModulePath+"/internal/engineering" {
-				continue
-			}
-			// Standard-library import paths have no dotted first path
-			// segment; every external module path does.
-			first, _, _ := strings.Cut(imp, "/")
-			if strings.Contains(first, ".") || strings.HasPrefix(imp, ModulePath+"/") {
-				t.Errorf("%s imports %q; internal/proposal may import only stdlib and internal/engineering", entry.Name(), imp)
-			}
-			switch imp {
-			case "context", "database/sql", "net", "net/http", "os", "time", "math/rand", "crypto/rand":
-				t.Errorf("%s imports forbidden authority/non-determinism package %q", entry.Name(), imp)
+			if !proposalImportSpecAllowed(spec) {
+				if spec.Name != nil {
+					t.Errorf("%s imports %q as %q; internal/proposal forbids aliased, dot and blank imports", entry.Name(), imp, spec.Name.Name)
+					continue
+				}
+				t.Errorf("%s imports %q; internal/proposal imports must remain inside the exact reviewed allowlist", entry.Name(), imp)
 			}
 		}
 
@@ -53,12 +89,119 @@ func TestProposalPackageIsPure(t *testing.T) {
 			"Clock": true, "Provider": true, "HTTPClient": true,
 		}
 		ast.Inspect(file, func(n ast.Node) bool {
+			if call, ok := n.(*ast.CallExpr); ok {
+				if name, forbidden := forbiddenProposalCallName(call.Fun); forbidden {
+					t.Errorf("%s calls forbidden I/O function %q", entry.Name(), name)
+				}
+			}
 			id, ok := n.(*ast.Ident)
 			if ok && forbiddenNames[id.Name] {
 				t.Errorf("%s declares or uses forbidden authority identifier %q", entry.Name(), id.Name)
 			}
 			return true
 		})
+	}
+}
+
+func TestProposalCallGuardRejectsIO(t *testing.T) {
+	for _, expression := range []string{
+		`print("x")`,
+		`println("x")`,
+		`fmt.Print("x")`,
+		`fmt.Printf("%s", "x")`,
+		`fmt.Println("x")`,
+		`fmt.Fprint(writer, "x")`,
+		`fmt.Fprintf(writer, "%s", "x")`,
+		`fmt.Fprintln(writer, "x")`,
+		`fmt.Scan(&value)`,
+		`fmt.Scanf("%s", &value)`,
+		`fmt.Scanln(&value)`,
+		`fmt.Fscan(reader, &value)`,
+		`fmt.Fscanf(reader, "%s", &value)`,
+		`fmt.Fscanln(reader, &value)`,
+	} {
+		expr, err := parser.ParseExpr(expression)
+		if err != nil {
+			t.Fatalf("parse %q: %v", expression, err)
+		}
+		call, ok := expr.(*ast.CallExpr)
+		if !ok {
+			t.Fatalf("%q did not parse as a call", expression)
+		}
+		if _, forbidden := forbiddenProposalCallName(call.Fun); !forbidden {
+			t.Errorf("I/O call %q unexpectedly allowed", expression)
+		}
+	}
+
+	for _, expression := range []string{
+		`fmt.Errorf("invalid: %s", value)`,
+		`fmt.Sprintf("%s", value)`,
+		`fmt.Sscan(value, &target)`,
+		`strings.TrimSpace(value)`,
+	} {
+		expr, err := parser.ParseExpr(expression)
+		if err != nil {
+			t.Fatalf("parse %q: %v", expression, err)
+		}
+		call := expr.(*ast.CallExpr)
+		if name, forbidden := forbiddenProposalCallName(call.Fun); forbidden {
+			t.Errorf("pure value call %q rejected as %q", expression, name)
+		}
+	}
+}
+
+func TestProposalImportAllowlistRejectsAuthorityPackages(t *testing.T) {
+	for _, imp := range []string{
+		"context",
+		"crypto/rand",
+		"database/sql",
+		"math/rand/v2",
+		"net/http",
+		"os/exec",
+		"plugin",
+		"runtime",
+		"syscall",
+		"unsafe",
+		"C",
+		ModulePath + "/internal/application",
+		"github.com/provider/sdk",
+	} {
+		if proposalImportAllowed(imp) {
+			t.Errorf("authority or non-determinism import %q unexpectedly allowed", imp)
+		}
+	}
+
+	for imp := range proposalImportAllowlist {
+		if !proposalImportAllowed(imp) {
+			t.Errorf("reviewed import %q unexpectedly rejected", imp)
+		}
+	}
+}
+
+func TestProposalImportAllowlistRejectsAliases(t *testing.T) {
+	for _, declaration := range []string{
+		`package proposal; import f "fmt"`,
+		`package proposal; import . "fmt"`,
+		`package proposal; import _ "fmt"`,
+	} {
+		file, err := parser.ParseFile(token.NewFileSet(), "alias.go", declaration, 0)
+		if err != nil {
+			t.Fatalf("parse %q: %v", declaration, err)
+		}
+		if len(file.Imports) != 1 {
+			t.Fatalf("%q imports = %d, want 1", declaration, len(file.Imports))
+		}
+		if proposalImportSpecAllowed(file.Imports[0]) {
+			t.Errorf("aliased import in %q unexpectedly allowed", declaration)
+		}
+	}
+
+	file, err := parser.ParseFile(token.NewFileSet(), "plain.go", `package proposal; import "fmt"`, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !proposalImportSpecAllowed(file.Imports[0]) {
+		t.Error("plain reviewed fmt import unexpectedly rejected")
 	}
 }
 

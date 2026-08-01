@@ -229,6 +229,28 @@ func TestCommandEndpointsCanonicalOrder(t *testing.T) {
 		t.Errorf("C8: decision_key = %q, want decision:DEC-1", decisionEnvelope.Data.DecisionKey)
 	}
 
+	// FF-024's forward C8 correction: omitting subject_revision_id selects
+	// the governed capability Artifact subject rather than an empty identity.
+	rr = postJSON(t, handler, "/api/v1/decisions", map[string]any{
+		"decision_id": "DEC-ARTIFACT", "subject_artifact_id": "CAP-1",
+		"question": "Which rule governs all capability revisions?", "outcome_statement": "Use one capability-wide rule.",
+		"evidence_artifact_id": "EV-0", "evidence_revision_id": "EV-0-REV-1",
+	}, &decisionEnvelope)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("C8 Artifact subject: status = %d, want 201; body = %s", rr.Code, rr.Body.String())
+	}
+	if decisionEnvelope.Data.DecisionKey != "decision:DEC-ARTIFACT" {
+		t.Errorf("C8 Artifact subject: decision_key = %q, want decision:DEC-ARTIFACT", decisionEnvelope.Data.DecisionKey)
+	}
+	rr = postJSON(t, handler, "/api/v1/decisions", map[string]any{
+		"decision_id": "DEC-ARTIFACT", "subject_artifact_id": "CAP-1", "subject_revision_id": "",
+		"question": "Which rule governs all capability revisions?", "outcome_statement": "Use one capability-wide rule.",
+		"evidence_artifact_id": "EV-0", "evidence_revision_id": "EV-0-REV-1",
+	}, &decisionEnvelope)
+	if rr.Code != http.StatusCreated || decisionEnvelope.Data.DecisionKey != "decision:DEC-ARTIFACT" {
+		t.Fatalf("C8 explicit-empty Artifact replay: status/key = %d/%q, want 201/decision:DEC-ARTIFACT; body = %s", rr.Code, decisionEnvelope.Data.DecisionKey, rr.Body.String())
+	}
+
 	// C9 EstablishValidationPlan
 	var planEnvelope struct {
 		Data struct {
