@@ -1,9 +1,11 @@
 package http_test
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
+	"github.com/aleka7sk/featureforge/internal/application"
 	transporthttp "github.com/aleka7sk/featureforge/internal/transport/http"
 )
 
@@ -103,6 +105,9 @@ func TestTimelinePreservesPriorRevisionValidation(t *testing.T) {
 // FEATUREFORGE_POSTGRES_TEST_DSN is unset.
 func TestTimelinePreservesPriorRevisionValidationPostgres(t *testing.T) {
 	uow, rec, clock := newPostgresFixtureHTTP(t)
+	if err := application.EnsureLifecycleConfiguration(context.Background(), uow, rec, rec); err != nil {
+		t.Fatalf("initializing lifecycle configuration: %v", err)
+	}
 	handler := transporthttp.NewHandler(transporthttp.Dependencies{
 		UOW: uow, Recorder: rec, Inspector: rec, Projector: rec, Clock: clock,
 	})
