@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/url"
@@ -67,16 +68,16 @@ func readContentFormFields(r *http.Request) contentFormFields {
 }
 
 // contentJSON builds C3/C4's "content" object. acceptance_criteria uses
-// this package's "key: text" per-line convention; a line without a colon
-// is dropped -- a syntax decision, not a domain one, since the command
-// itself validates every criterion's key and text (FF-021 §2: "parse only
-// form syntax").
-func (f contentFormFields) contentJSON() map[string]any {
+// this package's "key: text" per-line convention. A line without a colon is
+// rejected as malformed form syntax; silently dropping it would change the
+// user's submitted engineering content before it reaches the authoritative
+// command boundary.
+func (f contentFormFields) contentJSON() (map[string]any, error) {
 	criteria := make([]map[string]any, 0)
-	for _, line := range splitLines(f.acceptanceCriteria) {
+	for index, line := range splitLines(f.acceptanceCriteria) {
 		key, text, found := strings.Cut(line, ":")
 		if !found {
-			continue
+			return nil, fmt.Errorf("acceptance criterion line %d must use 'key: text' syntax", index+1)
 		}
 		criteria = append(criteria, map[string]any{"key": strings.TrimSpace(key), "text": strings.TrimSpace(text)})
 	}
@@ -84,7 +85,7 @@ func (f contentFormFields) contentJSON() map[string]any {
 		"schema_version": 1, "title": f.title, "problem_statement": f.problemStatement, "user_outcome": f.userOutcome,
 		"functional_behaviours": splitLines(f.functionalBehaviours), "constraints": splitLines(f.constraints),
 		"acceptance_criteria": criteria, "dependencies": splitLines(f.dependencies), "open_questions": splitLines(f.openQuestions),
-	}
+	}, nil
 }
 
 func (f contentFormFields) values() map[string]string {
@@ -178,8 +179,13 @@ func handleEstablishCapability(deps Dependencies) http.HandlerFunc {
 		}
 		artifactID, revisionID := r.FormValue("artifact_id"), r.FormValue("revision_id")
 		content := readContentFormFields(r)
+		contentBody, err := content.contentJSON()
+		if err != nil {
+			writeMalformedFormSyntax(w, err)
+			return
+		}
 		result, err := callAPI(r.Context(), deps.API, http.MethodPost, "/api/v1/capabilities", map[string]any{
-			"feature_card_id": featureCardID, "artifact_id": artifactID, "revision_id": revisionID, "content": content.contentJSON(),
+			"feature_card_id": featureCardID, "artifact_id": artifactID, "revision_id": revisionID, "content": contentBody,
 		})
 		if err != nil {
 			writeInternalErrorPage(w)
@@ -210,6 +216,11 @@ func handleReviseCapability(deps Dependencies) http.HandlerFunc {
 		}
 		revisionID := r.FormValue("revision_id")
 		content := readContentFormFields(r)
+		contentBody, err := content.contentJSON()
+		if err != nil {
+			writeMalformedFormSyntax(w, err)
+			return
+		}
 
 		cc, problem := loadCapabilityContext(r.Context(), deps, featureCardID)
 		if problem != nil {
@@ -217,7 +228,7 @@ func handleReviseCapability(deps Dependencies) http.HandlerFunc {
 			return
 		}
 		result, err := callAPI(r.Context(), deps.API, http.MethodPost, "/api/v1/capabilities/"+url.PathEscape(cc.ArtifactID)+"/revisions", map[string]any{
-			"revision_id": revisionID, "content": content.contentJSON(),
+			"revision_id": revisionID, "content": contentBody,
 		})
 		if err != nil {
 			writeInternalErrorPage(w)
@@ -418,14 +429,14 @@ func handleRecordDecision(deps Dependencies) http.HandlerFunc {
 // "key|method|outcome interpretation|requirement artifact ID|requirement
 // revision ID|expected evidence,comma,separated" -- a static alternative
 // to a dynamic add/remove control, which would require JavaScript
-// (FF-021 §8). A malformed line (wrong field count) is dropped; the
-// command itself validates every field it receives.
-func parsePlanActivities(s, subjectArtifactID, subjectRevisionID string) []map[string]any {
+// (FF-021 §8). A malformed line is rejected as form syntax; silently dropping
+// it could establish a different plan than the user submitted.
+func parsePlanActivities(s, subjectArtifactID, subjectRevisionID string) ([]map[string]any, error) {
 	activities := make([]map[string]any, 0)
-	for _, line := range splitLines(s) {
+	for index, line := range splitLines(s) {
 		fields := strings.Split(line, "|")
 		if len(fields) != 6 {
-			continue
+			return nil, fmt.Errorf("validation activity line %d must contain exactly six pipe-separated fields", index+1)
 		}
 		var evidence []string
 		for e := range strings.SplitSeq(fields[5], ",") {
@@ -440,7 +451,7 @@ func parsePlanActivities(s, subjectArtifactID, subjectRevisionID string) []map[s
 			"expected_evidence": evidence,
 		})
 	}
-	return activities
+	return activities, nil
 }
 
 func handleEstablishPlan(deps Dependencies) http.HandlerFunc {
@@ -452,15 +463,27 @@ func handleEstablishPlan(deps Dependencies) http.HandlerFunc {
 		artifactID, revisionID, activitiesField := r.FormValue("artifact_id"), r.FormValue("revision_id"), r.FormValue("activities")
 		acceptanceRecordID := r.FormValue("acceptance_record_id")
 
+		// Form syntax is a boundary concern and must be classified before any
+		// API lookup. Parse once with empty contextual identities, then attach
+		// the authoritative capability context after the syntax has succeeded.
+		activities, err := parsePlanActivities(activitiesField, "", "")
+		if err != nil {
+			writeMalformedFormSyntax(w, err)
+			return
+		}
 		cc, problem := loadCapabilityContext(r.Context(), deps, featureCardID)
 		if problem != nil {
 			problem.write(w)
 			return
 		}
+		for _, activity := range activities {
+			activity["subject_artifact_id"] = cc.ArtifactID
+			activity["subject_revision_id"] = cc.CurrentRevisionID
+		}
 		result, err := callAPI(r.Context(), deps.API, http.MethodPost, "/api/v1/validation/plans", map[string]any{
 			"artifact_id": artifactID, "revision_id": revisionID, "scope_artifact_id": cc.ArtifactID,
 			"acceptance_record_id": acceptanceRecordID,
-			"activities":           parsePlanActivities(activitiesField, cc.ArtifactID, cc.CurrentRevisionID),
+			"activities":           activities,
 		})
 		if err != nil {
 			writeInternalErrorPage(w)

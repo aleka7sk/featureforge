@@ -96,6 +96,10 @@ func TestChainOfTwo(t *testing.T) {
 	if !result.Found || result.Claim.Key.ID != "CLM-4" {
 		t.Errorf("result = %+v, want CLM-4", result)
 	}
+	want := "claim:CLM-2 was corrected by claim:CLM-4; claim:CLM-4 is not corrected by anything; claim:CLM-4 stands"
+	if result.Rationale.Chain != want {
+		t.Errorf("rationale = %q, want %q", result.Rationale.Chain, want)
+	}
 }
 
 func TestChainOfThree(t *testing.T) {
@@ -113,6 +117,40 @@ func TestChainOfThree(t *testing.T) {
 	}
 	if !result.Found || result.Claim.Key.ID != "CLM-C" {
 		t.Errorf("result = %+v, want CLM-C", result)
+	}
+	want := "claim:CLM-A was corrected by claim:CLM-B; claim:CLM-B was corrected by claim:CLM-C; claim:CLM-C is not corrected by anything; claim:CLM-C stands"
+	if result.Rationale.Chain != want {
+		t.Errorf("rationale = %q, want %q", result.Rationale.Chain, want)
+	}
+}
+
+func TestCorrectionRationaleUsesTheRecordedCorrectionKind(t *testing.T) {
+	tests := []struct {
+		name string
+		kind string
+		verb string
+	}{
+		{name: "correct", kind: engineering.CorrectionKindCorrect, verb: "was corrected by"},
+		{name: "replace", kind: engineering.CorrectionKindReplace, verb: "was replaced by"},
+		{name: "invalidate", kind: engineering.CorrectionKindInvalidate, verb: "was invalidated by"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			uow := newStoreWithRecordSubject(t)
+			original := mustClaimEnv(t, "CLM-ORIGINAL", "peos:satisfied", nil, "")
+			putClaim(t, uow, original)
+			head := mustClaimEnv(t, "CLM-HEAD", "peos:not-satisfied", &original, tt.kind)
+			putClaim(t, uow, head)
+
+			result, err := resolveClaim(t, uow)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "claim:CLM-ORIGINAL " + tt.verb + " claim:CLM-HEAD; claim:CLM-HEAD is not corrected by anything; claim:CLM-HEAD stands"
+			if result.Rationale.Chain != want {
+				t.Fatalf("rationale = %q, want %q", result.Rationale.Chain, want)
+			}
+		})
 	}
 }
 
@@ -235,17 +273,31 @@ func TestSelfCorrection(t *testing.T) {
 }
 
 func TestCycle(t *testing.T) {
-	uow := newStoreWithRecordSubject(t)
-	a := engineering.RecordKey{Kind: engineering.RecordKindClaim, ID: "CLM-A"}
-	b := engineering.RecordKey{Kind: engineering.RecordKindClaim, ID: "CLM-B"}
-	claimA := mustClaimEnv(t, "CLM-A", "peos:satisfied", &engineering.RecordEnvelope{Key: b}, "peos:correct")
-	claimB := mustClaimEnv(t, "CLM-B", "peos:not-satisfied", &engineering.RecordEnvelope{Key: a}, "peos:correct")
-	putClaim(t, uow, claimA)
-	putClaim(t, uow, claimB)
+	orders := [][]string{
+		{"CLM-TAIL", "CLM-B", "CLM-A"},
+		{"CLM-A", "CLM-B", "CLM-TAIL"},
+	}
+	for _, order := range orders {
+		uow := newStoreWithRecordSubject(t)
+		a := engineering.RecordKey{Kind: engineering.RecordKindClaim, ID: "CLM-A"}
+		b := engineering.RecordKey{Kind: engineering.RecordKindClaim, ID: "CLM-B"}
+		claims := map[string]engineering.RecordEnvelope{
+			"CLM-A":    mustClaimEnv(t, "CLM-A", "peos:satisfied", &engineering.RecordEnvelope{Key: b}, engineering.CorrectionKindCorrect),
+			"CLM-B":    mustClaimEnv(t, "CLM-B", "peos:not-satisfied", &engineering.RecordEnvelope{Key: a}, engineering.CorrectionKindCorrect),
+			"CLM-TAIL": mustClaimEnv(t, "CLM-TAIL", "peos:inconclusive", &engineering.RecordEnvelope{Key: a}, engineering.CorrectionKindCorrect),
+		}
+		for _, claimID := range order {
+			putClaim(t, uow, claims[claimID])
+		}
 
-	_, err := resolveClaim(t, uow)
-	if !errors.Is(err, application.ErrCorrectionCycle) {
-		t.Errorf("err = %v, want ErrCorrectionCycle", err)
+		_, err := resolveClaim(t, uow)
+		if !errors.Is(err, application.ErrCorrectionCycle) {
+			t.Fatalf("order %v: err = %v, want ErrCorrectionCycle", order, err)
+		}
+		want := "application: correction cycle: Claim IDs [CLM-A, CLM-B] form one or more correction cycles"
+		if err == nil || err.Error() != want {
+			t.Fatalf("order %v: err = %q, want %q", order, err, want)
+		}
 	}
 }
 
@@ -261,6 +313,10 @@ func TestCompetingHeads(t *testing.T) {
 	_, err := resolveClaim(t, uow)
 	if !errors.Is(err, application.ErrCorrectionAmbiguous) {
 		t.Errorf("err = %v, want ErrCorrectionAmbiguous", err)
+	}
+	want := "application: correction ambiguous: competing Claim IDs [CLM-2, CLM-3] for this subject, scope, and criteria"
+	if err == nil || err.Error() != want {
+		t.Errorf("err = %q, want %q", err, want)
 	}
 }
 

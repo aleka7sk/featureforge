@@ -8,12 +8,13 @@
     {{if .Projects}}
     <table>
       <thead>
-        <tr><th scope="col">Name</th><th scope="col">Created</th></tr>
+        <tr><th scope="col">Name</th><th scope="col">Features</th><th scope="col">Created</th></tr>
       </thead>
       <tbody>
         {{range .Projects}}
         <tr>
           <td><a href="/projects/{{.ProjectID}}">{{.Name}}</a></td>
+          <td>{{.FeatureCount}}</td>
           <td>{{.CreatedAt.Format "2006-01-02"}}</td>
         </tr>
         {{end}}

@@ -188,7 +188,7 @@ func GetFeatureEngineeringStateForCard(ctx context.Context, uow UnitOfWork, proj
 // (no linked capability) yields no decision/execution/claim/evidence population,
 // matching discoverEngineeringStateComponents's own empty-but-well-formed
 // rule for that case.
-func GetFeatureTimelineForCard(ctx context.Context, uow UnitOfWork, inspector EngineeringReplayInspector, featureCardID domain.FeatureCardID) (TimelineResult, error) {
+func GetFeatureTimelineForCard(ctx context.Context, uow UnitOfWork, projector EngineeringProjector, inspector EngineeringReplayInspector, featureCardID domain.FeatureCardID) (TimelineResult, error) {
 	var result TimelineResult
 	err := uow.Do(ctx, func(r Repositories) error {
 		project, card, err := resolveProjectAndCard(ctx, r, featureCardID)
@@ -223,7 +223,7 @@ func GetFeatureTimelineForCard(ctx context.Context, uow UnitOfWork, inspector En
 			}
 			sort.Strings(evidenceArtifactIDs)
 		}
-		timeline, err := GetFeatureTimeline(ctx, r, inspector, TimelineInput{
+		timeline, err := GetFeatureTimeline(ctx, r, projector, inspector, TimelineInput{
 			Project: project, FeatureCard: card,
 			CapabilityArtifactID:   artifactID,
 			RequirementArtifactIDs: components.requirementArtifactIDs,

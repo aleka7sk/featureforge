@@ -371,7 +371,7 @@ func TestSubjectDiscoveryRejectsMixedRequirementAndPlanHistories(t *testing.T) {
 				return err
 			},
 			"Q5": func() error {
-				_, err := application.GetFeatureTimelineForCard(ctx, f.uow, f.rec, mustFeatureCardID(t, "FC-1"))
+				_, err := application.GetFeatureTimelineForCard(ctx, f.uow, f.rec, f.rec, mustFeatureCardID(t, "FC-1"))
 				return err
 			},
 		} {
@@ -452,7 +452,7 @@ func TestSubjectDiscoveryRejectsMixedRequirementAndPlanHistories(t *testing.T) {
 				return err
 			},
 			"Q5": func() error {
-				_, err := application.GetFeatureTimelineForCard(ctx, f.uow, f.rec, mustFeatureCardID(t, "FC-1"))
+				_, err := application.GetFeatureTimelineForCard(ctx, f.uow, f.rec, f.rec, mustFeatureCardID(t, "FC-1"))
 				return err
 			},
 		} {

@@ -69,6 +69,18 @@ type timelineRow struct {
 	References     []string
 	Corrected      string
 	Rationale      string
+	Anchor         string
+	SourceHref     string
+	ReferenceLinks []timelineReference
+}
+
+// timelineReference preserves the authoritative identity text. Href targets
+// either a dedicated read page, an exact timeline source event, or the generic
+// Q5-backed reference detail; it is empty only for invalid empty input that an
+// authoritative TimelineResult must never contain.
+type timelineReference struct {
+	Identity string
+	Href     string
 }
 
 func mapTimelineRow(e apiTimelineEventDTO) timelineRow {
@@ -136,6 +148,7 @@ func mapRevisionRow(r apiRevisionDTO, isCurrent bool) revisionRow {
 // basis is displayed, not collapsed").
 type decisionRow struct {
 	DecisionID       string
+	SubjectKey       string
 	HasOccurredAt    bool
 	OccurredAt       time.Time
 	Outcome          string
@@ -151,7 +164,7 @@ type decisionRow struct {
 
 func mapDecisionRow(d apiApplicableDecisionDTO) decisionRow {
 	row := decisionRow{
-		DecisionID: d.DecisionID, Outcome: d.Outcome, Question: d.Question, OutcomeStatement: d.OutcomeStatement,
+		DecisionID: d.DecisionID, SubjectKey: d.SubjectKey, Outcome: d.Outcome, Question: d.Question, OutcomeStatement: d.OutcomeStatement,
 		Rationale: d.Rationale, Alternatives: d.Alternatives, Evidence: d.Basis.Evidence,
 		Assumptions: d.Basis.Assumptions, Constraints: d.Basis.Constraints, Uncertainties: d.Basis.Uncertainties,
 	}

@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/aleka7sk/featureforge/internal/application"
 	"github.com/aleka7sk/featureforge/internal/engineering/peos"
@@ -49,7 +48,7 @@ func mustPostForm(t *testing.T, handler http.Handler, path string, values url.Va
 // committed state is visible exactly as internal/transport/http's own
 // canonical scenario test proves it through the API directly.
 func TestCanonicalScenarioThroughUIForms(t *testing.T) {
-	uow, recorder, handler := newTestStack()
+	_, _, handler := newTestStack()
 
 	// C1 create project.
 	mustPostForm(t, handler, "/projects", url.Values{
@@ -82,15 +81,13 @@ func TestCanonicalScenarioThroughUIForms(t *testing.T) {
 		"transition_record_artifact_id": {"TR-1"}, "transition_record_revision_id": {"TR-1-REV-0"},
 	}, "/features/FC-1")
 
-	// C8 cites an Evidence act. There is intentionally no standalone
-	// Evidence form, so seed that prerequisite through the same real
-	// engineering repository used by the in-process API.
-	recordDecisionEvidenceForUI(t, uow, recorder, time.Now().UTC())
+	// C8 forward-cites EV-1. C10 below materialises that exact Evidence pair
+	// through the public validation-run form.
 	mustPostForm(t, handler, "/features/FC-1/decisions", url.Values{
 		"decision_id": {"DEC-1"}, "question": {"Should homework support audio?"},
 		"outcome_statement":    {"Homework supports one optional audio attachment."},
 		"alternatives":         {"Store inline.\nStore externally."},
-		"evidence_artifact_id": {scenario.DecisionEvidenceID}, "evidence_revision_id": {scenario.DecisionEvidenceID + "-REV-1"},
+		"evidence_artifact_id": {scenario.EvidenceIDs["A-1"]}, "evidence_revision_id": {scenario.EvidenceIDs["A-1"] + "-REV-1"},
 		"assumptions": {"Audio is hosted externally."}, "constraints": {"No binary storage."},
 		"rationale": {"Avoids adding binary storage."},
 	}, "/features/FC-1/decisions")
@@ -186,7 +183,7 @@ func TestCanonicalScenarioThroughUIForms(t *testing.T) {
 	}
 
 	_, decisions := getPage(t, handler, "/features/FC-1/decisions")
-	if !strings.Contains(decisions, "DEC-1") || !strings.Contains(decisions, scenario.DecisionEvidenceID) {
+	if !strings.Contains(decisions, "DEC-1") || !strings.Contains(decisions, scenario.EvidenceIDs["A-1"]) {
 		t.Errorf("expected the decision and its evidence, got %s", decisions)
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/aleka7sk/featureforge/internal/engineering"
 )
@@ -113,11 +114,15 @@ func ResolveCurrentClaim(ctx context.Context, repos Repositories, inspector Engi
 	}
 	sort.Slice(rationale.Edges, func(i, j int) bool { return rationale.Edges[i].From.ID < rationale.Edges[j].From.ID })
 
-	// Step 4: reject cycles, bounded by |claims|.
-	for _, c := range claims {
-		if cycleFrom(c.Key.ID, edgesByFrom, len(claims)) {
-			return CurrentClaimResult{}, fmt.Errorf("%w: starting from claim %s", ErrCorrectionCycle, c.Key)
-		}
+	// Step 4: reject cycles, bounded by |claims|. Enumerate the complete
+	// conflicting population rather than reporting whichever start node the
+	// repository happened to return first (FF-010 §6, FF-001 §6.4).
+	if cycleNodeIDs := correctionCycleNodeIDs(claims, edgesByFrom); len(cycleNodeIDs) > 0 {
+		return CurrentClaimResult{}, fmt.Errorf(
+			"%w: Claim IDs [%s] form one or more correction cycles",
+			ErrCorrectionCycle,
+			strings.Join(cycleNodeIDs, ", "),
+		)
 	}
 
 	// Step 5: partition into superseded, invalidated.
@@ -163,7 +168,16 @@ func ResolveCurrentClaim(ctx context.Context, repos Repositories, inspector Engi
 	}
 	// Step 8: more than one head is ambiguous.
 	if len(heads) > 1 {
-		return CurrentClaimResult{}, fmt.Errorf("%w: %d competing heads for this subject, scope, and criteria", ErrCorrectionAmbiguous, len(heads))
+		headIDs := make([]string, 0, len(heads))
+		for _, head := range heads {
+			headIDs = append(headIDs, head.Key.ID)
+		}
+		sort.Strings(headIDs)
+		return CurrentClaimResult{}, fmt.Errorf(
+			"%w: competing Claim IDs [%s] for this subject, scope, and criteria",
+			ErrCorrectionAmbiguous,
+			strings.Join(headIDs, ", "),
+		)
 	}
 
 	// Step 9.
@@ -188,21 +202,39 @@ func sameCriteria(a, b []string) bool {
 	return true
 }
 
-// cycleFrom reports whether following correction edges from start
-// eventually revisits start, bounded by maxHops (the total claim count).
-func cycleFrom(start string, edgesByFrom map[string]CorrectionEdge, maxHops int) bool {
-	current := start
-	for hop := 0; hop < maxHops+1; hop++ {
-		edge, ok := edgesByFrom[current]
-		if !ok {
-			return false
+// correctionCycleNodeIDs returns the sorted union of every Claim ID that is
+// actually inside a correction cycle. A non-cyclic head or tail leading into a
+// cycle is deliberately excluded. Each traversal is bounded by |claims| + 1;
+// all edges have already been proven to stay inside this claim population.
+func correctionCycleNodeIDs(claims []engineering.RecordEnvelope, edgesByFrom map[string]CorrectionEdge) []string {
+	cycleNodes := make(map[string]struct{})
+	for _, claim := range claims {
+		path := make([]string, 0, len(claims))
+		position := make(map[string]int, len(claims))
+		current := claim.Key.ID
+		for hop := 0; hop <= len(claims); hop++ {
+			if cycleStart, repeated := position[current]; repeated {
+				for _, nodeID := range path[cycleStart:] {
+					cycleNodes[nodeID] = struct{}{}
+				}
+				break
+			}
+			position[current] = len(path)
+			path = append(path, current)
+			edge, found := edgesByFrom[current]
+			if !found {
+				break
+			}
+			current = edge.To.ID
 		}
-		if edge.To.ID == start {
-			return true
-		}
-		current = edge.To.ID
 	}
-	return true // exceeded bound without terminating -- treat as a cycle
+
+	ids := make([]string, 0, len(cycleNodes))
+	for nodeID := range cycleNodes {
+		ids = append(ids, nodeID)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // familyMismatch reports whether targetID names a record of some kind
@@ -225,32 +257,47 @@ func familyMismatch(ctx context.Context, repos Repositories, targetID string) bo
 // describeChain renders the correction chain leading to head in prose, per
 // FF-010 §6's worked example.
 func describeChain(head engineering.RecordEnvelope, edges []CorrectionEdge) string {
-	incoming := map[string][]CorrectionEdge{}
+	byCorrectingClaim := make(map[string]CorrectionEdge, len(edges))
 	for _, e := range edges {
-		incoming[e.To.ID] = append(incoming[e.To.ID], e)
+		byCorrectingClaim[e.From.ID] = e
 	}
-	chain := ""
+	chain := make([]CorrectionEdge, 0, len(edges))
 	current := head.Key.ID
 	visited := map[string]bool{current: true}
 	for {
-		sources, ok := incoming[current]
-		if !ok || len(sources) == 0 {
+		edge, ok := byCorrectingClaim[current]
+		if !ok {
 			break
 		}
-		e := sources[0]
-		if visited[e.From.ID] {
+		if visited[edge.To.ID] {
 			break
 		}
-		if chain == "" {
-			chain = fmt.Sprintf("%s was corrected by %s", e.From, e.To)
-		} else {
-			chain = fmt.Sprintf("%s was corrected by %s; %s", e.From, e.To, chain)
-		}
-		current = e.From.ID
+		chain = append(chain, edge)
+		current = edge.To.ID
 		visited[current] = true
 	}
-	if chain == "" {
+	if len(chain) == 0 {
 		return fmt.Sprintf("%s is not corrected by anything; %s stands", head.Key, head.Key)
 	}
-	return fmt.Sprintf("%s; %s is not corrected by anything; %s stands", chain, head.Key, head.Key)
+	parts := make([]string, 0, len(chain)+2)
+	for i := len(chain) - 1; i >= 0; i-- {
+		edge := chain[i]
+		parts = append(parts, describeCorrectionEdge(edge))
+	}
+	parts = append(parts,
+		fmt.Sprintf("%s is not corrected by anything", head.Key),
+		fmt.Sprintf("%s stands", head.Key),
+	)
+	return strings.Join(parts, "; ")
+}
+
+func describeCorrectionEdge(edge CorrectionEdge) string {
+	verb := "was corrected by"
+	switch edge.Kind {
+	case engineering.CorrectionKindReplace:
+		verb = "was replaced by"
+	case engineering.CorrectionKindInvalidate:
+		verb = "was invalidated by"
+	}
+	return fmt.Sprintf("%s %s %s", edge.To, verb, edge.From)
 }

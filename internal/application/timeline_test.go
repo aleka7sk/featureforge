@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,7 +70,7 @@ func TestCanonicalTimelineOrdering(t *testing.T) {
 	var result application.TimelineResult
 	err := uow.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		result, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in)
+		result, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), newLenientEnvelopeInspector(), in)
 		return err
 	})
 	if err != nil {
@@ -95,7 +96,7 @@ func TestTimelineInsertionOrderIndependence(t *testing.T) {
 	var result1 application.TimelineResult
 	err := uow1.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		result1, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in1)
+		result1, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), newLenientEnvelopeInspector(), in1)
 		return err
 	})
 	if err != nil {
@@ -107,7 +108,7 @@ func TestTimelineInsertionOrderIndependence(t *testing.T) {
 	var result2 application.TimelineResult
 	err = uow2.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		result2, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in2)
+		result2, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), newLenientEnvelopeInspector(), in2)
 		return err
 	})
 	if err != nil {
@@ -130,7 +131,7 @@ func TestEventIDIsDerived(t *testing.T) {
 	var result application.TimelineResult
 	err := uow.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		result, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in)
+		result, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), newLenientEnvelopeInspector(), in)
 		return err
 	})
 	if err != nil {
@@ -141,6 +142,89 @@ func TestEventIDIsDerived(t *testing.T) {
 		if e.EventID != want {
 			t.Errorf("EventID = %q, want %q", e.EventID, want)
 		}
+	}
+}
+
+func TestEveryTimelineEventExposesActorAndOwnSourceReference(t *testing.T) {
+	uow := newStoreWithRecordSubject(t)
+	in := seedTimelineFixture(t, uow)
+
+	var result application.TimelineResult
+	err := uow.Do(context.Background(), func(r application.Repositories) error {
+		var err error
+		result, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), newLenientEnvelopeInspector(), in)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range append(result.Undated, result.Dated...) {
+		if event.Actor == "" {
+			t.Errorf("%s has no actor", event.EventID)
+		}
+		if event.SourceIdentity == "" {
+			t.Errorf("%s has no source identity", event.EventID)
+		}
+		if !containsTimelineReference(event.References, event.SourceIdentity) {
+			t.Errorf("%s references = %v, want its own source %q", event.EventID, event.References, event.SourceIdentity)
+		}
+	}
+}
+
+func TestEqualTimeOrderingExplainsKindRankAndSourceIdentity(t *testing.T) {
+	uow := newStoreWithRecordSubject(t)
+	in := seedTimelineFixture(t, uow)
+
+	err := uow.Do(context.Background(), func(r application.Repositories) error {
+		for _, id := range []string{"DEC-B", "DEC-A"} {
+			key, err := engineering.NewRecordKey(engineering.RecordKindDecision, id)
+			if err != nil {
+				return err
+			}
+			payload := []byte(`{"decision_id":"` + id + `"}`)
+			env, err := engineering.NewRecordEnvelope(engineering.RecordEnvelopeInput{
+				Key: key, SubjectKey: engineering.ArtifactRevisionSubjectKey("CAP-1", "CAP-1-REV-1"),
+				OccurredAt: fixedTime(), HasOccurredAt: true,
+				Payload: payload, PayloadDigest: engineering.ComputeDigest(payload), RecordedAt: fixedTime(),
+			})
+			if err != nil {
+				return err
+			}
+			if err := r.Records.Put(context.Background(), env); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.DecisionIDs = []string{"DEC-B", "DEC-A"}
+
+	var result application.TimelineResult
+	err = uow.Do(context.Background(), func(r application.Repositories) error {
+		var err error
+		result, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), newLenientEnvelopeInspector(), in)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	indices := map[string]int{}
+	for i, event := range result.Dated {
+		if event.OccurredAt.Equal(fixedTime()) {
+			if !strings.Contains(event.Rationale, "kind-rank") || !strings.Contains(event.Rationale, "source-identity") {
+				t.Errorf("%s equal-time rationale = %q, want both tie-break names", event.EventID, event.Rationale)
+			}
+		}
+		indices[event.SourceIdentity] = i
+	}
+	if !(indices["PRJ-1"] < indices["CAP-1"] && indices["CAP-1"] < indices["decision:DEC-A"]) {
+		t.Errorf("kind-rank order indices = %v, want project < capability artifact < decision", indices)
+	}
+	if indices["decision:DEC-A"] >= indices["decision:DEC-B"] {
+		t.Errorf("source-identity order indices = %v, want DEC-A before DEC-B", indices)
 	}
 }
 
@@ -171,20 +255,68 @@ func TestUndatedGroupIsSeparate(t *testing.T) {
 	var result application.TimelineResult
 	err = uow.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		result, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in)
+		result, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), newLenientEnvelopeInspector(), in)
 		return err
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(result.Undated) != 1 || result.Undated[0].SourceIdentity != "decision:DEC-1" {
-		t.Errorf("Undated = %+v, want exactly the undated decision", result.Undated)
+		t.Fatalf("Undated = %+v, want exactly the undated decision", result.Undated)
+	}
+	if result.Undated[0].Actor == "" || !containsTimelineReference(result.Undated[0].References, result.Undated[0].SourceIdentity) {
+		t.Errorf("undated event = %+v, want actor and own source reference", result.Undated[0])
+	}
+	if !strings.Contains(result.Undated[0].Rationale, "no recorded timestamp") ||
+		!strings.Contains(result.Undated[0].Rationale, "above dated history") {
+		t.Errorf("undated rationale = %q, want timestamp absence and placement", result.Undated[0].Rationale)
 	}
 	for _, e := range result.Dated {
 		if e.SourceIdentity == "decision:DEC-1" {
 			t.Error("the undated event must not appear in the dated slice")
 		}
 	}
+}
+
+func TestLifecycleTimelineEventNamesAssignmentAndTransitionSources(t *testing.T) {
+	f := newCommandFixture()
+	entry, specified := seedCommandLifecycleThroughSpecified(t, f)
+	result, err := application.GetFeatureTimelineForCard(context.Background(), f.uow, f.rec, f.rec, mustFeatureCardID(t, "FC-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]string{
+		"state-assignment:" + entry.AssignmentID:     entry.TransitionRecordArtifactID + "/" + entry.TransitionRecordRevisionID,
+		"state-assignment:" + specified.AssignmentID: specified.TransitionRecordArtifactID + "/" + specified.TransitionRecordRevisionID,
+	}
+	for _, event := range result.Dated {
+		transition, found := want[event.SourceIdentity]
+		if !found {
+			continue
+		}
+		if !containsTimelineReference(event.References, event.SourceIdentity) || !containsTimelineReference(event.References, transition) {
+			t.Errorf("%s references = %v, want assignment %q and transition %q", event.EventID, event.References, event.SourceIdentity, transition)
+		}
+		for _, detail := range []string{"policy LCD-1/LCDV-1", "entry transition", "initial states", "transitions"} {
+			if !strings.Contains(event.Summary, detail) {
+				t.Errorf("%s summary = %q, want authoritative lifecycle policy detail %q", event.EventID, event.Summary, detail)
+			}
+		}
+		delete(want, event.SourceIdentity)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing lifecycle events for %v", want)
+	}
+}
+
+func containsTimelineReference(references []string, want string) bool {
+	for _, reference := range references {
+		if reference == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCorrectedClaimRendersLink(t *testing.T) {
@@ -199,7 +331,7 @@ func TestCorrectedClaimRendersLink(t *testing.T) {
 	var result application.TimelineResult
 	err := uow.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		result, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in)
+		result, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), newLenientEnvelopeInspector(), in)
 		return err
 	})
 	if err != nil {
@@ -234,7 +366,7 @@ func TestDanglingReferenceFails(t *testing.T) {
 	in.ClaimIDs = []string{"CLM-1"}
 
 	err := uow.Do(context.Background(), func(r application.Repositories) error {
-		_, err := application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in)
+		_, err := application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), newLenientEnvelopeInspector(), in)
 		return err
 	})
 	if !errors.Is(err, application.ErrTimelineSourceInvalid) {
@@ -251,7 +383,7 @@ func TestInterruptedOutcomeRenderedVerbatim(t *testing.T) {
 	var result application.TimelineResult
 	err := uow.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		result, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in)
+		result, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), newLenientEnvelopeInspector(), in)
 		return err
 	})
 	if err != nil {
@@ -261,8 +393,8 @@ func TestInterruptedOutcomeRenderedVerbatim(t *testing.T) {
 	for _, e := range result.Dated {
 		if e.SourceIdentity == "execution:ER-1" {
 			found = true
-			if e.Summary != "peos:interrupted" {
-				t.Errorf("Summary = %q, want peos:interrupted rendered verbatim", e.Summary)
+			if !strings.Contains(e.Summary, "peos:interrupted") {
+				t.Errorf("Summary = %q, want peos:interrupted rendered verbatim with its activity key", e.Summary)
 			}
 		}
 	}
@@ -277,7 +409,7 @@ func TestTimelineIsDeterministic(t *testing.T) {
 	var first application.TimelineResult
 	err := uow.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		first, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in)
+		first, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), newLenientEnvelopeInspector(), in)
 		return err
 	})
 	if err != nil {
@@ -287,7 +419,7 @@ func TestTimelineIsDeterministic(t *testing.T) {
 		var got application.TimelineResult
 		err := uow.Do(context.Background(), func(r application.Repositories) error {
 			var err error
-			got, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in)
+			got, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), newLenientEnvelopeInspector(), in)
 			return err
 		})
 		if err != nil {

@@ -206,8 +206,10 @@ Four principles follow:
 
 1. **Writes are intents.** Each command is one endpoint. The endpoint name
    states the act.
-2. **Reads are questions.** Each query is one endpoint, returning the answer
-   *and its rationale*.
+2. **Reads are questions.** Each query is one endpoint. Derived or interpretive
+   reads return the answer *and the application-owned rationale*. Direct
+   authoritative reads Q1, Q2, and Q7 return stored facts and do not invent a
+   rationale.
 3. **The transport is a translator, not a decision-maker.** Its only
    responsibilities are decoding, invoking, and encoding. Any conditional that
    is not input validation or error mapping belongs in `internal/application`.
@@ -324,12 +326,14 @@ application algorithm.
 
 Q5's Evidence population is the deduplicated union of exact Evidence citations
 from its validated Decisions, history-wide Executions and history-wide Claims.
-Every cited pair must resolve and pass authoritative family/payload/projection
-inspection before its event is emitted. A deliberately unresolved C8 Decision
-citation is the governed `409 timeline_source_invalid` read outcome; a dangling
-Execution/Claim reference violates their mandatory write invariant and is
-opaque stored-state integrity (`500`). Both fail the whole timeline rather than
-returning a partial list.
+Every pair selected for an Evidence event must resolve and pass authoritative
+family/payload/projection inspection before emission. The sole reference-
+resolution exception is a governed C8 Decision citation whose Artifact and
+Revision are both absent: the inspected Decision remains readable with that
+exact pending reference, and no Evidence event is invented. One-sided or
+contradictory C8 occupancy and every
+dangling Execution/Claim reference violate stored-state integrity (`500`) and
+fail the whole timeline rather than returning a partial list.
 
 ### 6.3 Methods
 
@@ -405,6 +409,8 @@ is derived, its rationale:
 
 `rationale` is **omitted when absent, never rendered empty**. A derived answer
 without rationale is a bug, not an empty object — and §14's test asserts it.
+Q1, Q2, and Q7 are direct authoritative inventory or stored-value reads, so
+their successful envelopes omit `rationale` by contract.
 
 **Identifiers are strings, always.** `ProjectID`, `FeatureCardID`, artifact and
 revision IDs are already validated identity strings in the domain. The

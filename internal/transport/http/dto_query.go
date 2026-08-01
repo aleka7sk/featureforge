@@ -214,6 +214,32 @@ type effectiveRequirementDTO struct {
 	SourceAcceptanceCriterionKey string `json:"source_acceptance_criterion_key"`
 }
 
+// requirementRevisionHistoryDTO mirrors
+// application.RequirementRevisionHistory. Q4 returns every validated
+// Requirement revision, not only the effective one, so a consumer can render
+// immutable history without reconstructing sequence, acceptance, or source
+// trace from unrelated projections.
+type requirementRevisionHistoryDTO struct {
+	ArtifactID                   string `json:"artifact_id"`
+	RevisionID                   string `json:"revision_id"`
+	Sequence                     int    `json:"sequence"`
+	AcceptanceState              string `json:"acceptance_state"`
+	Statement                    string `json:"statement"`
+	SourceCapabilityArtifactID   string `json:"source_capability_artifact_id"`
+	SourceCapabilityRevisionID   string `json:"source_capability_revision_id"`
+	SourceAcceptanceCriterionKey string `json:"source_acceptance_criterion_key"`
+}
+
+func mapRequirementRevisionHistoryDTO(h application.RequirementRevisionHistory) requirementRevisionHistoryDTO {
+	return requirementRevisionHistoryDTO{
+		ArtifactID: h.ArtifactID, RevisionID: h.RevisionKey.RevisionID, Sequence: h.Sequence,
+		AcceptanceState: string(h.AcceptanceState), Statement: h.Statement,
+		SourceCapabilityArtifactID:   h.SourceCapabilityRevision.ArtifactID,
+		SourceCapabilityRevisionID:   h.SourceCapabilityRevision.RevisionID,
+		SourceAcceptanceCriterionKey: h.SourceAcceptanceCriterion,
+	}
+}
+
 // decisionBasisDTO mirrors a decision's full basis (FF-020 §5, FF-001
 // §3.5: "the basis is displayed, not collapsed"). Evidence is the
 // existing RecordEnvelope.EvidenceKeys projection, not a decode; every
@@ -243,7 +269,7 @@ type applicableDecisionDTO struct {
 
 func mapApplicableDecisionDTO(d application.ApplicableDecision) applicableDecisionDTO {
 	dto := applicableDecisionDTO{
-		DecisionID: d.DecisionID, SubjectKey: d.Decision.SubjectKey, Scope: d.Decision.Scope, Outcome: d.Decision.Outcome,
+		DecisionID: d.DecisionID, SubjectKey: d.SubjectKey, Scope: d.Decision.Scope, Outcome: d.Decision.Outcome,
 		Question: d.Detail.Question, OutcomeStatement: d.Detail.OutcomeStatement, Rationale: d.Detail.Rationale,
 		Alternatives: append([]string{}, d.Detail.Alternatives...),
 		Basis: decisionBasisDTO{
@@ -411,12 +437,13 @@ func mapValidationPlanDTO(v application.ValidationPlanResult) validationPlanDTO 
 // engineeringStateDTO is Q4's data payload, and the "state" sub-object of
 // Q3's (FF-018 §10.3).
 type engineeringStateDTO struct {
-	CurrentRevision       currentRevisionDTO        `json:"current_revision"`
-	EffectiveRequirements []effectiveRequirementDTO `json:"effective_requirements"`
-	ApplicableDecisions   []applicableDecisionDTO   `json:"applicable_decisions"`
-	ValidationPlan        validationPlanDTO         `json:"validation_plan"`
-	Readiness             readinessResultDTO        `json:"readiness"`
-	Lifecycle             lifecycleStateDTO         `json:"lifecycle"`
+	CurrentRevision       currentRevisionDTO              `json:"current_revision"`
+	EffectiveRequirements []effectiveRequirementDTO       `json:"effective_requirements"`
+	RequirementHistory    []requirementRevisionHistoryDTO `json:"requirement_history"`
+	ApplicableDecisions   []applicableDecisionDTO         `json:"applicable_decisions"`
+	ValidationPlan        validationPlanDTO               `json:"validation_plan"`
+	Readiness             readinessResultDTO              `json:"readiness"`
+	Lifecycle             lifecycleStateDTO               `json:"lifecycle"`
 }
 
 // engineeringStateRationaleDTO is Q4's rationale payload. There is
@@ -438,6 +465,7 @@ func mapEngineeringStateDTO(s application.EngineeringStateResult) (engineeringSt
 	data := engineeringStateDTO{
 		CurrentRevision:       mapCurrentRevisionDTO(s.CurrentRevision),
 		EffectiveRequirements: make([]effectiveRequirementDTO, 0, len(s.EffectiveRequirements)),
+		RequirementHistory:    make([]requirementRevisionHistoryDTO, 0, len(s.RequirementHistory)),
 		ApplicableDecisions:   make([]applicableDecisionDTO, 0, len(s.ApplicableDecisions)),
 		ValidationPlan:        mapValidationPlanDTO(s.ValidationPlan),
 		Readiness:             mapReadinessResultDTO(s.Readiness),
@@ -450,6 +478,9 @@ func mapEngineeringStateDTO(s application.EngineeringStateResult) (engineeringSt
 			SourceCapabilityRevisionID:   req.SourceCapabilityRevision.RevisionID,
 			SourceAcceptanceCriterionKey: req.SourceAcceptanceCriterion,
 		})
+	}
+	for _, revision := range s.RequirementHistory {
+		data.RequirementHistory = append(data.RequirementHistory, mapRequirementRevisionHistoryDTO(revision))
 	}
 	for _, dec := range s.ApplicableDecisions {
 		data.ApplicableDecisions = append(data.ApplicableDecisions, mapApplicableDecisionDTO(dec))

@@ -42,12 +42,10 @@ var RequirementArtifactIDs = []string{"REQ-1", "REQ-2", "REQ-3", "REQ-4"}
 
 func requirementRevisionID(artifactID string) string { return artifactID + "-REV-1" }
 
-// EvidenceIDs, keyed by the activity/claim they support (FF-011 §7). EV-0
-// supports the decision's basis.
-var (
-	DecisionEvidenceID = "EV-0"
-	EvidenceIDs        = map[string]string{"A-1": "EV-1", "A-2": "EV-2", "A-3": "EV-3", "A-2-rerun": "EV-4"}
-)
+// EvidenceIDs are keyed by the activity/claim they support (FF-011 §7).
+// EV-1 is also the Decision's forward-cited basis and is materialised by A-1's
+// later C10 act.
+var EvidenceIDs = map[string]string{"A-1": "EV-1", "A-2": "EV-2", "A-3": "EV-3", "A-2-rerun": "EV-4"}
 
 func evidenceRevisionID(artifactID string) string { return artifactID + "-REV-1" }
 

@@ -142,7 +142,8 @@ instead of re-derived.
 
 - `EngineeringStateInput` gains `PlanArtifactID string`.
 - `EffectiveRequirement` gains `Statement string`; `ApplicableDecision` gains
-  `Detail engineering.DecisionDetail`; `EngineeringStateResult` gains
+  a payload-verified `SubjectKey` and `Detail engineering.DecisionDetail`;
+  `EngineeringStateResult` gains
   `ValidationPlan ValidationPlanResult` (`Found bool; ArtifactID, RevisionID
   string; Activities []engineering.PlanActivityDetail`).
 - `GetFeatureEngineeringState` takes a `projector EngineeringProjector` and,
@@ -176,6 +177,15 @@ source artifact/revision and criterion key, and the Requirements screen renders
 them beside the statement. A missing or corrupt trace fails the whole read with
 opaque stored-state integrity; the UI never infers it from prose.
 
+**M.7 consumer correction.** Q4 also returns
+`RequirementHistory []RequirementRevisionHistory`: every immutable Requirement
+revision, ordered by artifact and governed sequence, with its decoded statement,
+current acceptance state, and exact criterion trace. The history is populated
+only after `validateManagedHistory` has checked every payload/projection,
+order, journal, reference, and trace. The effective statement is reused from
+that same validated history. This closes FF-001 §3.4 without adding a
+screen-specific endpoint.
+
 Every change above is additive to an existing signature or type except the
 two `GetFeatureOverview`/`GetFeatureEngineeringStateForCard` parameter
 additions and the `GetCapabilityRevisions`/`GetCapabilityRevision` return-type
@@ -190,12 +200,12 @@ changes name, type, or meaning.
 | FF-001 need | Where |
 |---|---|
 | Revision specification content | `revisionDTO.content` (new `*contentDTO`, reusing C3/C4's request shape via new `mapContentDTOFromContent`), rendered only by the new `mapRevisionWithContentDTO` — Q6 and Q7 only. Q4's `current_revision` (via `mapRevisionDTO`) deliberately carries no content: `CurrentRevisionResult` has no content lookup, and adding one would have widened a much more broadly-used type for a field only Q6/Q7 need. |
-| Requirement statement and exact source | `effectiveRequirementDTO.statement`, `source_capability_artifact_id`, `source_capability_revision_id`, `source_acceptance_criterion_key` |
-| Decision detail | `applicableDecisionDTO` gains `question`, `outcome_statement`, `rationale`, `alternatives[]`, `basis{evidence[], assumptions[], constraints[], uncertainties[]}` — `basis.evidence` reads the existing `EvidenceKeys` projection, not a decode |
+| Requirement statement, history, and exact source | `effectiveRequirementDTO` retains the selected revision; `requirement_history[]` adds every validated revision with identity, sequence, acceptance state, statement, and exact trace |
+| Decision subject and detail | `applicableDecisionDTO.subject_key` is copied only after full record inspection; detail adds `question`, `outcome_statement`, `rationale`, `alternatives[]`, `basis{evidence[], assumptions[], constraints[], uncertainties[]}` |
 | Applicable validation plan + activities | `engineeringStateDTO.validation_plan` (new `validationPlanDTO`; its activity type is named `planActivityDetailDTO`, distinct from `dto_command.go`'s request-side `planActivityDTO`) |
 | Current claim detail | `readiness.per_requirement[]` gains `reasoning`, `criterion_keys[]` (from `Claim.CriterionKeys`), `corrects` (from `Claim.CorrectionTargetID` when `Claim.HasCorrection()`) |
 | Superseded claims "shown, not hidden" (FF-001 §3.6) | `rejected[]` gains `outcome`, `reasoning`, `corrected_by` |
-| Execution/claim references | `timelineFromRecord` (`query_timeline.go`) appends the record's own `EvidenceKeys`/`ExecutionKeys` onto `References`, alongside the existing `SubjectKey` entry — an existing `[]string` field, no new field |
+| Decision/plan/execution detail and references | Q5 payload-projects the Decision outcome; plan activity keys, methods, interpretations and expected evidence; and each Execution's planned-activity key. It appends exact subject, Requirement, plan and Evidence references to the existing `References []string`. A wholly absent C8 Evidence pair remains an explicit pending Decision reference, not a fabricated Evidence event. |
 
 `ErrStoredPayloadUnreadable` is mapped to `500`/`internal_error`/opaque in
 `errorMappings`, forcing `TestErrorMappingIsExhaustive` to stay honest.

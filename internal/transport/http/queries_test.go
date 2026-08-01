@@ -294,6 +294,66 @@ func TestGetFeatureStateHandler_ReadSurfaceContent(t *testing.T) {
 	}
 }
 
+func TestGetFeatureStateHandler_RequirementHistoryAndDecisionSubject(t *testing.T) {
+	deps := newTestDeps()
+	handler := transporthttp.NewHandler(deps)
+	seedForQueries(t, deps, handler)
+
+	rr := postJSON(t, handler, "/api/v1/requirements", map[string]any{
+		"artifact_id": "REQ-1", "revision_id": "REQ-1-REV-2", "acceptance_record_id": "ACC-REQ-1-REV-2",
+		"source_capability_revision_id": "CAP-1-REV-1", "source_acceptance_criterion_key": "AC-1",
+		"statement": "Later statement.", "subject_artifact_id": "CAP-1",
+	}, nil)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("seeding second requirement revision: status = %d; body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Data struct {
+			RequirementHistory []struct {
+				ArtifactID                   string `json:"artifact_id"`
+				RevisionID                   string `json:"revision_id"`
+				Sequence                     int    `json:"sequence"`
+				AcceptanceState              string `json:"acceptance_state"`
+				Statement                    string `json:"statement"`
+				SourceCapabilityArtifactID   string `json:"source_capability_artifact_id"`
+				SourceCapabilityRevisionID   string `json:"source_capability_revision_id"`
+				SourceAcceptanceCriterionKey string `json:"source_acceptance_criterion_key"`
+			} `json:"requirement_history"`
+			ApplicableDecisions []struct {
+				DecisionID string `json:"decision_id"`
+				SubjectKey string `json:"subject_key"`
+			} `json:"applicable_decisions"`
+		} `json:"data"`
+	}
+	rr = getJSON(t, handler, "/api/v1/features/FC-1/state", &resp)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+	if len(resp.Data.RequirementHistory) != 2 {
+		t.Fatalf("requirement_history = %+v, want two revisions", resp.Data.RequirementHistory)
+	}
+	first, second := resp.Data.RequirementHistory[0], resp.Data.RequirementHistory[1]
+	if first.ArtifactID != "REQ-1" || first.RevisionID != "REQ-1-REV-1" || first.Sequence != 1 ||
+		first.AcceptanceState != "accepted" || first.Statement != "Statement." {
+		t.Errorf("requirement_history[0] = %+v", first)
+	}
+	if second.ArtifactID != "REQ-1" || second.RevisionID != "REQ-1-REV-2" || second.Sequence != 2 ||
+		second.AcceptanceState != "accepted" || second.Statement != "Later statement." {
+		t.Errorf("requirement_history[1] = %+v", second)
+	}
+	for i, revision := range resp.Data.RequirementHistory {
+		if revision.SourceCapabilityArtifactID != "CAP-1" || revision.SourceCapabilityRevisionID != "CAP-1-REV-1" ||
+			revision.SourceAcceptanceCriterionKey != "AC-1" {
+			t.Errorf("requirement_history[%d] source trace = %+v", i, revision)
+		}
+	}
+	if len(resp.Data.ApplicableDecisions) != 1 || resp.Data.ApplicableDecisions[0].DecisionID != "DEC-1" ||
+		resp.Data.ApplicableDecisions[0].SubjectKey != engineering.ArtifactRevisionSubjectKey("CAP-1", "CAP-1-REV-1") {
+		t.Errorf("applicable_decisions = %+v", resp.Data.ApplicableDecisions)
+	}
+}
+
 func TestGetFeatureHandler(t *testing.T) {
 	deps := newTestDeps()
 	handler := transporthttp.NewHandler(deps)

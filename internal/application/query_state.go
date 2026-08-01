@@ -110,7 +110,8 @@ func DiscoverRequirementArtifactIDs(ctx context.Context, repos Repositories, ins
 // of its revisions as the authoritative subject (FF-018 §6.3). Every revision
 // is consulted, not only the current one, so a decision recorded against an
 // earlier revision remains part of the feature's history after a later
-// revision exists. Results are deduplicated and sorted ascending.
+// revision exists. Results are deduplicated and sorted by recorded time,
+// then Decision ID.
 func DiscoverDecisionIDs(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, capabilityArtifactID string) ([]string, error) {
 	if _, err := validateManagedHistory(ctx, repos, inspector, capabilityArtifactID, engineering.RevisionFamilyCapability, false); err != nil {
 		return nil, err
@@ -130,22 +131,31 @@ func DiscoverDecisionIDs(ctx context.Context, repos Repositories, inspector Engi
 		}
 		subjects[engineering.ArtifactRevisionSubjectKey(rev.Key.ArtifactID, rev.Key.RevisionID)] = struct{}{}
 	}
-	seen := map[string]bool{}
+	decisionsByID := make(map[string]engineering.RecordEnvelope)
 	out := make([]string, 0)
 	for _, dec := range records {
 		if dec.Kind != engineering.RecordKindDecision {
 			continue
 		}
-		if _, relevant := subjects[dec.SubjectKey]; !relevant || seen[dec.Key.ID] {
+		if _, relevant := subjects[dec.SubjectKey]; !relevant {
+			continue
+		}
+		if _, duplicate := decisionsByID[dec.Key.ID]; duplicate {
 			continue
 		}
 		if err := validateStoredDecisionReferences(ctx, repos, inspector, dec); err != nil {
 			return nil, err
 		}
-		seen[dec.Key.ID] = true
+		decisionsByID[dec.Key.ID] = dec
 		out = append(out, dec.Key.ID)
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool {
+		left, right := decisionsByID[out[i]], decisionsByID[out[j]]
+		if left.RecordedAt.Equal(right.RecordedAt) {
+			return left.Key.ID < right.Key.ID
+		}
+		return left.RecordedAt.Before(right.RecordedAt)
+	})
 	return out, nil
 }
 
@@ -155,8 +165,30 @@ func DiscoverDecisionIDs(ctx context.Context, repos Repositories, inspector Engi
 // (FF-020 §5, FF-001 §3.5: "the basis is displayed, not collapsed").
 type ApplicableDecision struct {
 	DecisionID string
+	// SubjectKey is the decision's authoritative, payload-verified subject.
+	// GetFeatureEngineeringState sets it only after inspectRecord has proved
+	// that the stored payload and the RecordEnvelope projection agree, so
+	// consumers never need to treat an unexplained projection as authority.
+	SubjectKey string
 	Decision   engineering.RecordEnvelope
 	Detail     engineering.DecisionDetail
+}
+
+// RequirementRevisionHistory is one validated Requirement revision exposed
+// by Q4. Unlike EffectiveRequirement, which carries only the currently
+// selected revision for readiness, this entry makes every revision in the
+// immutable history readable. Statement is decoded from the authoritative
+// payload only after the complete managed history has passed integrity
+// inspection; Sequence, AcceptanceState, and the source trace are then read
+// from their separately governed persisted members.
+type RequirementRevisionHistory struct {
+	ArtifactID                string
+	RevisionKey               engineering.RevisionKey
+	Sequence                  int
+	AcceptanceState           engineering.AcceptanceState
+	Statement                 string
+	SourceCapabilityRevision  engineering.RevisionKey
+	SourceAcceptanceCriterion string
 }
 
 // ValidationPlanResult names the applicable validation plan and its
@@ -179,6 +211,7 @@ type ValidationPlanResult struct {
 type EngineeringStateResult struct {
 	CurrentRevision       CurrentRevisionResult
 	EffectiveRequirements []EffectiveRequirement
+	RequirementHistory    []RequirementRevisionHistory
 	ApplicableDecisions   []ApplicableDecision
 	ValidationPlan        ValidationPlanResult
 	Readiness             ReadinessResult
@@ -223,21 +256,27 @@ func GetFeatureEngineeringState(ctx context.Context, repos Repositories, project
 	if err != nil {
 		return EngineeringStateResult{}, err
 	}
-	for i, req := range effective {
-		env, found, err := repos.Revisions.Get(ctx, req.RevisionKey)
-		if err != nil {
-			return EngineeringStateResult{}, err
-		}
+	// ResolveEffectiveRequirements has now validated every complete managed
+	// history. Decode all revision statements once and reuse the selected
+	// entry for EffectiveRequirements rather than decoding the current
+	// payload through a second, potentially divergent read path.
+	history, err := renderValidatedRequirementHistory(ctx, repos, projector, in.RequirementArtifactIDs)
+	if err != nil {
+		return EngineeringStateResult{}, err
+	}
+	statementByKey := make(map[engineering.RevisionKey]string, len(history))
+	for _, revision := range history {
+		statementByKey[revision.RevisionKey] = revision.Statement
+	}
+	for i := range effective {
+		statement, found := statementByKey[effective[i].RevisionKey]
 		if !found {
-			continue
-		}
-		statement, err := projector.ProjectRequirementStatement(env.Payload)
-		if err != nil {
-			return EngineeringStateResult{}, fmt.Errorf("%w: requirement %s: %w", ErrStoredPayloadUnreadable, req.ArtifactID, err)
+			return EngineeringStateResult{}, integrityError("effective requirement is missing from its validated history", nil)
 		}
 		effective[i].Statement = statement
 	}
 	result.EffectiveRequirements = effective
+	result.RequirementHistory = history
 
 	for _, decID := range in.DecisionIDs {
 		key, err := engineering.NewRecordKey(engineering.RecordKindDecision, decID)
@@ -261,8 +300,17 @@ func GetFeatureEngineeringState(ctx context.Context, repos Repositories, project
 		if err != nil {
 			return EngineeringStateResult{}, fmt.Errorf("%w: decision %s: %w", ErrStoredPayloadUnreadable, decID, err)
 		}
-		result.ApplicableDecisions = append(result.ApplicableDecisions, ApplicableDecision{DecisionID: decID, Decision: rec, Detail: detail})
+		result.ApplicableDecisions = append(result.ApplicableDecisions, ApplicableDecision{
+			DecisionID: decID, SubjectKey: rec.SubjectKey, Decision: rec, Detail: detail,
+		})
 	}
+	sort.Slice(result.ApplicableDecisions, func(i, j int) bool {
+		left, right := result.ApplicableDecisions[i], result.ApplicableDecisions[j]
+		if left.Decision.RecordedAt.Equal(right.Decision.RecordedAt) {
+			return left.DecisionID < right.DecisionID
+		}
+		return left.Decision.RecordedAt.Before(right.Decision.RecordedAt)
+	})
 
 	if in.PlanArtifactID != "" {
 		currentPlan, err := ResolveCurrentRevision(ctx, repos, in.PlanArtifactID)
@@ -303,6 +351,75 @@ func GetFeatureEngineeringState(ctx context.Context, repos Repositories, project
 	result.Lifecycle = lifecycle
 
 	return result, nil
+}
+
+// renderValidatedRequirementHistory returns every revision of every requested
+// Requirement Artifact ordered by (ArtifactID, governed sequence). Its caller
+// must first run ResolveEffectiveRequirements for the same artifact set; that
+// is the integrity gate which proves every payload/projection, order, journal,
+// and trace before this function decodes or returns them. Artifact IDs are
+// deduplicated before reading so a malformed caller list cannot duplicate
+// history rows.
+func renderValidatedRequirementHistory(ctx context.Context, repos Repositories, projector EngineeringProjector, artifactIDs []string) ([]RequirementRevisionHistory, error) {
+	seen := make(map[string]struct{}, len(artifactIDs))
+	orderedArtifactIDs := make([]string, 0, len(artifactIDs))
+	for _, artifactID := range artifactIDs {
+		if _, duplicate := seen[artifactID]; duplicate {
+			continue
+		}
+		seen[artifactID] = struct{}{}
+		orderedArtifactIDs = append(orderedArtifactIDs, artifactID)
+	}
+	sort.Strings(orderedArtifactIDs)
+
+	history := make([]RequirementRevisionHistory, 0)
+	for _, artifactID := range orderedArtifactIDs {
+		revisions, err := repos.Revisions.ListByArtifact(ctx, artifactID)
+		if err != nil {
+			return nil, err
+		}
+		orders, err := repos.RevisionOrder.ListByArtifact(ctx, artifactID)
+		if err != nil {
+			return nil, err
+		}
+		journal, err := repos.RevisionAcceptance.ListByArtifact(ctx, artifactID)
+		if err != nil {
+			return nil, err
+		}
+
+		sequenceByKey := make(map[engineering.RevisionKey]int, len(orders))
+		for _, order := range orders {
+			sequenceByKey[order.Key] = order.Sequence
+		}
+		sort.Slice(revisions, func(i, j int) bool {
+			return sequenceByKey[revisions[i].Key] < sequenceByKey[revisions[j].Key]
+		})
+
+		for _, revision := range revisions {
+			sequence, found := sequenceByKey[revision.Key]
+			if !found {
+				return nil, integrityError("validated requirement revision has no order metadata", nil)
+			}
+			statement, err := projector.ProjectRequirementStatement(revision.Payload)
+			if err != nil {
+				return nil, fmt.Errorf("%w: requirement revision %s: %w", ErrStoredPayloadUnreadable, revision.Key, err)
+			}
+			trace, found, err := repos.RequirementTraces.Get(ctx, revision.Key)
+			if err != nil {
+				return nil, err
+			}
+			if !found {
+				return nil, integrityError("validated requirement revision has no criterion trace", nil)
+			}
+			history = append(history, RequirementRevisionHistory{
+				ArtifactID: artifactID, RevisionKey: revision.Key, Sequence: sequence,
+				AcceptanceState: resolveAcceptanceState(journal, revision.Key), Statement: statement,
+				SourceCapabilityRevision:  trace.CapabilityRevision,
+				SourceAcceptanceCriterion: trace.AcceptanceCriterionKey,
+			})
+		}
+	}
+	return history, nil
 }
 
 // decorateReadinessReasoning fills in the free-text reasoning

@@ -74,7 +74,20 @@ Q5 validates the complete persisted policy and whole predecessor graph. Each
 event references its exact establishing Transition Record Revision and
 `LCD-1/LCDV-1`; a partial, branched, cyclic, wrong-version or unreadable history
 fails the entire timeline with opaque stored-state integrity rather than
-returning a partial list.
+returning a partial list. Its detail includes the decoded Definition/Version,
+entry transition, initial states and complete transition-edge summary, so the
+persisted configuration reference has an authoritative read representation
+without inventing a separate user act or timeline event for startup
+configuration.
+
+**C8 forward-citation correction (AD-030/FF-022).** A structurally valid
+Decision may be recorded while its exact basis Evidence Artifact/Revision pair
+is wholly absent. Q5 still emits the inspected Decision and its exact
+`evidence:<artifact>/<revision>` reference, but emits no Evidence event. The UI
+opens that identity as a pending reference backed by the Decision event. Once
+C10 atomically materialises the exact pair, recomputation links the same
+identity to the Evidence source event. One-sided occupancy, unreadable content,
+or a contradictory family is corruption and still fails the complete timeline.
 
 ## 4. Event fields
 
@@ -87,7 +100,7 @@ returning a partial list.
 | `actor` | `Provenance.Actor`, or `ExecutionRecord.Actor` | Provenance actor absent — see §6 |
 | `references` | Typed links to the records this event names | Never — always at least the source record |
 | `rationale` | Why this event is placed where it is, and how ties were broken | Never |
-| `detail` | Kind-specific summary: an outcome, a sequence number, a decision statement, a correction target | Kind-dependent |
+| `detail` | Kind-specific summary: a Decision outcome; plan activity keys, methods, interpretations and expected evidence; an Execution activity key and outcome; a sequence number; a correction target; or the validated lifecycle policy summary | Kind-dependent |
 
 `rationale` on the timeline is not decoration. When two events share a timestamp,
 the rationale states which tie-break applied. When an event has no timestamp, the
@@ -122,49 +135,51 @@ The timeline never silently invents a position.
 |---|---|
 | Two events share `occurred_at` | Ordered by `kind_rank`, then `source_identity`. Both events' rationale states the tie-break applied. |
 | An event's source has no timestamp | It is **not** placed at epoch and **not** placed last silently. It goes into a separate `undated` group rendered above the dated timeline, each entry flagged "no recorded timestamp". |
-| An event references a record that cannot be resolved | Error `ErrUnresolvableTimelineReference`, naming both records. The timeline is not rendered with a broken link. |
+| A C8 Decision cites an Evidence pair whose Artifact and Revision are both absent | Emit the Decision with an honest pending exact-reference target and no Evidence event. This is the sole unresolved-reference exception. |
+| Any other reference cannot be resolved, or C8 Evidence occupancy is partial/contradictory | Error `ErrUnresolvableTimelineReference` / stored-state integrity as governed by the source family. The timeline is not rendered partially. |
 | A claim's correction target is missing | Same as above — this is the dangling-reference case, and it fails. |
 | Two events resolve to the same `event_id` | Error `ErrDuplicateTimelineEvent`. Under §2 this is unreachable; if it occurs, two records share an identity, which is a persistence bug. |
 | An execution outcome is `interrupted` or `indeterminate` | Rendered with that outcome verbatim, never normalized toward "completed" or "failed". |
 
 ## 7. Worked timeline
 
-The canonical scenario ([FF-005](005-validation-scenario.md)) produces:
+The canonical public scenario ([FF-011](011-canonical-scenario.md)) produces
+exactly these 28 dated events:
 
 | # | Label | Actor | Detail |
 |---|---|---|---|
-| 1 | Project created | local-user | Belcanto Pilot |
-| 2 | Feature card created | local-user | Homework after a lesson |
-| 3 | Capability specification created | local-user | `featureforge:product-capability` |
-| 4 | Capability revision 1 recorded | local-user | sequence 1 |
-| 5 | Capability revision 1 accepted | local-user | draft → accepted |
-| 6 | Lifecycle state → drafting | local-user | SA-1, entry TR-1/TR-1-REV-0 |
-| 7 | Evidence recorded | local-user | pilot-teacher interview notes |
-| 8 | Decision recorded | local-user | audio attachment by URL; 5-second latency |
-| 9 | Capability revision 2 recorded | local-user | sequence 2 |
-| 10 | Capability revision 2 accepted | local-user | draft → accepted |
-| 11 | Requirement R-1 recorded | local-user | exact trace CAP-1-REV-2#AC-1 |
-| 12 | Requirement R-2 recorded | local-user | exact trace CAP-1-REV-2#AC-2 |
-| 13 | Requirement R-3 recorded | local-user | exact trace CAP-1-REV-2#AC-3 |
-| 14 | Requirement R-4 recorded | local-user | exact trace CAP-1-REV-2#AC-4; no claim follows |
-| 15 | Lifecycle state → specified | local-user | SA-2, `specify` from SA-1 |
-| 16 | Validation plan revision recorded | local-user | activities A-1, A-2, A-3 |
-| 17 | Validation activity A-1 executed | local-user | completed |
-| 18 | Evidence recorded | local-user | reviewer note V-1 |
-| 19 | Lifecycle state → under-validation | local-user | SA-3, `begin-validation` from SA-2 after a plan activity completed |
-| 20 | Claim recorded — satisfied | local-user | C-1, criteria R-1 |
-| 21 | Validation activity A-2 executed | local-user | completed |
-| 22 | Evidence recorded | local-user | reviewer note V-2 |
-| 23 | Claim recorded — satisfied | local-user | C-2, criteria R-2 |
-| 24 | Validation activity A-3 executed | local-user | completed |
-| 25 | Evidence recorded | local-user | inspection note V-3 |
-| 26 | Claim recorded — satisfied | local-user | C-3, criteria R-3 |
-| 27 | Validation activity A-2 re-executed | local-user | completed |
-| 28 | Evidence recorded | local-user | reviewer note V-4 |
-| 29 | **Claim recorded — not satisfied — correcting C-2** | local-user | C-4, criteria R-2 |
+| 1 | Project created | `featureforge:local-user` | `PRJ-1` — Belcanto Pilot |
+| 2 | Feature card created | `featureforge:local-user` | `FC-1` — Homework after a lesson |
+| 3 | Capability specification created | `featureforge:local-user` | `CAP-1`, `featureforge:product-capability` |
+| 4 | Capability revision recorded | `featureforge:local-user` | `CAP-1/CAP-1-REV-1`, sequence 1 |
+| 5 | Capability revision accepted | `featureforge:local-user` | `ACC-1`, `CAP-1/CAP-1-REV-1`, `accepted` |
+| 6 | Lifecycle state → `featureforge:drafting` | `featureforge:local-user` | `SA-1`, entry `TR-1/TR-1-REV-0` |
+| 7 | Decision recorded | `featureforge:local-user` | `DEC-1`; exact forward citation `evidence:EV-1/EV-1-REV-1`, materialised at row 17 |
+| 8 | Capability revision recorded | `featureforge:local-user` | `CAP-1/CAP-1-REV-2`, sequence 2 |
+| 9 | Capability revision accepted | `featureforge:local-user` | `ACC-2`, `CAP-1/CAP-1-REV-2`, `accepted` |
+| 10 | Requirement recorded | `featureforge:local-user` | `REQ-1/REQ-1-REV-1`; exact trace `CAP-1/CAP-1-REV-2#AC-1` |
+| 11 | Requirement recorded | `featureforge:local-user` | `REQ-2/REQ-2-REV-1`; exact trace `CAP-1/CAP-1-REV-2#AC-2` |
+| 12 | Requirement recorded | `featureforge:local-user` | `REQ-3/REQ-3-REV-1`; exact trace `CAP-1/CAP-1-REV-2#AC-3` |
+| 13 | Requirement recorded | `featureforge:local-user` | `REQ-4/REQ-4-REV-1`; exact trace `CAP-1/CAP-1-REV-2#AC-4`; no claim follows |
+| 14 | Lifecycle state → `featureforge:specified` | `featureforge:local-user` | `SA-2`, `TR-1/TR-1-REV-1` (`specify` from `SA-1`) |
+| 15 | Validation plan revision recorded | `featureforge:local-user` | `VP-1/VP-1-REV-1`; activities `A-1`, `A-2`, `A-3` |
+| 16 | Validation activity executed | `featureforge:local-user` | `ER-1`, `A-1`, `completed` |
+| 17 | Evidence recorded | `featureforge:local-user` | `EV-1/EV-1-REV-1`, materialised by the same C10 act as `ER-1`; resolves `DEC-1`'s citation |
+| 18 | Lifecycle state → `featureforge:under-validation` | `featureforge:local-user` | `SA-3`, `TR-1/TR-1-REV-2` (`begin-validation` from `SA-2`) |
+| 19 | Claim recorded | `featureforge:local-user` | `CLM-1`, `peos:satisfied`, criterion `requirement-revision:REQ-1/REQ-1-REV-1` |
+| 20 | Validation activity executed | `featureforge:local-user` | `ER-2`, `A-2`, `completed` |
+| 21 | Evidence recorded | `featureforge:local-user` | `EV-2/EV-2-REV-1` |
+| 22 | Claim recorded | `featureforge:local-user` | `CLM-2`, `peos:satisfied`, criterion `requirement-revision:REQ-2/REQ-2-REV-1` |
+| 23 | Validation activity executed | `featureforge:local-user` | `ER-3`, `A-3`, `completed` |
+| 24 | Evidence recorded | `featureforge:local-user` | `EV-3/EV-3-REV-1` |
+| 25 | Claim recorded | `featureforge:local-user` | `CLM-3`, `peos:satisfied`, criterion `requirement-revision:REQ-3/REQ-3-REV-1` |
+| 26 | Validation activity executed | `featureforge:local-user` | `ER-4`, re-run of `A-2`, `completed` |
+| 27 | Evidence recorded | `featureforge:local-user` | `EV-4/EV-4-REV-1` |
+| 28 | **Claim recorded, correcting an earlier claim** | `featureforge:local-user` | `CLM-4`, `peos:not-satisfied`, criterion `requirement-revision:REQ-2/REQ-2-REV-1`, corrects `CLM-2` |
 
-Row 29 is the row that matters. Row 23 is still there, still says `satisfied`,
-and is still readable. That is the whole point of the exercise.
+Row 28 is the row that matters. Row 22 is still present, still says
+`peos:satisfied`, and is still readable. That is the whole point of the
+exercise.
 
 ## 8. Scope of the timeline
 
@@ -188,5 +203,11 @@ and is still readable. That is the whole point of the exercise.
 - a claim carrying a correction reference renders the link, and the corrected
   claim's own event is unchanged;
 - a dangling correction reference produces `ErrUnresolvableTimelineReference`;
+- a wholly absent C8 Evidence pair leaves the Decision and its pending link
+  readable; materialising that pair resolves the same link, while one-sided
+  occupancy fails closed;
+- every materialised canonical reference opens a dedicated, source-event, or
+  validated embedded detail representation; criterion identities remain
+  sub-record context and are never mislabelled as standalone records;
 - an `indeterminate` execution outcome renders as `indeterminate`;
 - deleting every derived model and recomputing produces byte-identical output.

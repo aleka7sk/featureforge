@@ -6,9 +6,10 @@ import "time"
 // §3.1). Built from Q1's JSON shape by projectsViewModel -- never from a
 // domain or application type, which this package cannot import.
 type projectRow struct {
-	ProjectID string
-	Name      string
-	CreatedAt time.Time
+	ProjectID    string
+	Name         string
+	CreatedAt    time.Time
+	FeatureCount int
 }
 
 // projectsPageData is templates/projects.html's shape.
@@ -29,10 +30,13 @@ type apiProjectDTO struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-func mapProjectsPageData(projects []apiProjectDTO) projectsPageData {
+func mapProjectsPageData(projects []apiProjectDTO, featureCounts map[string]int) projectsPageData {
 	data := projectsPageData{PageTitle: "Projects", Projects: make([]projectRow, 0, len(projects))}
 	for _, p := range projects {
-		data.Projects = append(data.Projects, projectRow{ProjectID: p.ProjectID, Name: p.Name, CreatedAt: p.CreatedAt})
+		data.Projects = append(data.Projects, projectRow{
+			ProjectID: p.ProjectID, Name: p.Name, CreatedAt: p.CreatedAt,
+			FeatureCount: featureCounts[p.ProjectID],
+		})
 	}
 	return data
 }

@@ -1,0 +1,44 @@
+{{define "timeline_reference"}}
+{{template "shared-head" .}}
+{{template "nav" .}}
+<main id="main-content">
+  <h1>Timeline reference</h1>
+  {{template "feature-nav" .FeatureCardID}}
+
+  <section class="panel" aria-labelledby="reference-heading">
+    <h2 id="reference-heading"><code>{{.Identity}}</code></h2>
+    <p>This exact identity is present in the authoritative feature timeline. The events below are the read-only context returned by Q5; no additional record fields are inferred.</p>
+    {{if .PendingEvidence}}
+    <p><strong>Pending evidence reference.</strong> The Decision stores this exact forward citation, but Q5 has no materialised Evidence source event for it yet.</p>
+    {{else if .HasSourceEvent}}
+    <p>A matching authoritative source representation is present in the feature timeline.</p>
+    {{else}}
+    <p>This governed reference is validated as part of its citing event and has no separate Q5 source event.</p>
+    {{end}}
+    <p><a href="/features/{{.FeatureCardID}}/timeline">Back to the full timeline</a></p>
+  </section>
+
+  {{if .Undated}}
+  <section class="panel" aria-labelledby="reference-undated-heading">
+    <h2 id="reference-undated-heading">Undated citing events</h2>
+    <ul class="timeline-list">
+      {{range .Undated}}
+      {{template "timeline-event-row" .}}
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+
+  {{if .Dated}}
+  <section class="panel" aria-labelledby="reference-dated-heading">
+    <h2 id="reference-dated-heading">Citing events</h2>
+    <ul class="timeline-list">
+      {{range .Dated}}
+      {{template "timeline-event-row" .}}
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+</main>
+{{template "footer" .}}
+{{end}}

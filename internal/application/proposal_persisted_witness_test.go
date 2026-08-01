@@ -197,7 +197,7 @@ func recordDecision(t *testing.T, ctx context.Context, uow application.UnitOfWor
 	if _, err := (application.RecordArchitectureDecisionCommand{
 		DecisionID: id, SubjectArtifactID: subjectArtifactID, SubjectRevisionID: subjectRevisionID,
 		Question: "What exact proposal constraint applies?", OutcomeStatement: "Retain the exact governed constraint.",
-		EvidenceArtifactID: scenario.DecisionEvidenceID, EvidenceRevisionID: scenario.DecisionEvidenceID + "-REV-1",
+		EvidenceArtifactID: scenario.EvidenceIDs["A-1"], EvidenceRevisionID: scenario.EvidenceIDs["A-1"] + "-REV-1",
 		Rationale: "The persisted evidence supports the governed constraint.",
 	}).Execute(ctx, uow, recorder, recorder, clock); err != nil {
 		t.Fatalf("RecordArchitectureDecisionCommand(%s): %v", id, err)
@@ -276,7 +276,7 @@ func TestAssembleProposalContextRejectsCorruptHiddenDecisionProjection(t *testin
 		DecisionID:        "DEC-HIDDEN-CORRUPT",
 		SubjectArtifactID: scenario.CapabilityArtifactID, SubjectRevisionID: scenario.CapabilityRevision2,
 		Question: "Can a corrupt projection be hidden?", OutcomeStatement: "It must not be hidden.",
-		EvidenceArtifactID: scenario.DecisionEvidenceID, EvidenceRevisionID: scenario.DecisionEvidenceID + "-REV-1",
+		EvidenceArtifactID: scenario.EvidenceIDs["A-1"], EvidenceRevisionID: scenario.EvidenceIDs["A-1"] + "-REV-1",
 		RecordedAt: clock.Now(),
 	})
 	if err != nil {

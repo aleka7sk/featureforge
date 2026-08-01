@@ -1,3 +1,24 @@
+{{define "timeline-event-row"}}
+<li class="timeline-item" id="{{.Anchor}}">
+  <span class="kind">{{.Label}}</span>
+  {{if .HasOccurredAt}}
+  <span class="when">{{.OccurredAt.Format "2006-01-02 15:04"}}</span>
+  {{else}}
+  <span class="when">No recorded timestamp</span>
+  {{end}}
+  <span class="hint">by {{.Actor}}</span>
+  <p>{{.Summary}}</p>
+  <p class="hint"><strong>Source:</strong> <a href="{{.SourceHref}}"><code>{{.SourceIdentity}}</code></a></p>
+  {{if .Corrected}}<p class="hint">Corrects {{.Corrected}}</p>{{end}}
+  {{if .ReferenceLinks}}
+  <p class="hint"><strong>References:</strong>
+    {{range $i, $r := .ReferenceLinks}}{{if $i}}, {{end}}<a href="{{$r.Href}}"><code>{{$r.Identity}}</code></a>{{end}}
+  </p>
+  {{end}}
+  {{template "rationale" .Rationale}}
+</li>
+{{end}}
+
 {{define "timeline"}}
 {{template "shared-head" .}}
 {{template "nav" .}}
@@ -19,41 +40,30 @@
     <button type="submit">Filter</button>
   </form>
 
+  {{if .Undated}}
+  <section class="panel" aria-labelledby="undated-heading">
+    <h2 id="undated-heading">Undated events</h2>
+    <p class="hint">These events are shown above dated history because their sources carry no recorded timestamp.</p>
+    <ul class="timeline-list">
+      {{range .Undated}}
+      {{template "timeline-event-row" .}}
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+
   <section class="panel" aria-labelledby="dated-heading">
     <h2 id="dated-heading">History</h2>
     {{if .Dated}}
     <ul class="timeline-list">
       {{range .Dated}}
-      <li class="timeline-item">
-        <span class="kind">{{.Label}}</span>
-        <span class="when">{{.OccurredAt.Format "2006-01-02 15:04"}}</span>
-        {{if .Actor}}<span class="hint">by {{.Actor}}</span>{{end}}
-        <p>{{.Summary}}</p>
-        {{if .Corrected}}<p class="hint">Corrects {{.Corrected}}</p>{{end}}
-        {{if .References}}<p class="hint">References: {{range $i, $r := .References}}{{if $i}}, {{end}}{{$r}}{{end}}</p>{{end}}
-        {{template "rationale" .Rationale}}
-      </li>
+      {{template "timeline-event-row" .}}
       {{end}}
     </ul>
     {{else}}
-    {{template "empty-state" "No events match this filter."}}
+    {{template "empty-state" "No dated events match this filter."}}
     {{end}}
   </section>
-
-  {{if .Undated}}
-  <section class="panel" aria-labelledby="undated-heading">
-    <h2 id="undated-heading">Undated events</h2>
-    <ul class="timeline-list">
-      {{range .Undated}}
-      <li class="timeline-item">
-        <span class="kind">{{.Label}}</span>
-        <p>{{.Summary}}</p>
-        {{template "rationale" .Rationale}}
-      </li>
-      {{end}}
-    </ul>
-  </section>
-  {{end}}
 </main>
 {{template "footer" .}}
 {{end}}

@@ -15,7 +15,8 @@ import (
 // failure (FF-021 §12). This is the one seam that keeps read and
 // write-error-recovery from duplicating the Q1-Q7 composition logic.
 
-// handleProjects renders screen 1 (FF-001 §3.1) from Q1.
+// handleProjects renders screen 1 (FF-001 §3.1) from Q1 plus Q2 for each
+// project's authoritative feature-card count.
 func handleProjects(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		data, problem := loadProjectsPageData(r.Context(), deps)
@@ -41,7 +42,24 @@ func loadProjectsPageData(ctx context.Context, deps Dependencies) (projectsPageD
 	if err := decodeInto(result, &body); err != nil {
 		return projectsPageData{}, &pageProblem{internal: true}
 	}
-	return mapProjectsPageData(body.Projects), nil
+	featureCounts := make(map[string]int, len(body.Projects))
+	for _, project := range body.Projects {
+		featuresResult, err := callAPI(ctx, deps.API, http.MethodGet, "/api/v1/projects/"+url.PathEscape(project.ProjectID)+"/features", nil)
+		if err != nil {
+			return projectsPageData{}, &pageProblem{internal: true}
+		}
+		if !featuresResult.OK {
+			return projectsPageData{}, &pageProblem{api: featuresResult}
+		}
+		var featuresBody struct {
+			Features []apiFeatureCardDTO `json:"features"`
+		}
+		if err := decodeInto(featuresResult, &featuresBody); err != nil {
+			return projectsPageData{}, &pageProblem{internal: true}
+		}
+		featureCounts[project.ProjectID] = len(featuresBody.Features)
+	}
+	return mapProjectsPageData(body.Projects, featureCounts), nil
 }
 
 // handleProjectDetail renders screen 1's "open project" view (FF-001
@@ -267,7 +285,7 @@ func loadRequirementsPageData(ctx context.Context, deps Dependencies, featureCar
 	if problem != nil {
 		return requirementsPageData{}, problem
 	}
-	data := mapRequirementsPageData(featureCardID, capabilityIDFromState(state), state.EffectiveRequirements, state.Readiness.PerRequirement)
+	data := mapRequirementsPageData(featureCardID, capabilityIDFromState(state), state.EffectiveRequirements, state.RequirementHistory, state.Readiness.PerRequirement)
 	if state.CurrentRevision.Found && state.CurrentRevision.Revision != nil {
 		data.SourceCapabilityRevisionID = state.CurrentRevision.Revision.RevisionID
 	}
@@ -335,27 +353,56 @@ func handleTimeline(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		featureCardID := r.PathValue("featureCardID")
 		selectedKind := r.URL.Query().Get("kind")
-
-		result, err := callAPI(r.Context(), deps.API, http.MethodGet, "/api/v1/features/"+url.PathEscape(featureCardID)+"/timeline", nil)
-		if err != nil {
-			writeInternalErrorPage(w)
-			return
-		}
-		if !result.OK {
-			writeAPIErrorPage(w, result)
-			return
-		}
-		var body struct {
-			Dated   []apiTimelineEventDTO `json:"dated"`
-			Undated []apiTimelineEventDTO `json:"undated"`
-		}
-		if err := decodeInto(result, &body); err != nil {
-			writeInternalErrorPage(w)
+		body, problem := loadTimeline(r.Context(), deps, featureCardID)
+		if problem != nil {
+			problem.write(w)
 			return
 		}
 
 		render(w, http.StatusOK, "timeline", mapTimelinePageData(featureCardID, selectedKind, body.Dated, body.Undated))
 	}
+}
+
+// handleTimelineReference provides FF-001 §3.7's "open any referenced
+// record" interaction without claiming that every engineering family has a
+// dedicated broad read query. The exact identity must occur in Q5 for this
+// feature, and every field rendered comes from the same authoritative result.
+func handleTimelineReference(deps Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		featureCardID := r.PathValue("featureCardID")
+		identity := r.URL.Query().Get("identity")
+		body, problem := loadTimeline(r.Context(), deps, featureCardID)
+		if problem != nil {
+			problem.write(w)
+			return
+		}
+		data, found := mapTimelineReferencePageData(featureCardID, identity, body.Dated, body.Undated)
+		if !found {
+			writeErrorPage(w, http.StatusNotFound, "Timeline reference not found", "The feature timeline does not contain this reference.")
+			return
+		}
+		render(w, http.StatusOK, "timeline_reference", data)
+	}
+}
+
+type apiTimelineResultDTO struct {
+	Dated   []apiTimelineEventDTO `json:"dated"`
+	Undated []apiTimelineEventDTO `json:"undated"`
+}
+
+func loadTimeline(ctx context.Context, deps Dependencies, featureCardID string) (apiTimelineResultDTO, *pageProblem) {
+	result, err := callAPI(ctx, deps.API, http.MethodGet, "/api/v1/features/"+url.PathEscape(featureCardID)+"/timeline", nil)
+	if err != nil {
+		return apiTimelineResultDTO{}, &pageProblem{internal: true}
+	}
+	if !result.OK {
+		return apiTimelineResultDTO{}, &pageProblem{api: result}
+	}
+	var body apiTimelineResultDTO
+	if err := decodeInto(result, &body); err != nil {
+		return apiTimelineResultDTO{}, &pageProblem{internal: true}
+	}
+	return body, nil
 }
 
 // loadEngineeringState is Q4 alone, shared by the Requirements, Decisions,
@@ -391,19 +438,9 @@ func capabilityIDFromState(state apiEngineeringStateDTO) string {
 // concatenated, for a screen (Validation) that filters by kind rather than
 // by date-presence.
 func loadAllTimelineEvents(ctx context.Context, deps Dependencies, featureCardID string) ([]apiTimelineEventDTO, *pageProblem) {
-	result, err := callAPI(ctx, deps.API, http.MethodGet, "/api/v1/features/"+url.PathEscape(featureCardID)+"/timeline", nil)
-	if err != nil {
-		return nil, &pageProblem{internal: true}
-	}
-	if !result.OK {
-		return nil, &pageProblem{api: result}
-	}
-	var body struct {
-		Dated   []apiTimelineEventDTO `json:"dated"`
-		Undated []apiTimelineEventDTO `json:"undated"`
-	}
-	if err := decodeInto(result, &body); err != nil {
-		return nil, &pageProblem{internal: true}
+	body, problem := loadTimeline(ctx, deps, featureCardID)
+	if problem != nil {
+		return nil, problem
 	}
 	events := make([]apiTimelineEventDTO, 0, len(body.Dated)+len(body.Undated))
 	events = append(events, body.Dated...)

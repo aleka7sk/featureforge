@@ -13,6 +13,7 @@ type validationPageData struct {
 	CapabilityID   string
 	PlanFound      bool
 	PlanArtifactID string
+	PlanRevisionID string
 	Activities     []activityRow
 	Executions     []timelineRow
 	Readiness      []readinessRow
@@ -30,7 +31,7 @@ func mapValidationPageData(featureCardID, capabilityID string, plan apiValidatio
 	}
 	return validationPageData{
 		PageTitle: "Validation", FeatureCardID: featureCardID, CapabilityID: capabilityID,
-		PlanFound: plan.Found, PlanArtifactID: plan.ArtifactID, Activities: mapActivityRows(plan.Activities),
+		PlanFound: plan.Found, PlanArtifactID: plan.ArtifactID, PlanRevisionID: plan.RevisionID, Activities: mapActivityRows(plan.Activities),
 		Executions: mapTimelineRows(executions), Readiness: mapReadinessRows(per),
 	}
 }

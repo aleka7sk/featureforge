@@ -113,18 +113,10 @@ func run(ctx context.Context, uow application.UnitOfWork, recorder application.E
 	}
 	tick()
 
-	// 6. Decision evidence (pilot-teacher interview notes), then the
-	// decision itself, resolving Revision 1's open questions. Recording
-	// evidence has no execution to pair it with here -- unlike A-1..A-3's
-	// evidence, which RecordValidationRunCommand bundles with an execution
-	// record -- so the scenario driver records it directly through the
-	// recorder, exactly as RecordValidationRunCommand does internally,
-	// without introducing an eleventh command beyond FF-010 §3's ten.
-	if err := recordEvidenceOnly(ctx, uow, recorder, inspector, clock, DecisionEvidenceID, "https://evidence.example/"+DecisionEvidenceID); err != nil {
-		return Result{}, fmt.Errorf("record decision evidence: %w", err)
-	}
-	tick()
-
+	// 6. The decision resolves Revision 1's open questions. Its EV-1 basis is
+	// the governed C8 forward citation: the exact Evidence pair is materialised
+	// later by A-1's public C10 validation-run act.
+	decisionEvidenceID := EvidenceIDs["A-1"]
 	if _, err := (application.RecordArchitectureDecisionCommand{
 		DecisionID: DecisionID, SubjectArtifactID: CapabilityArtifactID, SubjectRevisionID: CapabilityRevision1,
 		Question:         "Should homework support an optional audio attachment, and what publication latency is acceptable?",
@@ -134,7 +126,7 @@ func run(ctx context.Context, uow application.UnitOfWork, recorder application.E
 			"Store audio externally and retain a content-addressed representation reference.",
 			"Defer audio entirely.",
 		},
-		EvidenceArtifactID: DecisionEvidenceID, EvidenceRevisionID: evidenceRevisionID(DecisionEvidenceID),
+		EvidenceArtifactID: decisionEvidenceID, EvidenceRevisionID: evidenceRevisionID(decisionEvidenceID),
 		Assumptions:   []string{"Audio files are hosted by an existing media service."},
 		Constraints:   []string{"No binary storage in the first release."},
 		Uncertainties: []string{"Interview sample was 4 teachers."},
@@ -253,7 +245,7 @@ func run(ctx context.Context, uow application.UnitOfWork, recorder application.E
 	}
 
 	claimIDs := []string{ClaimForR1, ClaimIncorrect, ClaimForR3, ClaimCorrecting}
-	evidenceIDs := []string{DecisionEvidenceID, "EV-1", "EV-2", "EV-3", "EV-4"}
+	evidenceIDs := []string{EvidenceIDs["A-1"], EvidenceIDs["A-2"], EvidenceIDs["A-3"], EvidenceIDs["A-2-rerun"]}
 	executionIDs := []string{"ER-1", "ER-2", "ER-3", "ER-4"}
 
 	return Result{
@@ -261,104 +253,6 @@ func run(ctx context.Context, uow application.UnitOfWork, recorder application.E
 		RequirementArtifactIDs: RequirementArtifactIDs, DecisionID: DecisionID, PlanArtifactID: PlanArtifactID,
 		ExecutionIDs: executionIDs, EvidenceArtifactIDs: evidenceIDs, ClaimIDs: claimIDs,
 	}, nil
-}
-
-func recordEvidenceOnly(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, inspector application.EngineeringReplayInspector, clock *application.FixedClock, evidenceID, locator string) error {
-	now := clock.Now()
-	return uow.Do(ctx, func(r application.Repositories) error {
-		artifactKey := engineering.ArtifactKey{ArtifactID: evidenceID}
-		revisionKey := engineering.RevisionKey{ArtifactID: evidenceID, RevisionID: evidenceRevisionID(evidenceID)}
-		storedArtifact, artifactFound, err := r.Artifacts.Get(ctx, artifactKey)
-		if err != nil {
-			return err
-		}
-		storedRevision, revisionFound, err := r.Revisions.Get(ctx, revisionKey)
-		if err != nil {
-			return err
-		}
-		if artifactFound != revisionFound {
-			return fmt.Errorf("%w: direct decision evidence is only partially persisted", application.ErrStoredStateIntegrity)
-		}
-		if artifactFound {
-			if inspector == nil {
-				return fmt.Errorf("%w: replay inspector is unavailable", application.ErrStoredStateIntegrity)
-			}
-			if err := inspector.ValidateEvidenceArtifact(storedArtifact); err != nil {
-				return fmt.Errorf("%w: invalid direct decision-evidence artifact: %v", application.ErrStoredStateIntegrity, err)
-			}
-			if err := inspector.ValidateRevision(storedRevision); err != nil {
-				return fmt.Errorf("%w: invalid direct decision-evidence revision: %v", application.ErrStoredStateIntegrity, err)
-			}
-			if storedRevision.RevisionFamily != engineering.RevisionFamilyEvidence || storedArtifact.ArtifactType != storedRevision.ArtifactType {
-				return fmt.Errorf("%w: direct decision-evidence members disagree on family", application.ErrStoredStateIntegrity)
-			}
-			if !storedArtifact.RecordedAt.Equal(storedRevision.RecordedAt) {
-				return fmt.Errorf("%w: direct decision-evidence members disagree on recorded time", application.ErrStoredStateIntegrity)
-			}
-			revisions, err := r.Revisions.ListByArtifact(ctx, evidenceID)
-			if err != nil {
-				return err
-			}
-			if len(revisions) != 1 || revisions[0].Key != revisionKey {
-				return fmt.Errorf("%w: direct decision evidence must own exactly one revision", application.ErrStoredStateIntegrity)
-			}
-			if _, found, err := r.StructuredContent.Get(ctx, revisionKey); err != nil {
-				return err
-			} else if found {
-				return fmt.Errorf("%w: direct decision evidence carries capability content", application.ErrStoredStateIntegrity)
-			}
-			orders, err := r.RevisionOrder.ListByArtifact(ctx, evidenceID)
-			if err != nil {
-				return err
-			}
-			acceptance, err := r.RevisionAcceptance.ListByArtifact(ctx, evidenceID)
-			if err != nil {
-				return err
-			}
-			if len(orders) != 0 || len(acceptance) != 0 {
-				return fmt.Errorf("%w: direct decision evidence carries managed revision metadata", application.ErrStoredStateIntegrity)
-			}
-			executions, err := r.Records.ListByKind(ctx, engineering.RecordKindExecution)
-			if err != nil {
-				return err
-			}
-			for _, execution := range executions {
-				if err := inspector.ValidateRecord(execution); err != nil {
-					return fmt.Errorf("%w: invalid execution while checking direct decision evidence: %v", application.ErrStoredStateIntegrity, err)
-				}
-				for _, rawEvidenceKey := range execution.EvidenceKeys {
-					artifactID, revisionID, err := engineering.ParseEvidenceKey(rawEvidenceKey)
-					if err != nil {
-						return fmt.Errorf("%w: malformed execution evidence key: %v", application.ErrStoredStateIntegrity, err)
-					}
-					if artifactID == evidenceID && revisionID == revisionKey.RevisionID {
-						return fmt.Errorf("%w: direct decision evidence is also owned by a validation execution", application.ErrStoredStateIntegrity)
-					}
-				}
-			}
-			expectedArtifact, expectedRevision, err := recorder.RecordEvidence(engineering.EvidenceInput{
-				ArtifactID: evidenceID, RevisionID: revisionKey.RevisionID, Locator: locator, RecordedAt: storedRevision.RecordedAt,
-			})
-			if err != nil {
-				return fmt.Errorf("%w: rebuild direct decision evidence: %v", application.ErrInvalidCommand, err)
-			}
-			if !storedArtifact.Equal(expectedArtifact) || !storedRevision.Equal(expectedRevision) {
-				return fmt.Errorf("%w: direct decision-evidence identity has different immutable semantics", application.ErrImmutableValueConflict)
-			}
-			return nil
-		}
-
-		artEnv, revEnv, err := recorder.RecordEvidence(engineering.EvidenceInput{
-			ArtifactID: evidenceID, RevisionID: revisionKey.RevisionID, Locator: locator, RecordedAt: now,
-		})
-		if err != nil {
-			return err
-		}
-		if err := r.Artifacts.Put(ctx, artEnv); err != nil {
-			return err
-		}
-		return r.Revisions.Put(ctx, revEnv)
-	})
 }
 
 func establishRequirement(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, inspector application.EngineeringReplayInspector, clock *application.FixedClock, artifactID string) error {

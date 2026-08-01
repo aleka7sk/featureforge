@@ -314,6 +314,7 @@ func TestNoUpdateOrDeleteMethodExists(t *testing.T) {
 		(*application.RevisionOrderRepository)(nil),
 		(*application.RevisionAcceptanceRepository)(nil),
 		(*application.RequirementCriterionTraceRepository)(nil),
+		(*application.LifecycleDefinitionRepository)(nil),
 	}
 	forbidden := []string{"Update", "Delete", "Remove", "Set"}
 	for _, rt := range repoTypes {

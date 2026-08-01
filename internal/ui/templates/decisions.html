@@ -12,6 +12,7 @@
   <section class="panel" aria-labelledby="dec-{{.DecisionID}}">
     <h2 id="dec-{{.DecisionID}}">{{.DecisionID}} {{template "status-badge" .Outcome}}</h2>
     {{if .HasOccurredAt}}<p class="when">{{.OccurredAt.Format "2006-01-02 15:04"}}</p>{{end}}
+    <p><strong>Subject:</strong> {{.SubjectKey}}</p>
     {{if .Question}}<p><strong>Question:</strong> {{.Question}}</p>{{end}}
     <p><strong>Outcome:</strong> {{.OutcomeStatement}}</p>
     {{if .Rationale}}<p><strong>Rationale:</strong> {{.Rationale}}</p>{{end}}

@@ -10,13 +10,16 @@
   <section class="panel" aria-labelledby="plan-heading">
     <h2 id="plan-heading">Validation plan</h2>
     {{if .PlanFound}}
-      <p>Plan <strong>{{.PlanArtifactID}}</strong></p>
+      <p>Plan <strong>{{.PlanArtifactID}}/{{.PlanRevisionID}}</strong></p>
       {{if .Activities}}
       <table>
-        <thead><tr><th scope="col">Activity</th><th scope="col">Method</th><th scope="col">Satisfied when</th></tr></thead>
+        <thead><tr><th scope="col">Activity</th><th scope="col">Method</th><th scope="col">Satisfied when</th><th scope="col">Expected evidence</th></tr></thead>
         <tbody>
           {{range .Activities}}
-          <tr><td>{{.Key}}</td><td>{{.Method}}</td><td>{{.OutcomeInterpretation}}</td></tr>
+          <tr>
+            <td>{{.Key}}</td><td>{{.Method}}</td><td>{{.OutcomeInterpretation}}</td>
+            <td>{{range $i, $item := .ExpectedEvidence}}{{if $i}}, {{end}}{{$item}}{{end}}</td>
+          </tr>
           {{end}}
         </tbody>
       </table>
@@ -102,10 +105,11 @@
     <h2 id="claims-heading">Claims and readiness</h2>
     {{if .Readiness}}
     {{range .Readiness}}
-    <div class="panel">
+    <div class="panel" {{if .HasClaim}}id="claim:{{.ClaimID}}"{{end}}>
       <h3>{{.RequirementArtifactID}} {{if .HasClaim}}{{template "status-badge" .Outcome}}{{else}}{{template "status-badge" "no-claim"}}{{end}}</h3>
       {{if .HasClaim}}
         <p><strong>Current claim:</strong> {{.ClaimID}}{{if .Corrects}} (corrects {{.Corrects}}){{end}}</p>
+        {{if .CriterionKeys}}<p class="hint">Criteria: {{range $i, $key := .CriterionKeys}}{{if $i}}, {{end}}{{$key}}{{end}}</p>{{end}}
         {{if .Reasoning}}<p>{{.Reasoning}}</p>{{end}}
         {{template "rationale" .VerdictReason}}
       {{else}}
@@ -115,9 +119,9 @@
       <h4>Superseded and invalidated claims</h4>
       <ul>
         {{range .Rejected}}
-        <li class="superseded">
+        <li class="superseded" id="{{.RecordKey}}">
           {{.RecordKey}} {{template "status-badge" .Outcome}} — {{.Reason}}
-          {{if .CorrectedBy}}(corrected by {{.CorrectedBy}}){{end}}
+          {{if .CorrectedBy}}(<a href="#claim:{{.CorrectedBy}}">corrected by {{.CorrectedBy}}</a>){{end}}
           {{if .Reasoning}}<p>{{.Reasoning}}</p>{{end}}
         </li>
         {{end}}

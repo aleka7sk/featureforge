@@ -70,13 +70,28 @@ reverted violation before being trusted.
 
 | Screen | Route(s) | FF-001 | Queries | Command forms on this screen |
 |---|---|---|---|---|
-| Projects | `GET /`, `GET /projects/{projectID}` | §3.1 | Q1 (filtered client-side for the detail view), Q2 | C1 (on `/`), C2 (on the detail view) |
+| Projects | `GET /`, `GET /projects/{projectID}` | §3.1 | Q1 plus Q2 per project for the authoritative feature count; Q1+Q2 for detail | C1 (on `/`), C2 (on the detail view) |
 | Feature overview | `GET /features/{featureCardID}` | §3.2 | Q3, Q7 (current revision title), Q5 (last 5) | C3 (only while no capability exists), C6 |
 | Revisions | `GET /features/{featureCardID}/revisions` | §3.3 | Q3, Q6 | C4, C5 (one form per revision) |
-| Requirements | `GET /features/{featureCardID}/requirements` | §3.4 | Q4 | C7 |
-| Decisions | `GET /features/{featureCardID}/decisions` | §3.5 | Q4 | C8 |
+| Requirements | `GET /features/{featureCardID}/requirements` | §3.4 | Q4 current set plus validated immutable `requirement_history` | C7 |
+| Decisions | `GET /features/{featureCardID}/decisions` | §3.5 | Q4, including authoritative subject and full basis | C8 |
 | Validation | `GET /features/{featureCardID}/validation` | §3.6 | Q4, Q5 (filtered to `execution.recorded`) | C9 (only while no plan exists), C10, C11, C12 |
-| Timeline | `GET /features/{featureCardID}/timeline` | §3.7 | Q5 | — (kind filter is a `GET` query parameter, render-time) |
+| Timeline | `GET /features/{featureCardID}/timeline`, `GET /features/{featureCardID}/timeline/reference?identity=...` | §3.7 | Q5 | — (kind filter is render-time; the reference detail re-reads Q5 and accepts only an exact identity present in that Feature's result) |
+
+**M.7 literal-screen closure.** The overview names the exact Claim ID beside
+each readiness verdict. Requirements render every prior revision with statement,
+sequence, acceptance state, and exact source trace. Decisions show the
+payload-verified subject. Validation shows both plan artifact and revision,
+claim criterion identities, and real fragment links from superseded claims to
+their correctors. Timeline renders undated events above dated history; every
+event shows actor, source identity, references, detail, and rationale. Every
+reference is a link. Project/Feature roots use their dedicated pages;
+materialised record/revision sources use their exact timeline event; the
+validated lifecycle Definition Version uses the lifecycle event's decoded
+policy detail; and the sole wholly absent C8 Evidence pair opens an explicit
+pending-reference detail. The generic route renders only the exact identity and
+citing Q5 events, returns 404 for an identity absent from Q5, and preserves Q5's
+integrity failure instead of fabricating a record page.
 
 Command POST routes:
 
@@ -138,9 +153,10 @@ uniformly:
   revision ID|expected evidence,comma,separated`
   (`parsePlanActivities`).
 
-A malformed line is dropped, not rejected — this is syntax parsing, not
-domain validation; the command itself validates every field it receives, and
-a dropped line simply omits that entry from what gets submitted.
+A malformed criterion or activity line is rejected as form syntax with
+`400 Bad Request` before the API call. Silently dropping a line would mutate
+the person's submitted engineering content and could establish a different
+capability or plan. Field semantics remain command-owned.
 
 ## 8. Error UX, as built
 
@@ -175,14 +191,14 @@ pass.
 | File | What it proves |
 |---|---|
 | `apiclient_test.go` | AD-028 delegation: `callAPI` sends exactly the route/method/JSON shape a real client would, and the fake handler alone controls the outcome — including a swapped conflict response, proving a change in API semantics reaches the UI with no UI-side code change |
-| `render_test.go` | Every template parses at init; hostile content is escaped; each screen's non-empty and empty rendering paths, including the superseded-claim and both-revisions-independently properties, against hand-built view-model fixtures |
+| `render_test.go` | Every template parses at init; hostile content is escaped; each screen's non-empty and empty rendering paths, including exact Q5-backed Timeline reference detail, against hand-built view-model fixtures |
 | `server_test.go` | The whole pipeline against a real, empty in-memory API — empty state, static asset, unknown-route 404 — and against a real API with one project created through it |
-| `pages_test.go` | All seven `GET` screens against a real API seeded with two capability revisions, a decision with a full basis, an executed validation run, and a superseded/correcting claim pair — including the project-detail 404 case |
+| `pages_test.go` / `timeline_reference_test.go` | All seven screens plus reference detail against a real API; lifecycle policy/version navigation; unknown-reference 404; and preservation of an authoritative Q5 integrity failure |
 | `forms_test.go` | All twelve commands driven through the UI's form-encoded `POST` routes with hardcoded, known action paths; a correctable-failure input-preservation proof; a proof that the API's own field-order-independent validation message is what the UI surfaces |
-| `browser_scenario_test.go` / `browser_scenario_postgres_test.go` | The same twelve-command lifecycle, this time with every form action and every inter-screen link **scraped from the actually-rendered HTML**, not hardcoded — the highest-value test in this phase, run on memory and (via `FEATUREFORGE_POSTGRES_TEST_DSN`) PostgreSQL from one shared assertion body |
+| `browser_scenario_test.go` / `browser_scenario_postgres_test.go` | The same twelve-command lifecycle, with every action/link scraped from current HTML. After C8 it opens the pending Evidence reference and navigates normally to C9/C10 without cached pre-C8 actions; after C10 the same URL resolves to a materialised source. The final Timeline inventory opens every internal link. |
 
-29 tests in `internal/ui` (28 always-run plus the PostgreSQL variant, which
-skips cleanly without a DSN).
+The suite includes always-run memory coverage and the PostgreSQL browser
+variant, which skips cleanly without a DSN.
 
 ## 11. Composition root
 
@@ -236,16 +252,9 @@ returns nothing; no architecture decision was reopened.
 
 ## 15. Deviations from the plan, stated explicitly
 
-- The Projects screen (`GET /`) does not show a per-project feature-card
-  count. The accepted plan's screen table listed "Q2×N" for that reason,
-  but the screen's own template (built in the templates/view-models step)
-  never carried a count field, and no acceptance criterion or test
-  requires one — FF-001 §3.1's essential data (project identity, the
-  ability to open a project) is satisfied without it, and adding N extra
-  `GET` calls to the Projects list for a cosmetic count was not judged
-  worth the added round-trips. Not a contradiction requiring a stop: a
-  normal implementation-detail simplification within the accepted screen
-  set.
+- The original M.5 implementation omitted the Projects screen's per-project
+  feature-card count. M.7 corrected the deviation because FF-001 §3.1 names
+  the count literally; `GET /` now composes Q1 with Q2 per project.
 - `apiclient.go`'s envelope decoding initially dropped the `"rationale"`
   sibling of `"data"` (`internal/transport/http/errors.go`'s `writeJSON`
   envelope), which three screens' current-revision and lifecycle rationale

@@ -147,6 +147,7 @@ func TestNoUpdateOrDeleteOnEngineeringTables(t *testing.T) {
 	engineeringTables := []string{
 		"artifact_envelopes", "revision_envelopes", "structured_content",
 		"record_envelopes", "revision_order", "revision_acceptance", "requirement_criterion_traces",
+		"lifecycle_definitions", "lifecycle_definition_versions",
 		"projects", "feature_cards",
 	}
 	dir := filepath.Join(ModuleRoot(), "internal", "infrastructure", "postgres")

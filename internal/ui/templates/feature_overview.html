@@ -79,12 +79,13 @@
     <table>
       <caption class="visually-hidden">Per-requirement readiness</caption>
       <thead>
-        <tr><th scope="col">Requirement</th><th scope="col">Outcome</th><th scope="col">Why</th></tr>
+        <tr><th scope="col">Requirement</th><th scope="col">Claim</th><th scope="col">Outcome</th><th scope="col">Why</th></tr>
       </thead>
       <tbody>
         {{range .Readiness}}
         <tr>
           <td>{{.RequirementArtifactID}}</td>
+          <td>{{if .HasClaim}}{{.ClaimID}}{{else}}—{{end}}</td>
           <td>{{if .HasClaim}}{{template "status-badge" .Outcome}}{{else}}{{template "status-badge" "no-claim"}}{{end}}</td>
           <td>{{.VerdictReason}}</td>
         </tr>

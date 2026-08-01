@@ -7,10 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/aleka7sk/featureforge/internal/application"
-	"github.com/aleka7sk/featureforge/internal/engineering"
 	"github.com/aleka7sk/featureforge/internal/engineering/peos"
 	"github.com/aleka7sk/featureforge/internal/infrastructure/memory"
 	transporthttp "github.com/aleka7sk/featureforge/internal/transport/http"
@@ -74,29 +72,12 @@ func seedPageFixture(t *testing.T) pageFixture {
 		"source_capability_revision_id": "CAP-1-REV-1", "source_acceptance_criterion_key": "AC-2",
 		"statement": "Published homework SHALL NOT be visible to other users.", "subject_artifact_id": "CAP-1",
 	})
-	decisionEvidenceArtifact, decisionEvidenceRevision, err := recorder.RecordEvidence(engineering.EvidenceInput{
-		ArtifactID: "EV-DEC-1",
-		RevisionID: "EV-DEC-1-REV-1",
-		Locator:    "https://evidence.example/EV-DEC-1",
-		RecordedAt: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
-	})
-	if err != nil {
-		t.Fatalf("constructing decision evidence: %v", err)
-	}
-	if err := uow.Do(context.Background(), func(repos application.Repositories) error {
-		if err := repos.Artifacts.Put(context.Background(), decisionEvidenceArtifact); err != nil {
-			return err
-		}
-		return repos.Revisions.Put(context.Background(), decisionEvidenceRevision)
-	}); err != nil {
-		t.Fatalf("seeding decision evidence: %v", err)
-	}
 	post(t, api, "/api/v1/decisions", map[string]any{
 		"decision_id": "DEC-1", "subject_artifact_id": "CAP-1", "subject_revision_id": "CAP-1-REV-1",
 		"question":             "Should homework support an audio attachment?",
 		"outcome_statement":    "Homework supports at most one optional audio attachment.",
 		"alternatives":         []string{"Store audio inline.", "Store audio externally."},
-		"evidence_artifact_id": "EV-DEC-1", "evidence_revision_id": "EV-DEC-1-REV-1",
+		"evidence_artifact_id": "EV-1", "evidence_revision_id": "EV-1-REV-1",
 		"assumptions":   []string{"Audio files are hosted externally."},
 		"constraints":   []string{"No binary storage in the first release."},
 		"uncertainties": []string{"Interview sample was small."},
@@ -214,6 +195,17 @@ func getPage(t *testing.T, handler http.Handler, path string) (*httptest.Respons
 	return rr, rr.Body.String()
 }
 
+func TestProjectsPageShowsFeatureCount(t *testing.T) {
+	fx := seedPageFixture(t)
+	rr, body := getPage(t, fx.ui, "/")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, body)
+	}
+	if !strings.Contains(body, "<th scope=\"col\">Features</th>") || !strings.Contains(body, "<td>1</td>") {
+		t.Errorf("expected the authoritative feature count for PRJ-1, got %s", body)
+	}
+}
+
 // TestProjectDetailPageListsFeatures proves screen 1's "open project" view
 // (Q1 filtered by ID, plus Q2) renders the project's own feature cards.
 func TestProjectDetailPageListsFeatures(t *testing.T) {
@@ -301,6 +293,28 @@ func TestRequirementsPageShowsStatementsAndClaims(t *testing.T) {
 	}
 }
 
+func TestRequirementsPageShowsEveryPriorRevision(t *testing.T) {
+	fx := seedPageFixture(t)
+	post(t, fx.api, "/api/v1/requirements", map[string]any{
+		"artifact_id": "REQ-1", "revision_id": "REQ-1-REV-2", "acceptance_record_id": "ACC-REQ-1-REV-2",
+		"source_capability_revision_id": "CAP-1-REV-2", "source_acceptance_criterion_key": "AC-1",
+		"statement": "Published homework SHALL remain visible after revision.", "subject_artifact_id": "CAP-1",
+	})
+	rr, body := getPage(t, fx.ui, "/features/FC-1/requirements")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, body)
+	}
+	for _, want := range []string{
+		"REQ-1/REQ-1-REV-1", "Published homework SHALL be visible to the student.",
+		"REQ-1/REQ-1-REV-2", "Published homework SHALL remain visible after revision.",
+		"Historical immutable revision", "Sequence 1", "Sequence 2",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected %q in Requirement history, got %s", want, body)
+		}
+	}
+}
+
 // TestDecisionsPageShowsFullBasis proves screen 5 renders a decision's
 // complete basis -- "displayed, not collapsed" (FF-001 §3.5).
 func TestDecisionsPageShowsFullBasis(t *testing.T) {
@@ -309,7 +323,7 @@ func TestDecisionsPageShowsFullBasis(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body = %s", rr.Code, body)
 	}
-	for _, want := range []string{"DEC-1", "audio attachment", "EV-DEC-1", "hosted externally", "No binary storage", "Interview sample was small"} {
+	for _, want := range []string{"DEC-1", "artifact-revision:CAP-1/CAP-1-REV-1", "audio attachment", "EV-1", "hosted externally", "No binary storage", "Interview sample was small"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected %q in the rendered page, got %s", want, body)
 		}
@@ -325,14 +339,20 @@ func TestValidationPageShowsSupersededClaim(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body = %s", rr.Code, body)
 	}
-	if !strings.Contains(body, "VP-1") {
-		t.Error("expected the validation plan artifact id")
+	if !strings.Contains(body, "VP-1/VP-1-REV-1") {
+		t.Error("expected the validation plan artifact and revision ids")
+	}
+	if !strings.Contains(body, "Reviewer note") || !strings.Contains(body, "Access review note") {
+		t.Error("expected each plan activity's evidence expectation")
 	}
 	if !strings.Contains(body, "claim:CLM-2") {
 		t.Errorf("expected the superseded claim CLM-2 to be shown, got %s", body)
 	}
-	if !strings.Contains(body, "corrected by CLM-3") {
-		t.Error("expected a link back to the correcting claim")
+	if !strings.Contains(body, `href="#claim:CLM-3"`) || !strings.Contains(body, "corrected by CLM-3") {
+		t.Error("expected a real hyperlink to the correcting claim")
+	}
+	if !strings.Contains(body, "requirement-revision:REQ-2/REQ-2-REV-1") {
+		t.Error("expected the claim criterion identity")
 	}
 }
 
@@ -347,6 +367,15 @@ func TestTimelinePageFiltersByKind(t *testing.T) {
 	if !strings.Contains(body, "capability.accepted") && !strings.Contains(body, "Capability") {
 		t.Errorf("expected unfiltered history to include capability events, got %s", body)
 	}
+	for _, want := range []string{
+		"by featureforge:local-user",
+		"<strong>Source:</strong>",
+		`href="/features/FC-1/timeline#timeline-source-`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected complete, navigable timeline field %q, got %s", want, body)
+		}
+	}
 
 	rr, filtered := getPage(t, fx.ui, "/features/FC-1/timeline?kind=decision.recorded")
 	if rr.Code != http.StatusOK {
@@ -357,5 +386,35 @@ func TestTimelinePageFiltersByKind(t *testing.T) {
 	}
 	if strings.Contains(filtered, "REQ-1-REV-1") {
 		t.Errorf("expected requirement events to be filtered out, got %s", filtered)
+	}
+}
+
+func TestTimelineReferencePageNavigatesLifecyclePolicyAndRejectsUnknownIdentity(t *testing.T) {
+	fx := seedPageFixture(t)
+	timelineResponse, timeline := getPage(t, fx.ui, "/features/FC-1/timeline")
+	if timelineResponse.Code != http.StatusOK {
+		t.Fatalf("timeline status = %d, want 200; body = %s", timelineResponse.Code, timeline)
+	}
+	policyPath := "/features/FC-1/timeline/reference?identity=LCD-1%2FLCDV-1"
+	if !strings.Contains(timeline, `href="`+policyPath+`"`) {
+		t.Fatalf("timeline has no navigable lifecycle policy reference %q; body = %s", policyPath, timeline)
+	}
+
+	rr, body := getPage(t, fx.ui, policyPath)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("reference status = %d, want 200; body = %s", rr.Code, body)
+	}
+	for _, want := range []string{"LCD-1/LCDV-1", "Lifecycle state -&gt; drafting", "validated lifecycle predecessor-chain order", "authoritative source representation", "entry transition", "transitions"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("lifecycle reference detail missing %q; body = %s", want, body)
+		}
+	}
+
+	rr, body = getPage(t, fx.ui, "/features/FC-1/timeline/reference?identity=LCD-404%2FLCDV-404")
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("unknown reference status = %d, want 404; body = %s", rr.Code, body)
+	}
+	if !strings.Contains(body, "The feature timeline does not contain this reference.") {
+		t.Errorf("unknown reference page lacks an honest not-found explanation: %s", body)
 	}
 }

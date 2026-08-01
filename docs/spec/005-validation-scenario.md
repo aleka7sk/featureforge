@@ -97,13 +97,17 @@ criterion-to-Requirement relation exact and queryable.
 | Outcome statement | Homework supports at most one optional audio attachment, referenced by URL rather than stored inline, and publication must be observable to the student within 5 seconds. |
 | Rationale | Referencing by URL avoids introducing binary storage into the first release; 5 seconds is the longest delay the pilot teachers described as acceptable. |
 | Subjects | The capability Artifact, and Capability Revision 1 |
-| Basis — evidence | An evidence Artifact Revision holding the pilot-teacher interview notes |
+| Basis — evidence | `EV-1/EV-1-REV-1`, a pilot review report whose teacher findings support the Decision and whose engineering-review section is later produced by A-1 |
 | Basis — assumption | Audio files are hosted by an existing media service |
 | Basis — constraint | No binary storage in the first release |
 | Basis — uncertainty | Interview sample was 4 teachers |
 
 The decision is the recorded reason Revision 2 exists. Its basis is what makes
 that reason auditable, which is the point of recording it at all.
+
+C8 records the exact `EV-1/EV-1-REV-1` forward citation before the pair exists.
+The later A-1 validation execution materialises that same immutable report
+through C10; the scenario has no standalone Evidence write.
 
 ## 6. The validation chain
 

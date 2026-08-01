@@ -9,14 +9,18 @@
 
   {{if .Requirements}}
   {{range .Requirements}}
-  <section class="panel" aria-labelledby="req-{{.ArtifactID}}">
-    <h2 id="req-{{.ArtifactID}}">
-      {{.ArtifactID}}
-      {{if .Readiness.HasClaim}}{{template "status-badge" .Readiness.Outcome}}{{else}}{{template "status-badge" "no-claim"}}{{end}}
+  <section class="panel" aria-labelledby="req-{{.ArtifactID}}-{{.RevisionID}}">
+    <h2 id="req-{{.ArtifactID}}-{{.RevisionID}}">
+      {{.ArtifactID}}/{{.RevisionID}}
+      {{if .IsCurrent}}{{template "status-badge" "current"}}{{else}}{{template "status-badge" "historical"}}{{end}}
+      {{template "status-badge" .AcceptanceState}}
+      {{if .IsCurrent}}{{if .Readiness.HasClaim}}{{template "status-badge" .Readiness.Outcome}}{{else}}{{template "status-badge" "no-claim"}}{{end}}{{end}}
     </h2>
     <p>{{.Statement}}</p>
-    <p class="hint">Revision {{.RevisionID}} · source {{.SourceCapabilityArtifactID}}/{{.SourceCapabilityRevisionID}}#{{.SourceAcceptanceCriterionKey}}{{if .Readiness.CriterionKeys}} · claim criterion {{index .Readiness.CriterionKeys 0}}{{end}}</p>
-    {{if .Readiness.HasClaim}}
+    <p class="hint">Sequence {{.Sequence}} · source {{.SourceCapabilityArtifactID}}/{{.SourceCapabilityRevisionID}}#{{.SourceAcceptanceCriterionKey}}{{if .Readiness.CriterionKeys}} · claim criterion {{index .Readiness.CriterionKeys 0}}{{end}}</p>
+    {{if not .IsCurrent}}
+      <p class="hint">Historical immutable revision; readiness is shown on the effective revision.</p>
+    {{else if .Readiness.HasClaim}}
       <p><strong>Current claim:</strong> {{.Readiness.ClaimID}}</p>
       {{template "rationale" .Readiness.VerdictReason}}
       {{if .Readiness.Reasoning}}<p>{{.Readiness.Reasoning}}</p>{{end}}

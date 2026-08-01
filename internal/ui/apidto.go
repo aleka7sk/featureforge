@@ -80,6 +80,17 @@ type apiEffectiveRequirementDTO struct {
 	SourceAcceptanceCriterionKey string `json:"source_acceptance_criterion_key"`
 }
 
+type apiRequirementRevisionHistoryDTO struct {
+	ArtifactID                   string `json:"artifact_id"`
+	RevisionID                   string `json:"revision_id"`
+	Sequence                     int    `json:"sequence"`
+	AcceptanceState              string `json:"acceptance_state"`
+	Statement                    string `json:"statement"`
+	SourceCapabilityArtifactID   string `json:"source_capability_artifact_id"`
+	SourceCapabilityRevisionID   string `json:"source_capability_revision_id"`
+	SourceAcceptanceCriterionKey string `json:"source_acceptance_criterion_key"`
+}
+
 type apiDecisionBasisDTO struct {
 	Evidence      []string `json:"evidence"`
 	Assumptions   []string `json:"assumptions"`
@@ -89,6 +100,7 @@ type apiDecisionBasisDTO struct {
 
 type apiApplicableDecisionDTO struct {
 	DecisionID       string              `json:"decision_id"`
+	SubjectKey       string              `json:"subject_key"`
 	OccurredAt       *time.Time          `json:"occurred_at"`
 	Outcome          string              `json:"outcome"`
 	Question         string              `json:"question"`
@@ -154,12 +166,13 @@ type apiValidationPlanDTO struct {
 }
 
 type apiEngineeringStateDTO struct {
-	CurrentRevision       apiCurrentRevisionDTO        `json:"current_revision"`
-	EffectiveRequirements []apiEffectiveRequirementDTO `json:"effective_requirements"`
-	ApplicableDecisions   []apiApplicableDecisionDTO   `json:"applicable_decisions"`
-	ValidationPlan        apiValidationPlanDTO         `json:"validation_plan"`
-	Readiness             apiReadinessResultDTO        `json:"readiness"`
-	Lifecycle             apiLifecycleStateDTO         `json:"lifecycle"`
+	CurrentRevision       apiCurrentRevisionDTO              `json:"current_revision"`
+	EffectiveRequirements []apiEffectiveRequirementDTO       `json:"effective_requirements"`
+	RequirementHistory    []apiRequirementRevisionHistoryDTO `json:"requirement_history"`
+	ApplicableDecisions   []apiApplicableDecisionDTO         `json:"applicable_decisions"`
+	ValidationPlan        apiValidationPlanDTO               `json:"validation_plan"`
+	Readiness             apiReadinessResultDTO              `json:"readiness"`
+	Lifecycle             apiLifecycleStateDTO               `json:"lifecycle"`
 }
 
 type apiEngineeringStateRationaleDTO struct {

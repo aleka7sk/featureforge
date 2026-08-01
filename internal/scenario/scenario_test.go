@@ -165,17 +165,22 @@ func assertCanonicalEndState(
 		t.Fatalf("effective requirements = %d, want 4", len(effective))
 	}
 
-	// 6. The decision and its basis exist.
-	decisionFound := doQuery(t, uow, func(r application.Repositories) (bool, error) {
+	// 6. The decision and its basis exist. Its sole Evidence citation is the
+	// EV-1 pair later materialised by ER-1's C10 act.
+	decision := doQuery(t, uow, func(r application.Repositories) (engineering.RecordEnvelope, error) {
 		key, err := engineering.NewRecordKey(engineering.RecordKindDecision, scenario.DecisionID)
 		if err != nil {
-			return false, err
+			return engineering.RecordEnvelope{}, err
 		}
-		_, found, err := r.Records.Get(ctx, key)
-		return found, err
+		env, found, err := r.Records.Get(ctx, key)
+		if err == nil && !found {
+			t.Fatal("decision not found")
+		}
+		return env, err
 	})
-	if !decisionFound {
-		t.Error("decision not found")
+	wantDecisionEvidence := engineering.EvidenceKey(scenario.EvidenceIDs["A-1"], scenario.EvidenceIDs["A-1"]+"-REV-1")
+	if len(decision.EvidenceKeys) != 1 || decision.EvidenceKeys[0] != wantDecisionEvidence {
+		t.Errorf("decision evidence = %v, want [%s]", decision.EvidenceKeys, wantDecisionEvidence)
 	}
 
 	// 7. Plan, executions, and evidence exist.
@@ -198,6 +203,9 @@ func assertCanonicalEndState(
 		if !found {
 			t.Errorf("execution %s not found", execID)
 		}
+	}
+	if len(result.EvidenceArtifactIDs) != 4 {
+		t.Fatalf("evidence artifacts = %v, want EV-1 through EV-4", result.EvidenceArtifactIDs)
 	}
 	for _, evID := range result.EvidenceArtifactIDs {
 		found := doQuery(t, uow, func(r application.Repositories) (bool, error) {
@@ -306,10 +314,51 @@ func assertCanonicalEndState(
 
 	// 12. Timeline is complete and links CLM-4 to CLM-2.
 	timeline := doQuery(t, uow, func(r application.Repositories) (application.TimelineResult, error) {
-		return application.GetFeatureTimeline(ctx, r, peos.NewRecorder(), timelineInput(t, ctx, r, result))
+		return application.GetFeatureTimeline(ctx, r, peos.NewRecorder(), peos.NewRecorder(), timelineInput(t, ctx, r, result))
 	})
-	if len(timeline.Dated) != 29 || len(timeline.Undated) != 0 {
-		t.Errorf("timeline event counts = %d dated/%d undated, want 29 dated/0 undated", len(timeline.Dated), len(timeline.Undated))
+	if len(timeline.Dated) != 28 || len(timeline.Undated) != 0 {
+		t.Errorf("timeline event counts = %d dated/%d undated, want 28 dated/0 undated", len(timeline.Dated), len(timeline.Undated))
+	}
+	wantTimeline := []struct {
+		kind   application.EventKind
+		source string
+	}{
+		{application.EventProjectCreated, "PRJ-1"},
+		{application.EventFeatureCreated, "FC-1"},
+		{application.EventCapabilityCreated, "CAP-1"},
+		{application.EventCapabilityRevised, "CAP-1/CAP-1-REV-1"},
+		{application.EventCapabilityAccepted, "ACC-1"},
+		{application.EventLifecycleTransitioned, "state-assignment:SA-1"},
+		{application.EventDecisionRecorded, "decision:DEC-1"},
+		{application.EventCapabilityRevised, "CAP-1/CAP-1-REV-2"},
+		{application.EventCapabilityAccepted, "ACC-2"},
+		{application.EventRequirementRevised, "REQ-1/REQ-1-REV-1"},
+		{application.EventRequirementRevised, "REQ-2/REQ-2-REV-1"},
+		{application.EventRequirementRevised, "REQ-3/REQ-3-REV-1"},
+		{application.EventRequirementRevised, "REQ-4/REQ-4-REV-1"},
+		{application.EventLifecycleTransitioned, "state-assignment:SA-2"},
+		{application.EventPlanRevised, "VP-1/VP-1-REV-1"},
+		{application.EventExecutionRecorded, "execution:ER-1"},
+		{application.EventEvidenceRecorded, "EV-1/EV-1-REV-1"},
+		{application.EventLifecycleTransitioned, "state-assignment:SA-3"},
+		{application.EventClaimRecorded, "claim:CLM-1"},
+		{application.EventExecutionRecorded, "execution:ER-2"},
+		{application.EventEvidenceRecorded, "EV-2/EV-2-REV-1"},
+		{application.EventClaimRecorded, "claim:CLM-2"},
+		{application.EventExecutionRecorded, "execution:ER-3"},
+		{application.EventEvidenceRecorded, "EV-3/EV-3-REV-1"},
+		{application.EventClaimRecorded, "claim:CLM-3"},
+		{application.EventExecutionRecorded, "execution:ER-4"},
+		{application.EventEvidenceRecorded, "EV-4/EV-4-REV-1"},
+		{application.EventClaimCorrected, "claim:CLM-4"},
+	}
+	if len(timeline.Dated) == len(wantTimeline) {
+		for i, want := range wantTimeline {
+			got := timeline.Dated[i]
+			if got.Kind != want.kind || got.SourceIdentity != want.source {
+				t.Errorf("timeline event %d = (%s, %q), want (%s, %q)", i+1, got.Kind, got.SourceIdentity, want.kind, want.source)
+			}
+		}
 	}
 	sawCorrection := false
 	for _, ev := range timeline.Dated {

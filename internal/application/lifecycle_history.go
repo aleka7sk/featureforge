@@ -3,6 +3,8 @@ package application
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/aleka7sk/featureforge/internal/engineering"
 )
@@ -23,6 +25,11 @@ type LifecycleHistory struct {
 	RootArtifactID string
 	Assignments    []LifecycleHistoryAssignment
 	Head           LifecycleHistoryAssignment
+}
+
+type lifecycleSuccessor struct {
+	assignmentID string
+	transition   engineering.RevisionKey
 }
 
 // ResolveLifecycleHistory validates persisted configuration and every
@@ -181,8 +188,8 @@ func ResolveLifecycleHistory(ctx context.Context, repos Repositories, inspector 
 		return LifecycleHistory{}, integrityError("a transition revision has no resulting state assignment", nil)
 	}
 
-	var entryID string
-	nextByAssignment := make(map[string]string, len(assignments)-1)
+	entryCandidates := make([]lifecycleSuccessor, 0, 1)
+	successorsByAssignment := make(map[string][]lifecycleSuccessor, len(assignments)-1)
 	nodeByID := make(map[string]LifecycleHistoryAssignment, len(assignments))
 	configuredKey := engineering.LifecycleDefinitionVersionKey{DefinitionID: policy.DefinitionID, VersionID: policy.VersionID}
 	for revisionKey, transitionDetail := range transitionDetailByKey {
@@ -204,10 +211,18 @@ func ResolveLifecycleHistory(ctx context.Context, repos Repositories, inspector 
 		}
 
 		if transitionDetail.Entry {
-			if entryID != "" || !policy.HasInitialState(assignmentDetail.StateID) {
-				return LifecycleHistory{}, integrityError("lifecycle history has an invalid or duplicate entry", nil)
+			if !policy.HasInitialState(assignmentDetail.StateID) {
+				return LifecycleHistory{}, integrityError(fmt.Sprintf(
+					"entry assignment %s via transition revision %s uses non-initial state %s",
+					assignmentID,
+					revisionKey,
+					assignmentDetail.StateID,
+				), nil)
 			}
-			entryID = assignmentID
+			entryCandidates = append(entryCandidates, lifecycleSuccessor{
+				assignmentID: assignmentID,
+				transition:   revisionKey,
+			})
 		} else {
 			if transitionDetail.DefinitionVersion != configuredKey || transitionDetail.ResultingAssignmentID != assignmentID || transitionDetail.TargetStateID != assignmentDetail.StateID {
 				return LifecycleHistory{}, integrityError("transition and resulting assignment disagree", nil)
@@ -222,18 +237,29 @@ func ResolveLifecycleHistory(ctx context.Context, repos Repositories, inspector 
 			if !sourceDetail.EffectiveAt.Before(assignmentDetail.EffectiveAt) || sourceDetail.RecordedAt.After(transitionDetail.AttemptedAt) || transitionDetail.AttemptedAt.After(transitionDetail.CompletedAt) || transitionDetail.CompletedAt.After(assignmentDetail.EffectiveAt) {
 				return LifecycleHistory{}, integrityError("stored lifecycle transition violates canonical time order", nil)
 			}
-			if _, branched := nextByAssignment[transitionDetail.FromAssignmentID]; branched {
-				return LifecycleHistory{}, integrityError("lifecycle history branches from one predecessor", nil)
-			}
-			nextByAssignment[transitionDetail.FromAssignmentID] = assignmentID
+			successorsByAssignment[transitionDetail.FromAssignmentID] = append(
+				successorsByAssignment[transitionDetail.FromAssignmentID],
+				lifecycleSuccessor{assignmentID: assignmentID, transition: revisionKey},
+			)
 		}
 		nodeByID[assignmentID] = LifecycleHistoryAssignment{
 			Assignment: assignment, Detail: assignmentDetail,
 			Transition: transition, TransitionDetail: transitionDetail,
 		}
 	}
-	if entryID == "" {
+	if len(entryCandidates) == 0 {
 		return LifecycleHistory{}, integrityError("lifecycle history has no entry assignment", nil)
+	}
+	if len(entryCandidates) > 1 {
+		return LifecycleHistory{}, integrityError(lifecycleDuplicateEntryDiagnostic(entryCandidates), nil)
+	}
+	entryID := entryCandidates[0].assignmentID
+	if diagnostic := lifecycleBranchDiagnostic(successorsByAssignment); diagnostic != "" {
+		return LifecycleHistory{}, integrityError(diagnostic, nil)
+	}
+	nextByAssignment := make(map[string]string, len(successorsByAssignment))
+	for predecessorID, successors := range successorsByAssignment {
+		nextByAssignment[predecessorID] = successors[0].assignmentID
 	}
 
 	ordered := make([]LifecycleHistoryAssignment, 0, len(assignments))
@@ -258,6 +284,62 @@ func ResolveLifecycleHistory(ctx context.Context, repos Repositories, inspector 
 		Found: true, Policy: policy, RootArtifactID: rootID,
 		Assignments: ordered, Head: ordered[len(ordered)-1],
 	}, nil
+}
+
+func lifecycleBranchDiagnostic(successorsByAssignment map[string][]lifecycleSuccessor) string {
+	predecessors := make([]string, 0)
+	for predecessorID, successors := range successorsByAssignment {
+		if len(successors) > 1 {
+			predecessors = append(predecessors, predecessorID)
+		}
+	}
+	if len(predecessors) == 0 {
+		return ""
+	}
+	sort.Strings(predecessors)
+	groups := make([]string, 0, len(predecessors))
+	for _, predecessorID := range predecessors {
+		successors := append([]lifecycleSuccessor(nil), successorsByAssignment[predecessorID]...)
+		sort.Slice(successors, func(i, j int) bool {
+			if successors[i].assignmentID != successors[j].assignmentID {
+				return successors[i].assignmentID < successors[j].assignmentID
+			}
+			return successors[i].transition.String() < successors[j].transition.String()
+		})
+		conflicts := make([]string, 0, len(successors))
+		for _, successor := range successors {
+			conflicts = append(conflicts, fmt.Sprintf(
+				"assignment %s via transition revision %s",
+				successor.assignmentID,
+				successor.transition,
+			))
+		}
+		groups = append(groups, fmt.Sprintf(
+			"assignment %s has conflicting successors [%s]",
+			predecessorID,
+			strings.Join(conflicts, ", "),
+		))
+	}
+	return "lifecycle history branches: " + strings.Join(groups, "; ")
+}
+
+func lifecycleDuplicateEntryDiagnostic(entries []lifecycleSuccessor) string {
+	ordered := append([]lifecycleSuccessor(nil), entries...)
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].assignmentID != ordered[j].assignmentID {
+			return ordered[i].assignmentID < ordered[j].assignmentID
+		}
+		return ordered[i].transition.String() < ordered[j].transition.String()
+	})
+	conflicts := make([]string, 0, len(ordered))
+	for _, entry := range ordered {
+		conflicts = append(conflicts, fmt.Sprintf(
+			"assignment %s via transition revision %s",
+			entry.assignmentID,
+			entry.transition,
+		))
+	}
+	return "lifecycle history has conflicting entries [" + strings.Join(conflicts, ", ") + "]"
 }
 
 func loadLifecyclePolicy(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector) (engineering.LifecyclePolicy, error) {

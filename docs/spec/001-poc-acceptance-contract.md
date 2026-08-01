@@ -37,7 +37,7 @@ only if it has its own invariants; otherwise it is a parameter of another.
 | Candidate | Verdict |
 |---|---|
 | `CreateCapabilitySpecification` separate from creating Revision 1 | **Merged.** PEOS-002 permits an Artifact to exist before its first Revision but says such an Artifact must not be treated as reproducible or validated, and `core.Artifact` retains no creation-time provenance of its own. Creating them together makes the founding Revision's provenance the creation record, and removes an unusable intermediate state. |
-| `RecordEvidence` as its own use case | **Merged into `RecordValidationExecution` for validation evidence.** PEOS models produced evidence as `ExecutionRecord.ProducedEvidence()` — one act, one transaction. C8 is the narrow exception: it stores only an exact Decision-basis evidence citation, which may be unresolved under AD-030/FF-022. The canonical scenario independently records EV-0 before citing it; that fixture order is not a C8 write invariant. |
+| `RecordEvidence` as its own use case | **Merged into `RecordValidationExecution` for validation evidence.** PEOS models produced evidence as `ExecutionRecord.ProducedEvidence()` — one act, one transaction. C8 is the narrow exception: it stores only an exact Decision-basis evidence citation, which may be unresolved under AD-030/FF-022. The canonical Decision forward-cites `EV-1/EV-1-REV-1`; the later A-1 C10 act materialises that same pair, so no standalone Evidence write is needed. |
 | `RecordResult` | **Rejected.** There is no Result construct ([FF-003 §3](003-peos-integration.md#3-result-is-not-a-new-construct--resolved)). The execution outcome belongs to `RecordValidationExecution`; the claim outcome belongs to `RecordClaim`. |
 | `CorrectClaim` separate from `RecordClaim` | **Kept separate.** It has a distinct invariant `RecordClaim` does not: the correction target must exist, must be a claim, must not create a cycle, and the correction kind must be one of the three PEOS defines. Folding it in as an optional parameter would hide that validation. |
 | `UpdateFeatureCard` | **Superseded for this POC by AD-031.** Operational state is distinct from engineering state, but FeatureForge keeps Project and FeatureCard establishment fields stable and implements only the one-time capability link. Belcanto must choose its own edit, audit, concurrency, and replay contract. |
@@ -63,7 +63,10 @@ only if it has its own invariants; otherwise it is a parameter of another.
   ([FF-002 §4](002-domain-boundaries.md#4-package-layering)).
 - A use case returns product-shaped output. A PEOS value never leaves the
   integration layer.
-- Read use cases return a result **and** its rationale
+- Derived read use cases return a result **and** its rationale. Direct
+  inventory and stored-value reads (Q1 projects, Q2 feature cards, and Q7 one
+  exact revision) return the authoritative stored values and do not invent a
+  derivation rationale.
   ([FF-004 §3](004-current-state-resolution.md#3-current-state-queries)).
 
 ## 3. Minimal user experience
@@ -274,7 +277,8 @@ FeatureForge is successful only when **all** of the following are demonstrated.
 - [ ] Ambiguous histories fail explicitly, naming the conflicting records.
 - [ ] The current claim follows correction chains, including invalidation and
       cycle rejection.
-- [ ] Every query result includes its rationale.
+- [ ] Every derived query result includes its rationale; direct stored-value
+      reads Q1, Q2, and Q7 do not invent one.
 
 ### 6.5 Application
 

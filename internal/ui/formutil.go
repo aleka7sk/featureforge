@@ -1,9 +1,14 @@
 package ui
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 )
+
+func writeMalformedFormSyntax(w http.ResponseWriter, err error) {
+	writeErrorPage(w, http.StatusBadRequest, "Request could not be completed", fmt.Sprintf("The submitted form could not be read: %s.", err))
+}
 
 // maxFormBytes bounds a UI POST body the same way the API bounds a JSON
 // request body (FF-021 §11).

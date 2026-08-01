@@ -559,13 +559,13 @@ one.
 **Evidence discovery.** Decisions, Executions and Claims project exact
 `EvidenceKeys` (`engineering.EvidenceKey(artifactID, revisionID)` →
 `"evidence:" + artifactID + "/" + revisionID`). Q5 validates each selected
-record and every mandatory cross-reference, parses every exact key, resolves
-and inspects the cited Evidence Artifact/Revision pair, then deduplicates and
-sorts the resulting artifact IDs. The final population is the union of
-Decision-basis Evidence and the Evidence cited by history-wide Executions and
-Claims. A deliberately unresolved C8 citation returns
-`ErrTimelineSourceInvalid` (409); a dangling Execution/Claim citation is stored
-corruption (500). Neither case is silently omitted.
+record and every mandatory cross-reference and parses every exact key.
+Execution/Claim Evidence must resolve and validate. Decision Evidence is added
+to the Evidence-event population only when both the Artifact and Revision
+resolve and validate; when both are absent, the sole governed C8 forward-
+citation exception keeps the Decision event readable with its exact pending
+reference and invents no Evidence event. One-sided or contradictory occupancy,
+and every dangling Execution/Claim citation, is stored corruption (500).
 
 **No application input shape is redesigned for transport convenience.**
 `EngineeringStateInput` (`CapabilityArtifactID`, `RequirementArtifactIDs`,
@@ -1042,6 +1042,16 @@ predecessor chain` and `total = chain length`; the old `duplicate` tie-break
 projection is omitted because a branch or duplicate edge is integrity failure,
 not a successful resolution.
 
+**M.7 read-surface correction.** `data.requirement_history[]` contains every
+validated Requirement revision, ordered by `artifact_id` and governed
+`sequence`, with `revision_id`, `acceptance_state`, decoded `statement`,
+`source_capability_artifact_id`, `source_capability_revision_id`, and
+`source_acceptance_criterion_key`. This is the immutable history FF-001 §3.4
+requires; `effective_requirements[]` remains the selected current set used by
+readiness. Each `data.applicable_decisions[].subject_key` is now explicitly
+carried through the application result only after authoritative payload and
+projection agreement, rather than read as an unexplained transport projection.
+
 **Q3 `GET /features/{featureCardID}`** — `data.feature` (as Q2's element) plus
 the whole of Q4's `data` under `data.state`; `rationale` identical to Q4's.
 
@@ -1508,13 +1518,12 @@ package, so its checks are reproduced in
 Q1–Q7 HTTP responses wherever an endpoint exposes the answer, and from a
 direct query on the shared `uow` only for the facts no Phase A query
 endpoint surfaces (content digests, raw claim/correction fields, lifecycle
-transition history). One act — recording the decision's supporting
-evidence — has no HTTP command by design (FF-010 §3 fixes the act surface
-at ten acts / twelve commands; every other piece of evidence arrives
-bundled with an execution via `RecordValidationRunCommand`), so this one act
-is performed directly against the shared `uow`/recorder, exactly as
-`internal/scenario.Run` itself does internally. `TestCanonicalScenarioThroughHTTP`
-passed on its first run.
+transition history). Every canonical write uses the HTTP command surface. C8
+forward-cites `EV-1/EV-1-REV-1`; the later A-1
+`RecordValidationRunCommand` materialises that exact pair with its execution,
+exercising the governed unresolved-citation exception without inventing a
+standalone Evidence endpoint or writing through repositories in the journey.
+`TestCanonicalScenarioThroughHTTP` passed on its first run.
 
 **Step 10 — PostgreSQL scenario-through-HTTP.**
 *Files:* the same test, parameterised by adapter.
@@ -1855,7 +1864,7 @@ current revision's alone.
 | Query | Population |
 |---|---|
 | Q3 `GetFeatureOverview`, Q4 `GetFeatureEngineeringStateForCard` | Executions, claims: scoped to the **current** capability revision only (unchanged — these are current-*state* queries, and broadening them would let a stale claim read as satisfying the current revision, which FF-010 §7 forbids) |
-| Q5 `GetFeatureTimelineForCard` | Decisions, Executions and Claims are discovered only after globally enumerating and inspecting all Revision/Record envelopes. Executions and Claims are then unioned across **every** validated capability revision and deduplicated by their own record ID. Evidence is the deduplicated union of exact citations from the validated Decisions plus that history-wide Execution/Claim population; every cited pair must resolve and validate before any timeline is returned. |
+| Q5 `GetFeatureTimelineForCard` | Decisions, Executions and Claims are discovered only after globally enumerating and inspecting all Revision/Record envelopes. Executions and Claims are then unioned across **every** validated capability revision and deduplicated by their own record ID. Evidence events are the deduplicated union of resolved, validated exact citations. A wholly absent C8 Decision Evidence pair remains one explicit pending reference; partial/contradictory occupancy and every unresolved Execution/Claim citation fail closed. |
 
 `DiscoverExecutionAndClaimIDsAllRevisions` (`internal/application/query_timeline.go`)
 is the new, dedicated, history-wide discovery function Q5 uses; the

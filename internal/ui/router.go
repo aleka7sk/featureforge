@@ -25,6 +25,7 @@ func newRouter(deps Dependencies) http.Handler {
 	mux.HandleFunc("GET /features/{featureCardID}/decisions", handleDecisions(deps))
 	mux.HandleFunc("GET /features/{featureCardID}/validation", handleValidation(deps))
 	mux.HandleFunc("GET /features/{featureCardID}/timeline", handleTimeline(deps))
+	mux.HandleFunc("GET /features/{featureCardID}/timeline/reference", handleTimelineReference(deps))
 	mux.HandleFunc("GET /static/style.css", handleStaticCSS)
 
 	// Command forms (AD-028), one per command, in FF-011 canonical order.
@@ -52,29 +53,15 @@ func newRouter(deps Dependencies) http.Handler {
 // JSON.
 func withNotFound(mux *http.ServeMux) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		nw := &notFoundInterceptor{ResponseWriter: w}
-		mux.ServeHTTP(nw, r)
-		if nw.status == http.StatusNotFound {
+		// Ask ServeMux whether it owns this route before dispatch. Intercepting
+		// every 404 response after dispatch would also erase an owned handler's
+		// meaningful not-found result (for example an unknown Timeline
+		// reference) and replace it with the generic unmatched-path page.
+		_, pattern := mux.Handler(r)
+		if pattern == "" {
 			notFoundPage(w, r)
+			return
 		}
+		mux.ServeHTTP(w, r)
 	})
-}
-
-type notFoundInterceptor struct {
-	http.ResponseWriter
-	status int
-}
-
-func (w *notFoundInterceptor) WriteHeader(status int) {
-	w.status = status
-	if status != http.StatusNotFound {
-		w.ResponseWriter.WriteHeader(status)
-	}
-}
-
-func (w *notFoundInterceptor) Write(b []byte) (int, error) {
-	if w.status == http.StatusNotFound {
-		return len(b), nil
-	}
-	return w.ResponseWriter.Write(b)
 }

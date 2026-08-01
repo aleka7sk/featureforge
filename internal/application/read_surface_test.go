@@ -4,11 +4,69 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/aleka7sk/featureforge/internal/application"
 	"github.com/aleka7sk/featureforge/internal/domain"
 	"github.com/aleka7sk/featureforge/internal/engineering"
 )
+
+func TestGetFeatureEngineeringStateForCardOrdersDecisionsByRecordedAtThenID(t *testing.T) {
+	f := newCommandFixture()
+	ctx := context.Background()
+	seedCapability(t, f)
+
+	record := func(id string) {
+		t.Helper()
+		if _, err := (application.RecordArchitectureDecisionCommand{
+			DecisionID: id, SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1",
+			Question: "Which decision was recorded when?", OutcomeStatement: "Preserve recorded order.",
+			EvidenceArtifactID: "EV-" + id, EvidenceRevisionID: "EV-" + id + "-REV-1",
+		}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
+			t.Fatalf("RecordArchitectureDecision(%s): %v", id, err)
+		}
+	}
+
+	record("DEC-Z-EARLY")
+	f.clock.Advance(time.Hour)
+	record("DEC-Z-LATE")
+	record("DEC-A-LATE")
+
+	want := []string{"DEC-Z-EARLY", "DEC-A-LATE", "DEC-Z-LATE"}
+	var discovered []string
+	if err := f.uow.Do(ctx, func(r application.Repositories) error {
+		var err error
+		discovered, err = application.DiscoverDecisionIDs(ctx, r, f.rec, "CAP-1")
+		return err
+	}); err != nil {
+		t.Fatalf("DiscoverDecisionIDs: %v", err)
+	}
+	for i, decisionID := range discovered {
+		if i >= len(want) || decisionID != want[i] {
+			t.Fatalf("DiscoverDecisionIDs = %v, want %v", discovered, want)
+		}
+	}
+	if len(discovered) != len(want) {
+		t.Fatalf("DiscoverDecisionIDs = %v, want %v", discovered, want)
+	}
+
+	state, err := application.GetFeatureEngineeringStateForCard(ctx, f.uow, f.rec, f.rec, mustFeatureCardID(t, "FC-1"))
+	if err != nil {
+		t.Fatalf("GetFeatureEngineeringStateForCard: %v", err)
+	}
+	if len(state.ApplicableDecisions) != len(want) {
+		t.Fatalf("ApplicableDecisions = %+v, want IDs %v", state.ApplicableDecisions, want)
+	}
+	for i, decision := range state.ApplicableDecisions {
+		if decision.DecisionID != want[i] {
+			t.Errorf("ApplicableDecisions[%d].DecisionID = %q, want %q", i, decision.DecisionID, want[i])
+		}
+	}
+	if !state.ApplicableDecisions[0].Decision.RecordedAt.Before(state.ApplicableDecisions[1].Decision.RecordedAt) ||
+		!state.ApplicableDecisions[1].Decision.RecordedAt.Equal(state.ApplicableDecisions[2].Decision.RecordedAt) {
+		t.Fatalf("decision timestamps do not establish the adversarial ordering: %+v", state.ApplicableDecisions)
+	}
+}
 
 // seedReadSurfaceFixture establishes a capability with one requirement, one
 // decision, one validation plan, and one satisfied claim -- enough to
@@ -110,6 +168,9 @@ func TestGetFeatureEngineeringStateForCard_RendersReadSurfaceContent(t *testing.
 	if len(state.ApplicableDecisions) != 1 {
 		t.Fatalf("ApplicableDecisions = %+v", state.ApplicableDecisions)
 	}
+	if state.ApplicableDecisions[0].SubjectKey != engineering.ArtifactRevisionSubjectKey("CAP-1", "CAP-1-REV-1") {
+		t.Errorf("decision subject = %q", state.ApplicableDecisions[0].SubjectKey)
+	}
 	detail := state.ApplicableDecisions[0].Detail
 	if detail.Question != "Should homework support audio?" || detail.OutcomeStatement != "Yes, by content address." {
 		t.Errorf("decision detail = %+v", detail)
@@ -146,6 +207,42 @@ func TestGetFeatureEngineeringStateForCard_RendersReadSurfaceContent(t *testing.
 	}
 	if per.Claim.HasCorrection() {
 		t.Errorf("CLM-1 corrects nothing, got %+v", per.Claim)
+	}
+}
+
+func TestGetFeatureEngineeringStateForCard_RequirementHistoryIsAuthoritativeAndOrdered(t *testing.T) {
+	f := newCommandFixture()
+	seedReadSurfaceFixture(t, f)
+	if _, err := (application.EstablishRequirementCommand{
+		ArtifactID: "REQ-1", RevisionID: "REQ-1-REV-2",
+		Statement: "Published homework SHALL remain visible after a revision.", SubjectArtifactID: "CAP-1",
+		SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
+		AcceptanceRecordID: memberID("MEM-REQ-1-REV-2"),
+	}).Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
+		t.Fatalf("EstablishRequirement revision 2: %v", err)
+	}
+
+	state, err := application.GetFeatureEngineeringStateForCard(context.Background(), f.uow, f.rec, f.rec, mustFeatureCardID(t, "FC-1"))
+	if err != nil {
+		t.Fatalf("GetFeatureEngineeringStateForCard: %v", err)
+	}
+	if len(state.RequirementHistory) != 2 {
+		t.Fatalf("RequirementHistory = %+v, want two revisions", state.RequirementHistory)
+	}
+	first, second := state.RequirementHistory[0], state.RequirementHistory[1]
+	if first.ArtifactID != "REQ-1" || first.RevisionKey.RevisionID != "REQ-1-REV-1" || first.Sequence != 1 ||
+		first.AcceptanceState != engineering.AcceptanceStateAccepted || first.Statement != "Published homework SHALL be visible to the student." {
+		t.Errorf("RequirementHistory[0] = %+v", first)
+	}
+	if second.ArtifactID != "REQ-1" || second.RevisionKey.RevisionID != "REQ-1-REV-2" || second.Sequence != 2 ||
+		second.AcceptanceState != engineering.AcceptanceStateAccepted || second.Statement != "Published homework SHALL remain visible after a revision." {
+		t.Errorf("RequirementHistory[1] = %+v", second)
+	}
+	for i, revision := range state.RequirementHistory {
+		if revision.SourceCapabilityRevision != (engineering.RevisionKey{ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-1"}) ||
+			revision.SourceAcceptanceCriterion != "AC-1" {
+			t.Errorf("RequirementHistory[%d] source trace = %+v / %q", i, revision.SourceCapabilityRevision, revision.SourceAcceptanceCriterion)
+		}
 	}
 }
 

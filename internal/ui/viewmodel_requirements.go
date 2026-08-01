@@ -6,6 +6,9 @@ package ui
 type requirementRow struct {
 	ArtifactID                   string
 	RevisionID                   string
+	Sequence                     int
+	AcceptanceState              string
+	IsCurrent                    bool
 	Statement                    string
 	SourceCapabilityArtifactID   string
 	SourceCapabilityRevisionID   string
@@ -24,20 +27,31 @@ type requirementsPageData struct {
 	FormValues                 map[string]string
 }
 
-func mapRequirementsPageData(featureCardID, capabilityID string, effective []apiEffectiveRequirementDTO, per []apiPerRequirementReadinessDTO) requirementsPageData {
+func mapRequirementsPageData(featureCardID, capabilityID string, effective []apiEffectiveRequirementDTO, history []apiRequirementRevisionHistoryDTO, per []apiPerRequirementReadinessDTO) requirementsPageData {
 	readinessByID := make(map[string]readinessRow, len(per))
 	for _, row := range mapReadinessRows(per) {
 		readinessByID[row.RequirementArtifactID] = row
 	}
 
-	rows := make([]requirementRow, 0, len(effective))
+	effectiveRevisionByID := make(map[string]string, len(effective))
 	for _, req := range effective {
+		effectiveRevisionByID[req.ArtifactID] = req.RevisionID
+	}
+
+	rows := make([]requirementRow, 0, len(history))
+	for _, req := range history {
+		isCurrent := effectiveRevisionByID[req.ArtifactID] == req.RevisionID
+		var readiness readinessRow
+		if isCurrent {
+			readiness = readinessByID[req.ArtifactID]
+		}
 		rows = append(rows, requirementRow{
-			ArtifactID: req.ArtifactID, RevisionID: req.RevisionID, Statement: req.Statement,
+			ArtifactID: req.ArtifactID, RevisionID: req.RevisionID, Sequence: req.Sequence,
+			AcceptanceState: req.AcceptanceState, IsCurrent: isCurrent, Statement: req.Statement,
 			SourceCapabilityArtifactID:   req.SourceCapabilityArtifactID,
 			SourceCapabilityRevisionID:   req.SourceCapabilityRevisionID,
 			SourceAcceptanceCriterionKey: req.SourceAcceptanceCriterionKey,
-			Readiness:                    readinessByID[req.ArtifactID],
+			Readiness:                    readiness,
 		})
 	}
 

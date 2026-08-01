@@ -167,16 +167,23 @@ project exists to avoid. Materialization is introduced only if M.4 produces
 measured evidence that a query is too slow, and that would be a recorded
 decision. Recorded as **AD-006**.
 
-Every query obeys three universal rules:
+Every derived or interpretive current-state query governed by this document
+obeys three universal rules:
 
 - **Deterministic output.** Same stored records, same output, byte for byte.
   Every ordering is total: where a natural key could tie, a stable secondary key
   breaks it.
-- **Rationale is mandatory.** Every result carries a machine-readable rationale:
-  the rule applied, the records considered, and the records rejected with a
-  reason. This is displayed in the UI, not just logged.
+- **Rationale is mandatory.** Every such result carries a machine-readable
+  rationale: the rule applied, the records considered, and the records rejected
+  with a reason. This is displayed in the UI, not just logged.
 - **Ambiguity fails explicitly.** No query ever picks arbitrarily among
   candidates it cannot rank.
+
+Direct authoritative inventory or stored-value reads do not interpret current
+state and are outside this rationale requirement. In particular, Q1 (projects),
+Q2 (feature cards), and Q7 (one exact capability revision) return the stored
+facts without inventing a derivation rationale, as governed by FF-001 and
+FF-018.
 
 **Derived state is never written back into a PEOS value.** Not as a field, not
 as an Extension payload, not as a new revision.

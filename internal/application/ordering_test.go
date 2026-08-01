@@ -29,6 +29,12 @@ func newLenientEnvelopeInspector() lenientEnvelopeInspector {
 func (lenientEnvelopeInspector) ValidateArtifact(engineering.ArtifactEnvelope) error { return nil }
 func (lenientEnvelopeInspector) ValidateRevision(engineering.RevisionEnvelope) error { return nil }
 func (lenientEnvelopeInspector) ValidateRecord(engineering.RecordEnvelope) error     { return nil }
+func (lenientEnvelopeInspector) ProjectDecisionDetail([]byte) (engineering.DecisionDetail, error) {
+	return engineering.DecisionDetail{OutcomeStatement: "test decision outcome"}, nil
+}
+func (lenientEnvelopeInspector) ExecutionPlanActivity(engineering.RecordEnvelope) (engineering.RevisionKey, string, string, error) {
+	return engineering.RevisionKey{ArtifactID: "VP-1", RevisionID: "VP-1-REV-1"}, "A-1", "manual-review", nil
+}
 
 func newStoreAndUOW() *memory.UnitOfWork {
 	return memory.NewUnitOfWork(memory.NewStore())

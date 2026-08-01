@@ -2,7 +2,6 @@ package http_test
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -116,85 +115,6 @@ func capabilityRevision2ContentJSON() map[string]any {
 	}
 }
 
-// recordEvidenceDirectly records the decision's supporting evidence the
-// same way internal/scenario.Run does: directly through the recorder and
-// repositories, against the very uow/rec the HTTP handler in this test is
-// built on. There is no HTTP command for this act. FF-010 §3 fixes the
-// engineering act surface at ten acts (twelve commands); a standalone
-// "record evidence" endpoint was never part of it, exactly because every
-// other piece of evidence in the scenario arrives bundled with an
-// execution via RecordValidationRunCommand. This is the one act genuinely
-// outside the HTTP surface, not a shortcut around it.
-func recordEvidenceDirectly(t *testing.T, ctx context.Context, uow application.UnitOfWork, rec peos.Recorder, now time.Time, evidenceID, locator string) {
-	t.Helper()
-	err := uow.Do(ctx, func(r application.Repositories) error {
-		artifactKey := engineering.ArtifactKey{ArtifactID: evidenceID}
-		revisionKey := engineering.RevisionKey{ArtifactID: evidenceID, RevisionID: evidenceID + "-REV-1"}
-		storedArtifact, artifactFound, err := r.Artifacts.Get(ctx, artifactKey)
-		if err != nil {
-			return err
-		}
-		storedRevision, revisionFound, err := r.Revisions.Get(ctx, revisionKey)
-		if err != nil {
-			return err
-		}
-		if artifactFound != revisionFound {
-			return fmt.Errorf("partial direct decision-evidence pair")
-		}
-		if artifactFound {
-			if err := rec.ValidateEvidenceArtifact(storedArtifact); err != nil {
-				return err
-			}
-			if err := rec.ValidateRevision(storedRevision); err != nil {
-				return err
-			}
-			if storedRevision.RevisionFamily != engineering.RevisionFamilyEvidence || storedArtifact.ArtifactType != storedRevision.ArtifactType || !storedArtifact.RecordedAt.Equal(storedRevision.RecordedAt) {
-				return fmt.Errorf("contradictory direct decision-evidence pair")
-			}
-			revisions, err := r.Revisions.ListByArtifact(ctx, evidenceID)
-			if err != nil {
-				return err
-			}
-			orders, err := r.RevisionOrder.ListByArtifact(ctx, evidenceID)
-			if err != nil {
-				return err
-			}
-			journal, err := r.RevisionAcceptance.ListByArtifact(ctx, evidenceID)
-			if err != nil {
-				return err
-			}
-			if _, found, err := r.StructuredContent.Get(ctx, revisionKey); err != nil {
-				return err
-			} else if found || len(revisions) != 1 || revisions[0].Key != revisionKey || len(orders) != 0 || len(journal) != 0 {
-				return fmt.Errorf("direct decision evidence has unexpected sibling state")
-			}
-			expectedArtifact, expectedRevision, err := rec.RecordEvidence(engineering.EvidenceInput{
-				ArtifactID: evidenceID, RevisionID: revisionKey.RevisionID, Locator: locator, RecordedAt: storedRevision.RecordedAt,
-			})
-			if err != nil {
-				return err
-			}
-			if !storedArtifact.Equal(expectedArtifact) || !storedRevision.Equal(expectedRevision) {
-				return fmt.Errorf("direct decision-evidence identity has different semantics")
-			}
-			return nil
-		}
-		artEnv, revEnv, err := rec.RecordEvidence(engineering.EvidenceInput{
-			ArtifactID: evidenceID, RevisionID: evidenceID + "-REV-1", Locator: locator, RecordedAt: now,
-		})
-		if err != nil {
-			return err
-		}
-		if err := r.Artifacts.Put(ctx, artEnv); err != nil {
-			return err
-		}
-		return r.Revisions.Put(ctx, revEnv)
-	})
-	if err != nil {
-		t.Fatalf("recording decision evidence directly: %v", err)
-	}
-}
-
 // recordActivityRunViaHTTP POSTs the execution-and-evidence half of one
 // validation activity. Keeping it separate from the claim lets the canonical
 // scenario establish begin-validation from completed execution evidence before
@@ -294,12 +214,9 @@ func runScenarioThroughHTTP(t *testing.T, ctx context.Context, uow application.U
 	})
 	tick()
 
-	// 6. Decision evidence -- no HTTP command exists for this act; see
-	// recordEvidenceDirectly's doc comment.
-	recordEvidenceDirectly(t, ctx, uow, rec, clock.Now(), scenario.DecisionEvidenceID, "https://evidence.example/"+scenario.DecisionEvidenceID)
-	tick()
-
-	// 7. The decision, resolving Revision 1's open questions.
+	// 6. The decision resolves Revision 1's open questions and forward-cites
+	// EV-1, which the later A-1 C10 request materialises through this same
+	// public HTTP surface.
 	mustPost(t, handler, "/api/v1/decisions", map[string]any{
 		"decision_id": scenario.DecisionID, "subject_artifact_id": scenario.CapabilityArtifactID,
 		"subject_revision_id": scenario.CapabilityRevision1,
@@ -310,7 +227,7 @@ func runScenarioThroughHTTP(t *testing.T, ctx context.Context, uow application.U
 			"Store audio externally and retain a content-addressed representation reference.",
 			"Defer audio entirely.",
 		},
-		"evidence_artifact_id": scenario.DecisionEvidenceID, "evidence_revision_id": scenario.DecisionEvidenceID + "-REV-1",
+		"evidence_artifact_id": scenario.EvidenceIDs["A-1"], "evidence_revision_id": scenario.EvidenceIDs["A-1"] + "-REV-1",
 		"assumptions":   []string{"Audio files are hosted by an existing media service."},
 		"constraints":   []string{"No binary storage in the first release."},
 		"uncertainties": []string{"Interview sample was 4 teachers."},
@@ -318,7 +235,7 @@ func runScenarioThroughHTTP(t *testing.T, ctx context.Context, uow application.U
 	})
 	tick()
 
-	// 8. Capability Revision 2, then accept it.
+	// 7. Capability Revision 2, then accept it.
 	mustPost(t, handler, "/api/v1/capabilities/"+scenario.CapabilityArtifactID+"/revisions", map[string]any{
 		"revision_id": scenario.CapabilityRevision2, "content": capabilityRevision2ContentJSON(),
 	})
@@ -328,7 +245,7 @@ func runScenarioThroughHTTP(t *testing.T, ctx context.Context, uow application.U
 	})
 	tick()
 
-	// 9. Requirements REQ-1..REQ-4 trace exact criteria on the accepted
+	// 8. Requirements REQ-1..REQ-4 trace exact criteria on the accepted
 	// current CAP-1-REV-2. REQ-4 deliberately gets no validation activity
 	// and no claim.
 	requirementStatements := map[string]string{
@@ -349,7 +266,7 @@ func runScenarioThroughHTTP(t *testing.T, ctx context.Context, uow application.U
 		tick()
 	}
 
-	// 10. Enter specified only after the accepted current capability revision
+	// 9. Enter specified only after the accepted current capability revision
 	// and all four traced Requirements exist.
 	mustPost(t, handler, "/api/v1/capabilities/"+scenario.CapabilityArtifactID+"/lifecycle", map[string]any{
 		"assignment_id": scenario.SpecifiedAssignmentID, "state": "specified",
@@ -359,7 +276,7 @@ func runScenarioThroughHTTP(t *testing.T, ctx context.Context, uow application.U
 	})
 	tick()
 
-	// 11. Validation plan: A-1 (REQ-1), A-2 (REQ-2), A-3 (REQ-3); REQ-4 has none.
+	// 10. Validation plan: A-1 (REQ-1), A-2 (REQ-2), A-3 (REQ-3); REQ-4 has none.
 	mustPost(t, handler, "/api/v1/validation/plans", map[string]any{
 		"artifact_id": scenario.PlanArtifactID, "revision_id": scenario.PlanRevisionID,
 		"scope_artifact_id":    scenario.CapabilityArtifactID,
@@ -387,7 +304,7 @@ func runScenarioThroughHTTP(t *testing.T, ctx context.Context, uow application.U
 	})
 	tick()
 
-	// 12. The first execution and its evidence are the product support for
+	// 11. The first execution and its evidence are the product support for
 	// begin-validation. The first claim is deliberately recorded afterwards.
 	recordActivityRunViaHTTP(t, handler, tick, "A-1", "manual-review", "ER-1", "EV-1")
 
@@ -401,11 +318,11 @@ func runScenarioThroughHTTP(t *testing.T, ctx context.Context, uow application.U
 
 	recordActivityClaimViaHTTP(t, handler, tick, "A-1", "REQ-1", "manual-review", "ER-1", "EV-1", scenario.ClaimForR1, "The specification states student visibility explicitly.")
 
-	// 13. Execute the remaining activities and record their claims.
+	// 12. Execute the remaining activities and record their claims.
 	runActivityViaHTTP(t, handler, tick, "A-2", "REQ-2", "manual-review", "ER-2", "EV-2", scenario.ClaimIncorrect, "The specification states who may view homework.")
 	runActivityViaHTTP(t, handler, tick, "A-3", "REQ-3", "manual-inspection", "ER-3", "EV-3", scenario.ClaimForR3, "The specification names a resolvable representation for the attachment.")
 
-	// 14. Re-run A-2 and correct CLM-2.
+	// 13. Re-run A-2 and correct CLM-2.
 	mustPost(t, handler, "/api/v1/validation/runs", map[string]any{
 		"execution_id": "ER-4", "plan_artifact_id": scenario.PlanArtifactID, "plan_revision_id": scenario.PlanRevisionID,
 		"activity_key": "A-2", "subject_artifact_id": scenario.CapabilityArtifactID, "subject_revision_id": scenario.CapabilityRevision2,
@@ -545,6 +462,9 @@ func assertCanonicalEndStateThroughHTTP(t *testing.T, ctx context.Context, handl
 				Question         string   `json:"question"`
 				OutcomeStatement string   `json:"outcome_statement"`
 				Alternatives     []string `json:"alternatives"`
+				Basis            struct {
+					Evidence []string `json:"evidence"`
+				} `json:"basis"`
 			} `json:"applicable_decisions"`
 			ValidationPlan struct {
 				Found      bool   `json:"found"`
@@ -610,6 +530,10 @@ func assertCanonicalEndStateThroughHTTP(t *testing.T, ctx context.Context, handl
 			}
 			if len(d.Alternatives) == 0 {
 				t.Errorf("Q4: decision %s has no alternatives, want the three the scenario recorded", scenario.DecisionID)
+			}
+			wantEvidence := engineering.EvidenceKey(scenario.EvidenceIDs["A-1"], scenario.EvidenceIDs["A-1"]+"-REV-1")
+			if len(d.Basis.Evidence) != 1 || d.Basis.Evidence[0] != wantEvidence {
+				t.Errorf("Q4: decision %s basis.evidence = %v, want [%s]", scenario.DecisionID, d.Basis.Evidence, wantEvidence)
 			}
 		}
 	}
@@ -719,8 +643,8 @@ func assertCanonicalEndStateThroughHTTP(t *testing.T, ctx context.Context, handl
 	if rr := getJSON(t, handler, "/api/v1/features/"+scenario.FeatureCardID+"/timeline", &timeline); rr.Code != http.StatusOK {
 		t.Fatalf("Q5: status = %d, want 200", rr.Code)
 	}
-	if len(timeline.Data.Dated) != 29 || len(timeline.Data.Undated) != 0 {
-		t.Errorf("Q5: timeline event counts = %d dated/%d undated, want 29 dated/0 undated", len(timeline.Data.Dated), len(timeline.Data.Undated))
+	if len(timeline.Data.Dated) != 28 || len(timeline.Data.Undated) != 0 {
+		t.Errorf("Q5: timeline event counts = %d dated/%d undated, want 28 dated/0 undated", len(timeline.Data.Dated), len(timeline.Data.Undated))
 	}
 	sawCorrection := false
 	for _, ev := range timeline.Data.Dated {
@@ -819,7 +743,7 @@ func assertCanonicalEndStateThroughHTTP(t *testing.T, ctx context.Context, handl
 			t.Errorf("execution %s not found", execID)
 		}
 	}
-	for _, evID := range []string{scenario.DecisionEvidenceID, "EV-1", "EV-2", "EV-3", "EV-4"} {
+	for _, evID := range []string{"EV-1", "EV-2", "EV-3", "EV-4"} {
 		found := queryRepo(t, uow, func(r application.Repositories) (bool, error) {
 			revs, err := r.Revisions.ListByArtifact(ctx, evID)
 			return len(revs) == 1, err

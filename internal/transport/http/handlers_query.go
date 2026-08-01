@@ -96,7 +96,7 @@ func handleGetFeatureTimeline(deps Dependencies) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		timeline, err := application.GetFeatureTimelineForCard(r.Context(), deps.UOW, deps.Inspector, featureCardID)
+		timeline, err := application.GetFeatureTimelineForCard(r.Context(), deps.UOW, deps.Projector, deps.Inspector, featureCardID)
 		if err != nil {
 			writeAppError(w, r, deps, err)
 			return

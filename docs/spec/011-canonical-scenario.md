@@ -47,7 +47,7 @@ Deterministic and fixed. No generation.
 | Decision | `DEC-1` |
 | Validation plan artifact | `VP-1` |
 | Plan revision | `VP-1-REV-1` |
-| Evidence artifacts | `EV-0` (interview notes) … `EV-4` |
+| Evidence artifacts | `EV-1` … `EV-4`; `EV-1` is cited by both `DEC-1` and `ER-1` |
 | Evidence revisions | `EV-n-REV-1` |
 | Execution records | `ER-1`, `ER-2`, `ER-3`, `ER-4` |
 | Claims | `CLM-1`, `CLM-2`, `CLM-3`, `CLM-4` |
@@ -146,7 +146,7 @@ canonical statement content, computed by the same rule as capability content.
 |---|---|
 | Type | `decision.Decision` with `decision.Basis` |
 | Constructor order | `decision.NewOutcome(statement, decision.CommitmentEffectEstablishes)` → `core.NewAuthorityRef("featureforge","local-user")` → `decision.NewAuthority([]core.AuthorityRef{a}, []core.AuthorityRef{a})` → `decision.New(id, subjects, question, outcome, applicability, authority)` → `.WithBasis(basis)` → `.WithProvenance(prov)` → `.WithRationale(text)` |
-| Basis | `decision.NewBasisFrom(evidence, assumptions, constraints, uncertainties)`, evidence = `core.NewEvidenceArtifactRevisionRef("EV-0","EV-0-REV-1")` |
+| Basis | `decision.NewBasisFrom(evidence, assumptions, constraints, uncertainties)`, evidence = `core.NewEvidenceArtifactRevisionRef("EV-1","EV-1-REV-1")` |
 | Subjects | Capability **Revision 1** — the decision resolves that revision's open questions |
 | Sentinels | `decision.ErrInvalidDecision`, `decision.ErrInvalidOutcome`, `decision.ErrInvalidAuthority`, `decision.ErrInvalidBasis` |
 | Envelope | `RecordEnvelope` kind `decision` |
@@ -275,7 +275,7 @@ a representable state.
 | Alternatives considered | Store audio inline in the capability record; store audio externally and retain a content-addressed representation reference; defer audio entirely |
 | Selected outcome | Homework supports at most one optional audio attachment, stored outside the capability record and retained as a content-addressed representation reference; publication must be observable to the student within 5 seconds. |
 | Commitment effect | `decision.CommitmentEffectEstablishes` |
-| Basis — evidence | `EV-0/EV-0-REV-1` — pilot-teacher interview notes |
+| Basis — evidence | `EV-1/EV-1-REV-1` — the pilot review report also produced by A-1 |
 | Basis — assumption | Audio files are hosted by an existing media service |
 | Basis — constraint | No binary storage in the first release |
 | Basis — uncertainty | Interview sample was 4 teachers |
@@ -287,6 +287,13 @@ a representable state.
 
 Alternatives are recorded with `decision.NewAlternative` and attached via
 `WithAlternatives`, so the rejected options remain inspectable.
+
+`EV-1` is one report with two relevant sections: pilot-teacher findings support
+the Decision, and the engineering review confirms A-1's student-visibility
+criterion. C8 records its exact forward citation before the pair exists; C10
+later creates that same Evidence Artifact Revision while recording `ER-1`.
+Sharing one immutable Evidence revision across those two citations is deliberate,
+not a duplicate Evidence act.
 
 ## 7. Validation chain
 
@@ -339,6 +346,11 @@ present. A read or timeline that requires the link to resolve fails loudly
 until it exists (`ErrTimelineSourceInvalid` on the timeline). Evidence is never
 resolved by scanning.
 
+The canonical order exercises that exception: `DEC-1` forward-cites
+`EV-1/EV-1-REV-1`, then A-1's public C10 act creates the pair. The complete end
+state contains four Evidence artifacts, and every canonical Evidence write is
+therefore part of a validation execution.
+
 ## 8. Lifecycle progression
 
 | Assignment | State | Established by |
@@ -366,7 +378,7 @@ duplication check AD-018 exists to enforce.
 | Current claim — REQ-4 | none |
 | **Release readiness** | **`not-ready`** — REQ-2 not satisfied; REQ-4 also reported uncovered |
 | Lifecycle state | `featureforge:under-validation`, unique head `SA-3`, `LCD-1/LCDV-1`, established by `TR-1/TR-1-REV-2` |
-| Timeline | All acts, ordered, `CLM-4` linked to `CLM-2` |
+| Timeline | 28 dated events, no undated events; all acts ordered and `CLM-4` linked to `CLM-2` |
 | History integrity | Revision 1 and `CLM-2` fully inspectable; nothing updated or deleted |
 
 The scenario ends `not-ready` by design. A scenario ending green would prove only

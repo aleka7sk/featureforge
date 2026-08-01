@@ -166,6 +166,38 @@ func TestLifecycleStateIsUniqueHeadOfValidatedGraph(t *testing.T) {
 	}
 }
 
+func TestLifecycleStateDuplicateEntryDiagnosticNamesAssignmentsAndTransitions(t *testing.T) {
+	uow := newLifecycleStore(t)
+	recorder := peos.NewRecorder()
+	putLifecycleGraph(t, uow, recorder, "CAP-1", "TR-DUPLICATE-ENTRY", "drafting")
+
+	_, duplicateRevision, duplicateAssignment, err := recorder.RecordEntryAssignment(engineering.EntryAssignmentInput{
+		AssignmentID: "SA-GRAPH-0", SubjectArtifactID: "CAP-1", State: "drafting",
+		EffectiveAt: fixedTime(), TransitionRecordArtifactID: "TR-DUPLICATE-ENTRY",
+		TransitionRecordRevisionID: "TR-DUPLICATE-ENTRY-REV-Z", RecordedAt: fixedTime(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := uow.Do(context.Background(), func(r application.Repositories) error {
+		if err := r.Revisions.Put(context.Background(), duplicateRevision); err != nil {
+			return err
+		}
+		return r.Records.Put(context.Background(), duplicateAssignment)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = resolveLifecycle(t, uow)
+	if !errors.Is(err, application.ErrStoredStateIntegrity) {
+		t.Fatalf("err = %v, want ErrStoredStateIntegrity for duplicate lifecycle entries", err)
+	}
+	want := "application: stored command state integrity failure: lifecycle history has conflicting entries [assignment SA-GRAPH-0 via transition revision TR-DUPLICATE-ENTRY/TR-DUPLICATE-ENTRY-REV-Z, assignment SA-GRAPH-1 via transition revision TR-DUPLICATE-ENTRY/TR-DUPLICATE-ENTRY-REV-0]"
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %q, want %q", err, want)
+	}
+}
+
 func TestLifecycleStateRejectsBranchedHistory(t *testing.T) {
 	uow := newLifecycleStore(t)
 	recorder := peos.NewRecorder()
@@ -195,6 +227,71 @@ func TestLifecycleStateRejectsBranchedHistory(t *testing.T) {
 	_, err = resolveLifecycle(t, uow)
 	if !errors.Is(err, application.ErrStoredStateIntegrity) {
 		t.Fatalf("err = %v, want ErrStoredStateIntegrity for a branched predecessor graph", err)
+	}
+	want := "application: stored command state integrity failure: lifecycle history branches: assignment SA-GRAPH-1 has conflicting successors [assignment SA-GRAPH-2 via transition revision TR-BRANCH/TR-BRANCH-REV-1, assignment SA-GRAPH-BRANCH via transition revision TR-BRANCH/TR-BRANCH-REV-B]"
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %q, want %q", err, want)
+	}
+}
+
+func TestLifecycleStateCycleDiagnosticNamesAssignmentsAndTransitions(t *testing.T) {
+	uow := newLifecycleStore(t)
+	recorder := peos.NewRecorder()
+	base := fixedTime()
+	artifact, entryRevision, entryAssignment, err := recorder.RecordEntryAssignment(engineering.EntryAssignmentInput{
+		AssignmentID: "SA-CYCLE-ENTRY", SubjectArtifactID: "CAP-1", State: "drafting",
+		EffectiveAt: base, TransitionRecordArtifactID: "TR-CYCLE",
+		TransitionRecordRevisionID: "TR-CYCLE-REV-0", RecordedAt: base,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, firstRevision, firstAssignment, err := recorder.RecordTransition(engineering.TransitionInput{
+		AssignmentID: "SA-CYCLE-A", SubjectArtifactID: "CAP-1", State: "specified",
+		EffectiveAt: base.Add(2 * time.Hour), TransitionRecordArtifactID: "TR-CYCLE",
+		TransitionRecordRevisionID: "TR-CYCLE-REV-A", TransitionKey: "specify",
+		FromAssignmentID: "SA-CYCLE-B", AttemptedAt: base, CompletedAt: base.Add(time.Hour),
+		RecordedAt: base.Add(2 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, secondRevision, secondAssignment, err := recorder.RecordTransition(engineering.TransitionInput{
+		AssignmentID: "SA-CYCLE-B", SubjectArtifactID: "CAP-1", State: "under-validation",
+		EffectiveAt: base.Add(3 * time.Hour), TransitionRecordArtifactID: "TR-CYCLE",
+		TransitionRecordRevisionID: "TR-CYCLE-REV-B", TransitionKey: "begin-validation",
+		FromAssignmentID: "SA-CYCLE-A", AttemptedAt: base.Add(2 * time.Hour), CompletedAt: base.Add(3 * time.Hour),
+		RecordedAt: base.Add(3 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := uow.Do(context.Background(), func(r application.Repositories) error {
+		if err := r.Artifacts.Put(context.Background(), artifact); err != nil {
+			return err
+		}
+		for _, revision := range []engineering.RevisionEnvelope{entryRevision, firstRevision, secondRevision} {
+			if err := r.Revisions.Put(context.Background(), revision); err != nil {
+				return err
+			}
+		}
+		for _, assignment := range []engineering.RecordEnvelope{entryAssignment, firstAssignment, secondAssignment} {
+			if err := r.Records.Put(context.Background(), assignment); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = resolveLifecycle(t, uow)
+	if !errors.Is(err, application.ErrStoredStateIntegrity) {
+		t.Fatalf("err = %v, want ErrStoredStateIntegrity for a lifecycle cycle", err)
+	}
+	want := "application: stored command state integrity failure: lifecycle predecessor chain contains a cycle among assignment/transition pairs [assignment SA-CYCLE-A via transition revision TR-CYCLE/TR-CYCLE-REV-A, assignment SA-CYCLE-B via transition revision TR-CYCLE/TR-CYCLE-REV-B]"
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %q, want %q", err, want)
 	}
 }
 

@@ -3,11 +3,104 @@ package application_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/aleka7sk/featureforge/internal/application"
 	"github.com/aleka7sk/featureforge/internal/engineering"
 )
+
+type invalidCriterionRequirementTraceRepository struct {
+	application.RequirementCriterionTraceRepository
+	key engineering.RevisionKey
+}
+
+func (r invalidCriterionRequirementTraceRepository) Get(ctx context.Context, key engineering.RevisionKey) (engineering.RequirementCriterionTrace, bool, error) {
+	trace, found, err := r.RequirementCriterionTraceRepository.Get(ctx, key)
+	if err != nil || !found || key != r.key {
+		return trace, found, err
+	}
+	trace.AcceptanceCriterionKey = "AC-MISSING"
+	return trace, true, nil
+}
+
+func TestRequirementTimelineEventCarriesValidatedCriterionTrace(t *testing.T) {
+	f := newCommandFixture()
+	ctx := context.Background()
+	seedCapability(t, f)
+	if _, err := (application.EstablishRequirementCommand{
+		ArtifactID: "REQ-TRACE", RevisionID: "REQ-TRACE-REV-1",
+		Statement: "The requirement SHALL retain its exact criterion source.", SubjectArtifactID: "CAP-1",
+		SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
+		AcceptanceRecordID: memberID("MEM-REQ-TRACE"),
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
+		t.Fatal(err)
+	}
+
+	timeline, err := application.GetFeatureTimelineForCard(ctx, f.uow, f.rec, f.rec, mustFeatureCardID(t, "FC-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTrace := "CAP-1/CAP-1-REV-1#AC-1"
+	for _, event := range append(timeline.Dated, timeline.Undated...) {
+		if event.Kind != application.EventRequirementRevised || event.SourceIdentity != "REQ-TRACE/REQ-TRACE-REV-1" {
+			continue
+		}
+		if !strings.Contains(event.Summary, "exact trace "+wantTrace) {
+			t.Errorf("requirement summary = %q, want exact trace %q", event.Summary, wantTrace)
+		}
+		if !containsTimelineReference(event.References, "CAP-1/CAP-1-REV-1") ||
+			!containsTimelineReference(event.References, "criterion:"+wantTrace) {
+			t.Errorf("requirement references = %v, want source revision and exact criterion trace", event.References)
+		}
+		return
+	}
+	t.Fatal("requirement timeline event not found")
+}
+
+func TestRequirementTimelineRejectsMissingCriterionTrace(t *testing.T) {
+	f := newCommandFixture()
+	ctx := context.Background()
+	seedCapability(t, f)
+	cmd := traceRequirementCommand("REQ-TIMELINE-MISSING-TRACE")
+	if _, err := cmd.Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
+		t.Fatal(err)
+	}
+	key := mustRevKey(t, cmd.ArtifactID, cmd.RevisionID)
+	uow := repositoryOverrideUOW{base: f.uow, override: func(r *application.Repositories) {
+		r.RequirementTraces = missingRequirementTraceRepository{
+			RequirementCriterionTraceRepository: r.RequirementTraces,
+			missing:                             key,
+		}
+	}}
+
+	_, err := application.GetFeatureTimelineForCard(ctx, uow, f.rec, f.rec, mustFeatureCardID(t, "FC-1"))
+	if !errors.Is(err, application.ErrStoredStateIntegrity) {
+		t.Fatalf("err = %v, want ErrStoredStateIntegrity", err)
+	}
+}
+
+func TestRequirementTimelineRejectsInvalidCriterionTrace(t *testing.T) {
+	f := newCommandFixture()
+	ctx := context.Background()
+	seedCapability(t, f)
+	cmd := traceRequirementCommand("REQ-TIMELINE-INVALID-TRACE")
+	if _, err := cmd.Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
+		t.Fatal(err)
+	}
+	key := mustRevKey(t, cmd.ArtifactID, cmd.RevisionID)
+	uow := repositoryOverrideUOW{base: f.uow, override: func(r *application.Repositories) {
+		r.RequirementTraces = invalidCriterionRequirementTraceRepository{
+			RequirementCriterionTraceRepository: r.RequirementTraces,
+			key:                                 key,
+		}
+	}}
+
+	_, err := application.GetFeatureTimelineForCard(ctx, uow, f.rec, f.rec, mustFeatureCardID(t, "FC-1"))
+	if !errors.Is(err, application.ErrStoredStateIntegrity) {
+		t.Fatalf("err = %v, want ErrStoredStateIntegrity", err)
+	}
+}
 
 // TestGetFeatureTimelineForCard_PreservesPriorRevisionActivity is the M-1
 // regression (docs/reports/m5-publication-remediation.md, D1/D2): an
@@ -89,7 +182,7 @@ func TestGetFeatureTimelineForCardIncludesValidatedDecisionEvidence(t *testing.T
 		t.Fatal(err)
 	}
 
-	timeline, err := application.GetFeatureTimelineForCard(ctx, f.uow, f.rec, mustFeatureCardID(t, "FC-1"))
+	timeline, err := application.GetFeatureTimelineForCard(ctx, f.uow, f.rec, f.rec, mustFeatureCardID(t, "FC-1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +197,7 @@ func TestGetFeatureTimelineForCardIncludesValidatedDecisionEvidence(t *testing.T
 	}
 }
 
-func TestGetFeatureTimelineForCardRejectsUnresolvedDecisionEvidence(t *testing.T) {
+func TestGetFeatureTimelineForCardKeepsGovernedDecisionForwardCitationReadable(t *testing.T) {
 	f := newCommandFixture()
 	ctx := context.Background()
 	seedCapability(t, f)
@@ -116,9 +209,103 @@ func TestGetFeatureTimelineForCardRejectsUnresolvedDecisionEvidence(t *testing.T
 		t.Fatal(err)
 	}
 
-	_, err := application.GetFeatureTimelineForCard(ctx, f.uow, f.rec, mustFeatureCardID(t, "FC-1"))
-	if !errors.Is(err, application.ErrTimelineSourceInvalid) {
-		t.Fatalf("err = %v, want ErrTimelineSourceInvalid", err)
+	timeline, err := application.GetFeatureTimelineForCard(ctx, f.uow, f.rec, f.rec, mustFeatureCardID(t, "FC-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantReference := engineering.EvidenceKey("EV-MISSING", "EV-MISSING-REV-1")
+	decisionFound, evidenceInvented := false, false
+	for _, event := range append(timeline.Undated, timeline.Dated...) {
+		if event.Kind == application.EventDecisionRecorded && event.SourceIdentity == "decision:DEC-1" {
+			decisionFound = containsTimelineReference(event.References, wantReference)
+		}
+		if event.Kind == application.EventEvidenceRecorded && event.SourceIdentity == "EV-MISSING/EV-MISSING-REV-1" {
+			evidenceInvented = true
+		}
+	}
+	if !decisionFound || evidenceInvented {
+		t.Fatalf("decision found/reference = %t, evidence event invented = %t; timeline = %+v", decisionFound, evidenceInvented, timeline)
+	}
+}
+
+func TestGetFeatureTimelineForCardRejectsPartiallyMaterialisedDecisionEvidence(t *testing.T) {
+	f := newCommandFixture()
+	ctx := context.Background()
+	seedCapability(t, f)
+	artifact, _, err := f.rec.RecordEvidence(engineering.EvidenceInput{
+		ArtifactID: "EV-PARTIAL", RevisionID: "EV-PARTIAL-REV-1",
+		Locator: "https://evidence.example/EV-PARTIAL", RecordedAt: f.clock.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.uow.Do(ctx, func(r application.Repositories) error { return r.Artifacts.Put(ctx, artifact) }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (application.RecordArchitectureDecisionCommand{
+		DecisionID: "DEC-1", SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1",
+		Question: "What supports the decision?", OutcomeStatement: "A partially occupied citation must fail closed.",
+		EvidenceArtifactID: "EV-PARTIAL", EvidenceRevisionID: "EV-PARTIAL-REV-1",
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = application.GetFeatureTimelineForCard(ctx, f.uow, f.rec, f.rec, mustFeatureCardID(t, "FC-1"))
+	if !errors.Is(err, application.ErrStoredStateIntegrity) {
+		t.Fatalf("err = %v, want ErrStoredStateIntegrity", err)
+	}
+}
+
+func TestTimelineEventDetailNamesDecisionPlanAndExecutionSemantics(t *testing.T) {
+	f := newCommandFixture()
+	ctx := context.Background()
+	seedCapability(t, f)
+	if _, err := (application.RecordArchitectureDecisionCommand{
+		DecisionID: "DEC-1", SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1",
+		Question: "How should media be stored?", OutcomeStatement: "Use external content-addressed media.",
+		EvidenceArtifactID: "EV-PENDING", EvidenceRevisionID: "EV-PENDING-REV-1",
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
+		t.Fatal(err)
+	}
+	establishPlan(t, f, "VP-1", "VP-1-REV-1")
+	if _, err := (application.RecordValidationRunCommand{
+		ExecutionID: "ER-1", PlanArtifactID: "VP-1", PlanRevisionID: "VP-1-REV-1", ActivityKey: "A-1",
+		SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1", Method: "manual-review", Outcome: "completed",
+		EvidenceArtifactID: "EV-PENDING", EvidenceRevisionID: "EV-PENDING-REV-1", EvidenceLocator: "https://evidence.example/EV-PENDING",
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
+		t.Fatal(err)
+	}
+
+	timeline, err := application.GetFeatureTimelineForCard(ctx, f.uow, f.rec, f.rec, mustFeatureCardID(t, "FC-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSummary := map[application.EventKind][]string{
+		application.EventDecisionRecorded:  {"Use external content-addressed media."},
+		application.EventPlanRevised:       {"A-1", "manual-review", "Satisfied when reviewed.", "reviewer note"},
+		application.EventExecutionRecorded: {"A-1", "peos:completed"},
+	}
+	seen := make(map[application.EventKind]bool, len(wantSummary))
+	for _, event := range append(timeline.Undated, timeline.Dated...) {
+		parts, relevant := wantSummary[event.Kind]
+		if !relevant {
+			continue
+		}
+		seen[event.Kind] = true
+		for _, part := range parts {
+			if !strings.Contains(event.Summary, part) {
+				t.Errorf("%s summary = %q, want %q", event.Kind, event.Summary, part)
+			}
+		}
+		if event.Kind == application.EventPlanRevised && !containsTimelineReference(event.References, "REQ-1/REQ-1-REV-1") {
+			t.Errorf("plan references = %v, want exact Requirement revision", event.References)
+		}
+		if event.Kind == application.EventExecutionRecorded && !containsTimelineReference(event.References, "VP-1/VP-1-REV-1") {
+			t.Errorf("execution references = %v, want exact plan revision", event.References)
+		}
+	}
+	if len(seen) != len(wantSummary) {
+		t.Fatalf("seen detail kinds = %v, want %v", seen, wantSummary)
 	}
 }
 
@@ -150,7 +337,7 @@ func TestGetFeatureTimelineForCardRejectsCorruptDecisionEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := application.GetFeatureTimelineForCard(ctx, f.uow, f.rec, mustFeatureCardID(t, "FC-1"))
+	_, err := application.GetFeatureTimelineForCard(ctx, f.uow, f.rec, f.rec, mustFeatureCardID(t, "FC-1"))
 	if !errors.Is(err, application.ErrStoredStateIntegrity) {
 		t.Fatalf("err = %v, want ErrStoredStateIntegrity", err)
 	}
@@ -218,9 +405,14 @@ func TestGetFeatureEngineeringStateForCard_PriorRevisionClaimStaysStale(t *testi
 	}
 }
 
-func timelineEventKindCounts(t *testing.T, uow application.UnitOfWork, inspector application.EngineeringReplayInspector, cardID string) map[string]int {
+type timelineReadAuthority interface {
+	application.EngineeringProjector
+	application.EngineeringReplayInspector
+}
+
+func timelineEventKindCounts(t *testing.T, uow application.UnitOfWork, reader timelineReadAuthority, cardID string) map[string]int {
 	t.Helper()
-	result, err := application.GetFeatureTimelineForCard(context.Background(), uow, inspector, mustFeatureCardID(t, cardID))
+	result, err := application.GetFeatureTimelineForCard(context.Background(), uow, reader, reader, mustFeatureCardID(t, cardID))
 	if err != nil {
 		t.Fatalf("GetFeatureTimelineForCard: %v", err)
 	}

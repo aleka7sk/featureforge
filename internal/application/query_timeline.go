@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/aleka7sk/featureforge/internal/domain"
@@ -48,6 +49,13 @@ var kindRank = map[EventKind]int{
 	EventClaimCorrected:        10,
 	EventLifecycleTransitioned: 11,
 }
+
+// timelineLocalActor is the one configured human actor in this bounded POC.
+// Project and FeatureCard establishment do not persist a separate actor field;
+// their commands are nevertheless performed by this configured actor
+// (AD-031). PEOS-backed sources are authoritatively inspected before this
+// value is used as the product-facing projection.
+const timelineLocalActor = "featureforge:local-user"
 
 // TimelineEvent is one entry in a feature's engineering timeline
 // (FF-010 §9).
@@ -284,13 +292,12 @@ func DiscoverEvidenceArtifactIDs(ctx context.Context, repos Repositories, inspec
 	return out, nil
 }
 
-// DiscoverDecisionEvidenceArtifactIDs returns every Evidence Artifact cited
-// by the supplied Decisions. Unlike the execution/claim projection helper
-// above, a Decision citation is included only after both sides of the
-// relationship have passed their authoritative integrity checks: the Decision
-// payload must agree with its projections and references, and the exact cited
-// Evidence Artifact/Revision pair must be complete and valid. A dangling
-// citation is a broken timeline source, never an omitted event.
+// DiscoverDecisionEvidenceArtifactIDs returns every materialised Evidence
+// Artifact cited by the supplied Decisions. C8 has one governed forward-
+// citation exception: when both the exact Artifact and Revision are absent,
+// the Decision remains a readable timeline event and its EvidenceKey remains
+// an explicit pending reference. Any partial or contradictory occupancy still
+// fails closed; execution/claim Evidence references have no such exception.
 func DiscoverDecisionEvidenceArtifactIDs(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, decisionIDs []string) ([]string, error) {
 	seen := make(map[string]bool, len(decisionIDs))
 	out := make([]string, 0, len(decisionIDs))
@@ -326,8 +333,14 @@ func DiscoverDecisionEvidenceArtifactIDs(ctx context.Context, repos Repositories
 		if err != nil {
 			return nil, err
 		}
-		if !artifactFound || !revisionFound {
-			return nil, fmt.Errorf("%w: decision %s cites unresolved evidence %s", ErrTimelineSourceInvalid, key, revisionKey)
+		if !artifactFound && !revisionFound {
+			// Structurally valid, wholly absent Decision evidence is the sole
+			// AD-030/FF-022 forward-citation exception. Do not manufacture an
+			// Evidence event; the Decision event still carries the exact key.
+			continue
+		}
+		if artifactFound != revisionFound {
+			return nil, integrityError("decision evidence citation is partially materialised", nil)
 		}
 		if _, err := validateEvidencePairOccupancy(ctx, repos, inspector, artifact, revision); err != nil {
 			return nil, err
@@ -344,7 +357,7 @@ func DiscoverDecisionEvidenceArtifactIDs(ctx context.Context, repos Repositories
 // GetFeatureTimeline computes a feature's complete engineering timeline
 // (FF-010 §9). It is read-only and deterministic: repeated calls on
 // unchanged data return byte-identical results. No source value is mutated.
-func GetFeatureTimeline(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, in TimelineInput) (TimelineResult, error) {
+func GetFeatureTimeline(ctx context.Context, repos Repositories, projector EngineeringProjector, inspector EngineeringReplayInspector, in TimelineInput) (TimelineResult, error) {
 	var events []TimelineEvent
 	var lifecycleHistory LifecycleHistory
 	if in.CapabilityArtifactID != "" {
@@ -358,16 +371,18 @@ func GetFeatureTimeline(ctx context.Context, repos Repositories, inspector Engin
 	events = append(events, TimelineEvent{
 		EventID: string(EventProjectCreated) + ":" + in.Project.ID().String(),
 		Kind:    EventProjectCreated, OccurredAt: in.Project.CreatedAt(), HasOccurredAt: true,
-		Label: "Project created", Summary: in.Project.Name(), SourceIdentity: in.Project.ID().String(),
-		Rationale: "project creation timestamp",
+		Actor: timelineLocalActor, Label: "Project created", Summary: in.Project.Name(), SourceIdentity: in.Project.ID().String(),
+		References: []string{in.Project.ID().String()},
+		Rationale:  "project creation timestamp",
 	})
 
 	events = append(events, TimelineEvent{
 		EventID:       string(EventFeatureCreated) + ":" + in.FeatureCard.ID().String(),
 		FeatureCardID: in.FeatureCard.ID(), Kind: EventFeatureCreated,
 		OccurredAt: in.FeatureCard.CreatedAt(), HasOccurredAt: true,
-		Label: "Feature card created", Summary: in.FeatureCard.Title(), SourceIdentity: in.FeatureCard.ID().String(),
-		Rationale: "feature card creation timestamp",
+		Actor: timelineLocalActor, Label: "Feature card created", Summary: in.FeatureCard.Title(), SourceIdentity: in.FeatureCard.ID().String(),
+		References: []string{in.FeatureCard.ID().String(), in.FeatureCard.ProjectID().String()},
+		Rationale:  "feature card creation timestamp",
 	})
 
 	if in.CapabilityArtifactID != "" {
@@ -415,7 +430,7 @@ func GetFeatureTimeline(ctx context.Context, repos Repositories, inspector Engin
 				events = append(events, TimelineEvent{
 					EventID: string(kind) + ":" + a.RecordID, FeatureCardID: in.FeatureCard.ID(), Kind: kind,
 					OccurredAt: a.EffectiveAt, HasOccurredAt: true, Actor: a.Actor, Label: label,
-					Summary: string(a.State), SourceIdentity: a.RecordID, References: []string{rev.Key.String()},
+					Summary: string(a.State), SourceIdentity: a.RecordID, References: []string{a.RecordID, rev.Key.String()},
 					Rationale: "acceptance journal entry",
 				})
 			}
@@ -423,6 +438,9 @@ func GetFeatureTimeline(ctx context.Context, repos Repositories, inspector Engin
 	}
 
 	for _, reqID := range in.RequirementArtifactIDs {
+		if _, err := validateManagedHistory(ctx, repos, inspector, reqID, engineering.RevisionFamilyRequirement, true); err != nil {
+			return TimelineResult{}, err
+		}
 		revisions, err := repos.Revisions.ListByArtifact(ctx, reqID)
 		if err != nil {
 			return TimelineResult{}, err
@@ -434,7 +452,28 @@ func GetFeatureTimeline(ctx context.Context, repos Repositories, inspector Engin
 			if err := inspectRevision(inspector, rev); err != nil {
 				return TimelineResult{}, err
 			}
-			events = append(events, timelineFromRevision(in.FeatureCard.ID(), EventRequirementRevised, "Requirement recorded", reqID, rev))
+			order, found, err := repos.RevisionOrder.Get(ctx, rev.Key)
+			if err != nil {
+				return TimelineResult{}, err
+			}
+			if !found {
+				return TimelineResult{}, integrityError("requirement timeline source has no revision order", nil)
+			}
+			trace, found, err := repos.RequirementTraces.Get(ctx, rev.Key)
+			if err != nil {
+				return TimelineResult{}, err
+			}
+			if !found {
+				return TimelineResult{}, integrityError("requirement timeline source has no criterion trace", nil)
+			}
+			if err := validateRequirementCriterionTrace(ctx, repos, inspector, rev, order, trace); err != nil {
+				return TimelineResult{}, err
+			}
+			traceIdentity := trace.CapabilityRevision.String() + "#" + trace.AcceptanceCriterionKey
+			event := timelineFromRevision(in.FeatureCard.ID(), EventRequirementRevised, "Requirement recorded", reqID+"; exact trace "+traceIdentity, rev)
+			event.References = appendUniqueTimelineReference(event.References, trace.CapabilityRevision.String())
+			event.References = appendUniqueTimelineReference(event.References, "criterion:"+traceIdentity)
+			events = append(events, event)
 		}
 	}
 
@@ -453,7 +492,14 @@ func GetFeatureTimeline(ctx context.Context, repos Repositories, inspector Engin
 		if err := inspectRecord(inspector, rec); err != nil {
 			return TimelineResult{}, err
 		}
-		events = append(events, timelineFromRecord(in.FeatureCard.ID(), EventDecisionRecorded, "Decision recorded", "", rec))
+		if projector == nil {
+			return TimelineResult{}, integrityError("timeline engineering projector is unavailable", nil)
+		}
+		detail, err := projector.ProjectDecisionDetail(rec.Payload)
+		if err != nil {
+			return TimelineResult{}, integrityError("decision timeline detail is unreadable", err)
+		}
+		events = append(events, timelineFromRecord(in.FeatureCard.ID(), EventDecisionRecorded, "Decision recorded", detail.OutcomeStatement, rec))
 	}
 
 	if in.PlanArtifactID != "" {
@@ -468,7 +514,36 @@ func GetFeatureTimeline(ctx context.Context, repos Repositories, inspector Engin
 			if err := inspectRevision(inspector, rev); err != nil {
 				return TimelineResult{}, err
 			}
-			events = append(events, timelineFromRevision(in.FeatureCard.ID(), EventPlanRevised, "Validation plan revision recorded", "", rev))
+			if projector == nil {
+				return TimelineResult{}, integrityError("timeline engineering projector is unavailable", nil)
+			}
+			activities, err := projector.ProjectPlanActivities(rev.Payload)
+			if err != nil {
+				return TimelineResult{}, integrityError("validation-plan timeline detail is unreadable", err)
+			}
+			_, activityKeys, _, subjects, requirements, err := inspector.ValidationPlanReferences(rev)
+			if err != nil {
+				return TimelineResult{}, integrityError("validation-plan timeline references are unreadable", err)
+			}
+			if len(activities) != len(activityKeys) {
+				return TimelineResult{}, integrityError("validation-plan timeline activity projections disagree", nil)
+			}
+			parts := make([]string, 0, len(activities))
+			for i, activity := range activities {
+				if activity.Key != activityKeys[i] {
+					return TimelineResult{}, integrityError("validation-plan timeline activity keys disagree", nil)
+				}
+				part := activity.Key + " (" + activity.Method + ": " + activity.OutcomeInterpretation + ")"
+				if len(activity.ExpectedEvidence) > 0 {
+					part += " expects " + strings.Join(activity.ExpectedEvidence, ", ")
+				}
+				parts = append(parts, part)
+			}
+			event := timelineFromRevision(in.FeatureCard.ID(), EventPlanRevised, "Validation plan revision recorded", "activities "+strings.Join(parts, "; "), rev)
+			for _, reference := range append(subjects, requirements...) {
+				event.References = appendUniqueTimelineReference(event.References, reference.String())
+			}
+			events = append(events, event)
 		}
 	}
 
@@ -487,7 +562,13 @@ func GetFeatureTimeline(ctx context.Context, repos Repositories, inspector Engin
 		if err := inspectRecord(inspector, rec); err != nil {
 			return TimelineResult{}, err
 		}
-		events = append(events, timelineFromRecord(in.FeatureCard.ID(), EventExecutionRecorded, "Validation activity executed", rec.Outcome, rec))
+		plan, activityKey, _, err := inspector.ExecutionPlanActivity(rec)
+		if err != nil {
+			return TimelineResult{}, integrityError("execution timeline activity is unreadable", err)
+		}
+		event := timelineFromRecord(in.FeatureCard.ID(), EventExecutionRecorded, "Validation activity executed", activityKey+" — "+rec.Outcome, rec)
+		event.References = appendUniqueTimelineReference(event.References, plan.String())
+		events = append(events, event)
 	}
 
 	for _, evID := range in.EvidenceArtifactIDs {
@@ -550,7 +631,20 @@ func GetFeatureTimeline(ctx context.Context, repos Repositories, inspector Engin
 	}
 
 	if lifecycleHistory.Found {
+		policySummary := timelineLifecyclePolicySummary(lifecycleHistory.Policy)
 		for _, node := range lifecycleHistory.Assignments {
+			references := []string{
+				node.Assignment.Key.String(),
+				node.Transition.Key.String(),
+				lifecycleHistory.Policy.DefinitionID + "/" + lifecycleHistory.Policy.VersionID,
+				node.Detail.SubjectArtifactID,
+			}
+			if node.TransitionDetail.FromAssignmentID != "" {
+				references = append(references, engineering.RecordKey{
+					Kind: engineering.RecordKindStateAssignment,
+					ID:   node.TransitionDetail.FromAssignmentID,
+				}.String())
+			}
 			events = append(events, TimelineEvent{
 				EventID:        string(EventLifecycleTransitioned) + ":" + node.Assignment.Key.String(),
 				FeatureCardID:  in.FeatureCard.ID(),
@@ -559,13 +653,10 @@ func GetFeatureTimeline(ctx context.Context, repos Repositories, inspector Engin
 				HasOccurredAt:  true,
 				Actor:          node.TransitionDetail.Actor,
 				Label:          "Lifecycle state -> " + node.Detail.StateID,
-				Summary:        node.Detail.StateID,
+				Summary:        node.Detail.StateID + "; " + policySummary,
 				SourceIdentity: node.Assignment.Key.String(),
-				References: []string{
-					node.Transition.Key.String(),
-					lifecycleHistory.Policy.DefinitionID + "/" + lifecycleHistory.Policy.VersionID,
-				},
-				Rationale: "validated lifecycle predecessor-chain order",
+				References:     references,
+				Rationale:      "validated lifecycle predecessor-chain order",
 			})
 		}
 	}
@@ -573,11 +664,35 @@ func GetFeatureTimeline(ctx context.Context, repos Repositories, inspector Engin
 	return sortTimeline(events), nil
 }
 
+func timelineLifecyclePolicySummary(policy engineering.LifecyclePolicy) string {
+	transitionParts := make([]string, 0, len(policy.Transitions()))
+	for _, transition := range policy.Transitions() {
+		transitionParts = append(transitionParts, transition.TransitionID+" ["+strings.Join(transition.SourceStates, ", ")+" -> "+strings.Join(transition.TargetStates, ", ")+"]")
+	}
+	return "policy " + policy.DefinitionID + "/" + policy.VersionID +
+		"; entry transition " + policy.EntryTransitionID +
+		"; initial states " + strings.Join(policy.InitialStates(), ", ") +
+		"; transitions " + strings.Join(transitionParts, "; ")
+}
+
+func appendUniqueTimelineReference(references []string, candidate string) []string {
+	for _, reference := range references {
+		if reference == candidate {
+			return references
+		}
+	}
+	return append(references, candidate)
+}
+
 func timelineFromArtifact(cardID domain.FeatureCardID, kind EventKind, label string, env engineering.ArtifactEnvelope) TimelineEvent {
+	references := []string{env.Key.String()}
+	if !cardID.IsZero() {
+		references = append(references, cardID.String())
+	}
 	return TimelineEvent{
 		EventID: string(kind) + ":" + env.Key.String(), FeatureCardID: cardID, Kind: kind,
-		OccurredAt: env.RecordedAt, HasOccurredAt: true, Label: label, Summary: env.ArtifactType,
-		SourceIdentity: env.Key.String(), Rationale: "artifact recorded-at time",
+		OccurredAt: env.RecordedAt, HasOccurredAt: true, Actor: timelineLocalActor, Label: label, Summary: env.ArtifactType,
+		SourceIdentity: env.Key.String(), References: references, Rationale: "artifact recorded-at time",
 	}
 }
 
@@ -590,30 +705,44 @@ func timelineFromRevision(cardID domain.FeatureCardID, kind EventKind, label, su
 	if summary == "" {
 		summary = string(env.RevisionFamily)
 	}
-	actor := env.ProvenanceActor
+	actor := timelineActor(env.ProvenanceActor)
+	references := []string{env.Key.String()}
+	if env.SubjectKey != "" {
+		references = append(references, env.SubjectKey)
+	}
 	return TimelineEvent{
 		EventID: string(kind) + ":" + env.Key.String(), FeatureCardID: cardID, Kind: kind,
 		OccurredAt: occurredAt, HasOccurredAt: hasOccurredAt, Actor: actor, Label: label, Summary: summary,
-		SourceIdentity: env.Key.String(), Rationale: "revision provenance recorded-at time",
+		SourceIdentity: env.Key.String(), References: references, Rationale: "revision provenance recorded-at time",
 	}
 }
 
 // timelineFromRecord builds one timeline event from a record's own
-// projected fields. References always names the record's subject, plus --
-// for a record that cites evidence or an execution, such as
-// execution.recorded and claim.recorded/corrected -- the existing
-// EvidenceKeys/ExecutionKeys projections (FF-020 §5, FF-001 §3.6:
-// "execution records with outcomes and evidence"), so a reader can follow
-// an event to what it produced or relied on without a second query.
+// projected fields. References always name the record itself and its subject,
+// plus every projected criterion, evidence, execution, and correction target
+// it governs (FF-020 §5, FF-001 §3.6: "execution records with outcomes and
+// evidence"), so a reader can follow what an event produced, relied on, or
+// corrected without a second query.
 func timelineFromRecord(cardID domain.FeatureCardID, kind EventKind, label, summary string, env engineering.RecordEnvelope) TimelineEvent {
-	references := []string{env.SubjectKey}
+	references := []string{env.Key.String(), env.SubjectKey}
+	references = append(references, env.CriterionKeys...)
 	references = append(references, env.EvidenceKeys...)
 	references = append(references, env.ExecutionKeys...)
+	if env.HasCorrection() {
+		references = append(references, engineering.RecordKey{Kind: engineering.RecordKindClaim, ID: env.CorrectionTargetID}.String())
+	}
 	return TimelineEvent{
 		EventID: string(kind) + ":" + env.Key.String(), FeatureCardID: cardID, Kind: kind,
-		OccurredAt: env.OccurredAt, HasOccurredAt: env.HasOccurredAt, Label: label, Summary: summary,
+		OccurredAt: env.OccurredAt, HasOccurredAt: env.HasOccurredAt, Actor: timelineLocalActor, Label: label, Summary: summary,
 		SourceIdentity: env.Key.String(), References: references, Rationale: "record's own occurred-at time",
 	}
+}
+
+func timelineActor(actor string) string {
+	if actor == "" {
+		return timelineLocalActor
+	}
+	return actor
 }
 
 // sortTimeline partitions events into dated and undated groups and orders
@@ -626,6 +755,7 @@ func sortTimeline(events []TimelineEvent) TimelineResult {
 		if e.HasOccurredAt {
 			dated = append(dated, e)
 		} else {
+			e.Rationale = appendTimelineRationale(e.Rationale, "no recorded timestamp; placed in the undated group above dated history")
 			undated = append(undated, e)
 		}
 	}
@@ -639,6 +769,28 @@ func sortTimeline(events []TimelineEvent) TimelineResult {
 		}
 		return a.SourceIdentity < b.SourceIdentity
 	})
+	for first := 0; first < len(dated); {
+		last := first + 1
+		for last < len(dated) && dated[first].OccurredAt.Equal(dated[last].OccurredAt) {
+			last++
+		}
+		if last-first > 1 {
+			for i := first; i < last; i++ {
+				// FF-006 requires every member of an equal-time group to
+				// explain the complete deterministic tie-break, including
+				// the final source-identity comparison.
+				dated[i].Rationale = appendTimelineRationale(dated[i].Rationale, "equal timestamp; ordered by kind-rank, then source-identity")
+			}
+		}
+		first = last
+	}
 	sort.Slice(undated, func(i, j int) bool { return undated[i].SourceIdentity < undated[j].SourceIdentity })
 	return TimelineResult{Dated: dated, Undated: undated}
+}
+
+func appendTimelineRationale(existing, explanation string) string {
+	if existing == "" {
+		return explanation
+	}
+	return existing + "; " + explanation
 }

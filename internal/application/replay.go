@@ -451,7 +451,7 @@ func validateCapabilityArtifactByID(ctx context.Context, r Repositories, inspect
 }
 
 func validateStateAssignmentAct(ctx context.Context, r Repositories, inspector EngineeringReplayInspector, assignment engineering.RecordEnvelope) error {
-	return validateStateAssignmentActFrom(ctx, r, inspector, assignment, make(map[engineering.RecordKey]struct{}))
+	return validateStateAssignmentActFrom(ctx, r, inspector, assignment, make(map[engineering.RecordKey]int), nil)
 }
 
 func validateStateAssignmentRoot(ctx context.Context, r Repositories, inspector EngineeringReplayInspector, assignment engineering.RecordEnvelope) error {
@@ -475,12 +475,12 @@ func validateStateAssignmentRoot(ctx context.Context, r Repositories, inspector 
 	return validateForeignArtifactOccupancy(ctx, r, inspector, artifact)
 }
 
-func validateStateAssignmentActFrom(ctx context.Context, r Repositories, inspector EngineeringReplayInspector, assignment engineering.RecordEnvelope, visiting map[engineering.RecordKey]struct{}) error {
-	if _, cycle := visiting[assignment.Key]; cycle {
-		return integrityError("lifecycle predecessor chain contains a cycle", nil)
-	}
-	visiting[assignment.Key] = struct{}{}
-	defer delete(visiting, assignment.Key)
+type lifecyclePredecessorStep struct {
+	assignmentID string
+	transition   engineering.RevisionKey
+}
+
+func validateStateAssignmentActFrom(ctx context.Context, r Repositories, inspector EngineeringReplayInspector, assignment engineering.RecordEnvelope, visiting map[engineering.RecordKey]int, path []lifecyclePredecessorStep) error {
 	if err := inspectRecord(inspector, assignment); err != nil {
 		return err
 	}
@@ -488,6 +488,12 @@ func validateStateAssignmentActFrom(ctx context.Context, r Repositories, inspect
 	if err != nil {
 		return integrityError("state assignment parent projection is unreadable", err)
 	}
+	if cycleStart, cycle := visiting[assignment.Key]; cycle {
+		return integrityError(lifecycleCycleDiagnostic(path[cycleStart:]), nil)
+	}
+	visiting[assignment.Key] = len(path)
+	path = append(path, lifecyclePredecessorStep{assignmentID: assignment.Key.ID, transition: parentKey})
+	defer delete(visiting, assignment.Key)
 	parent, found, err := r.Revisions.Get(ctx, parentKey)
 	if err != nil {
 		return err
@@ -585,7 +591,7 @@ func validateStateAssignmentActFrom(ctx context.Context, r Repositories, inspect
 		if predecessor.SubjectKey != assignment.SubjectKey {
 			return integrityError("transition predecessor belongs to another lifecycle subject", nil)
 		}
-		if err := validateStateAssignmentActFrom(ctx, r, inspector, predecessor, visiting); err != nil {
+		if err := validateStateAssignmentActFrom(ctx, r, inspector, predecessor, visiting, path); err != nil {
 			return err
 		}
 		predecessorParent, err := inspector.StateAssignmentEstablishedBy(predecessor)
@@ -601,6 +607,25 @@ func validateStateAssignmentActFrom(ctx context.Context, r Repositories, inspect
 		return integrityError("state assignment subject projection is invalid", err)
 	}
 	return validateCapabilityArtifactByID(ctx, r, inspector, subjectArtifactID, "state assignment subject")
+}
+
+func lifecycleCycleDiagnostic(path []lifecyclePredecessorStep) string {
+	steps := append([]lifecyclePredecessorStep(nil), path...)
+	sort.Slice(steps, func(i, j int) bool {
+		if steps[i].assignmentID != steps[j].assignmentID {
+			return steps[i].assignmentID < steps[j].assignmentID
+		}
+		return steps[i].transition.String() < steps[j].transition.String()
+	})
+	pairs := make([]string, 0, len(steps))
+	for _, step := range steps {
+		pairs = append(pairs, fmt.Sprintf(
+			"assignment %s via transition revision %s",
+			step.assignmentID,
+			step.transition,
+		))
+	}
+	return "lifecycle predecessor chain contains a cycle among assignment/transition pairs [" + strings.Join(pairs, ", ") + "]"
 }
 
 // validateManagedForeignOccupant proves that a pair occupied by another
@@ -688,7 +713,7 @@ func validateForeignArtifactOccupancy(ctx context.Context, r Repositories, inspe
 		}
 		revisionSet := make(map[engineering.RevisionKey]struct{}, len(revisions))
 		rootSubject := ""
-		entryCount := 0
+		entryRevisions := make([]engineering.RevisionKey, 0, 1)
 		for _, revision := range revisions {
 			if err := inspectRevision(inspector, revision); err != nil {
 				return err
@@ -706,15 +731,15 @@ func validateForeignArtifactOccupancy(ctx context.Context, r Repositories, inspe
 				return integrityError("transition-record predecessor shape is unreadable", inspectErr)
 			}
 			if !hasPredecessor {
-				entryCount++
+				entryRevisions = append(entryRevisions, revision.Key)
 				if !canonicalTimeEqual(artifact.RecordedAt, revision.RecordedAt) {
 					return integrityError("transition-record artifact and entry revision disagree on recorded time", nil)
 				}
 			}
 			revisionSet[revision.Key] = struct{}{}
 		}
-		if entryCount != 1 {
-			return integrityError("transition-record root must contain exactly one entry revision", nil)
+		if len(entryRevisions) == 0 {
+			return integrityError("transition-record root has no entry revision", nil)
 		}
 		owners := make(map[engineering.RevisionKey][]engineering.RecordEnvelope, len(revisions))
 		for _, assignment := range assignments {
@@ -734,6 +759,18 @@ func validateForeignArtifactOccupancy(ctx context.Context, r Repositories, inspe
 			if len(owners[revision.Key]) != 1 {
 				return integrityError("foreign transition revision must have exactly one assignment", nil)
 			}
+		}
+		if len(entryRevisions) > 1 {
+			entries := make([]lifecycleSuccessor, 0, len(entryRevisions))
+			for _, revisionKey := range entryRevisions {
+				entries = append(entries, lifecycleSuccessor{
+					assignmentID: owners[revisionKey][0].Key.ID,
+					transition:   revisionKey,
+				})
+			}
+			return integrityError(lifecycleDuplicateEntryDiagnostic(entries), nil)
+		}
+		for _, revision := range revisions {
 			if err := validateStateAssignmentAct(ctx, r, inspector, owners[revision.Key][0]); err != nil {
 				return err
 			}

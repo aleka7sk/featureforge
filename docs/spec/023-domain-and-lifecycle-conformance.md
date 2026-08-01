@@ -307,12 +307,13 @@ whole Q5 with opaque 500 rather than returning a partial timeline.
 
 Q5 discovers Evidence as the deduplicated union of exact citations from every
 validated Decision plus the history-wide Execution and Claim population. Each
-selected record and exact Evidence Artifact/Revision pair is inspected before
-event emission. An unresolved C8 citation is coherent command state but cannot
-produce a complete timeline, so it retains `409 timeline_source_invalid`;
-dangling Execution/Claim evidence contradicts their mandatory reference
-invariant and is opaque stored-state integrity (`500`). Neither condition may
-silently omit an event or return a partial timeline.
+selected record is inspected before event emission. A governed C8 citation
+whose exact Evidence Artifact and Revision are both absent remains a pending
+reference on the readable Decision event and produces no invented Evidence
+event. A partially occupied or contradictory C8 pair, and dangling
+Execution/Claim evidence, are opaque stored-state integrity (`500`) because the
+latter references are mandatory. No corrupt condition may silently omit an
+event or return a partial timeline.
 
 ## 9. Corrected canonical scenario
 

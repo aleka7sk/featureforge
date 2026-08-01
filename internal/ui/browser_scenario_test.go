@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/aleka7sk/featureforge/internal/application"
-	"github.com/aleka7sk/featureforge/internal/engineering"
 	"github.com/aleka7sk/featureforge/internal/engineering/peos"
 	"github.com/aleka7sk/featureforge/internal/infrastructure/memory"
 	"github.com/aleka7sk/featureforge/internal/scenario"
@@ -32,6 +31,7 @@ import (
 // extraction, matching FF-021 §14's "no new dependency" constraint.
 
 var formActionRe = regexp.MustCompile(`<form[^>]*\baction="([^"]+)"`)
+var hrefRe = regexp.MustCompile(`href="([^"]+)"`)
 
 func inputValue(t *testing.T, html, name string) string {
 	t.Helper()
@@ -72,6 +72,39 @@ func linkHrefFor(t *testing.T, html, text string) string {
 		t.Fatalf("link %q not found in page:\n%s", text, html)
 	}
 	return m[1]
+}
+
+// codeLinkHrefFor follows an identity link rendered as <code> inside an
+// anchor, which is how Timeline references remain both exact and clickable.
+func codeLinkHrefFor(t *testing.T, html, identity string) string {
+	t.Helper()
+	re := regexp.MustCompile(`<a href="([^"]+)"[^>]*><code>` + regexp.QuoteMeta(identity) + `</code></a>`)
+	m := re.FindStringSubmatch(html)
+	if m == nil {
+		t.Fatalf("identity link %q not found in page:\n%s", identity, html)
+	}
+	return m[1]
+}
+
+func assertEveryTimelineLinkIsReadable(t *testing.T, b *browserSession, page string) {
+	t.Helper()
+	seen := make(map[string]bool)
+	for _, match := range hrefRe.FindAllStringSubmatch(page, -1) {
+		href := strings.ReplaceAll(match[1], "&amp;", "&")
+		parsed, err := url.Parse(href)
+		if err != nil || !strings.HasPrefix(parsed.Path, "/") {
+			continue
+		}
+		target := parsed.EscapedPath()
+		if parsed.RawQuery != "" {
+			target += "?" + parsed.RawQuery
+		}
+		if seen[target] {
+			continue
+		}
+		seen[target] = true
+		b.get(target)
+	}
 }
 
 // browserSession is the smallest thing that behaves like a browser against
@@ -123,32 +156,6 @@ func (b *browserSession) submit(action string, values url.Values) string {
 		b.t.Fatalf("POST %s: status = %d, want 303; body = %s", action, rr.Code, rr.Body.String())
 	}
 	return rr.Header().Get("Location")
-}
-
-// recordDecisionEvidenceForUI records the one canonical act that has no UI or
-// HTTP command of its own. Every other Evidence Artifact is created together
-// with a validation run; the Decision's EV-0 must still exist so Q5 can follow
-// the Decision's authoritative EvidenceKeys projection instead of silently
-// dropping that timeline event.
-func recordDecisionEvidenceForUI(t *testing.T, uow application.UnitOfWork, rec peos.Recorder, now time.Time) {
-	t.Helper()
-	ctx := context.Background()
-	err := uow.Do(ctx, func(r application.Repositories) error {
-		artifact, revision, err := rec.RecordEvidence(engineering.EvidenceInput{
-			ArtifactID: scenario.DecisionEvidenceID, RevisionID: scenario.DecisionEvidenceID + "-REV-1",
-			Locator: "https://evidence.example/" + scenario.DecisionEvidenceID, RecordedAt: now,
-		})
-		if err != nil {
-			return err
-		}
-		if err := r.Artifacts.Put(ctx, artifact); err != nil {
-			return err
-		}
-		return r.Revisions.Put(ctx, revision)
-	})
-	if err != nil {
-		t.Fatalf("record decision evidence: %v", err)
-	}
 }
 
 // runCanonicalScenarioThroughUIBrowser drives the full FF-011 lifecycle by
@@ -206,17 +213,17 @@ func runCanonicalScenarioThroughUIBrowser(t *testing.T, uow application.UnitOfWo
 
 	// 5. Assign the drafting entry after the accepted founding revision.
 	overview = b.get("/features/" + scenario.FeatureCardID)
-	loc = b.submit(formActionAfter(t, overview, "Assign a lifecycle state"), url.Values{
+	lifecycleAction := formActionAfter(t, overview, "Assign a lifecycle state")
+	loc = b.submit(lifecycleAction, url.Values{
 		"assignment_id": {scenario.EntryAssignmentID}, "state": {"drafting"}, "is_entry": {"true"},
 		"transition_record_artifact_id": {scenario.TransitionRecordArtifactID},
 		"transition_record_revision_id": {scenario.EntryTransitionRevisionID},
 	})
 	tick()
 
-	// 6. Record the Decision's cited Evidence, then follow "Decisions" to
-	// record DEC-1. No standalone Evidence form exists.
-	recordDecisionEvidenceForUI(t, uow, rec, clock.Now())
-	tick()
+	// 6. Follow "Decisions" to record DEC-1. C8 forward-cites EV-1; the
+	// later A-1 validation-run form materialises that exact Evidence pair. Q5
+	// stays readable and exposes the exact citation as an honest pending target.
 	overview = b.get(loc)
 	decisionsHref := linkHrefFor(t, overview, "Decisions")
 	decisions := b.get(decisionsHref)
@@ -225,13 +232,20 @@ func runCanonicalScenarioThroughUIBrowser(t *testing.T, uow application.UnitOfWo
 		"question":             {"Should homework support an optional audio attachment?"},
 		"outcome_statement":    {"Homework supports at most one optional audio attachment."},
 		"alternatives":         {"Store audio inline.\nStore audio externally."},
-		"evidence_artifact_id": {scenario.DecisionEvidenceID}, "evidence_revision_id": {scenario.DecisionEvidenceID + "-REV-1"},
+		"evidence_artifact_id": {scenario.EvidenceIDs["A-1"]}, "evidence_revision_id": {scenario.EvidenceIDs["A-1"] + "-REV-1"},
 		"assumptions": {"Audio files are hosted by an existing media service."},
 		"constraints": {"No binary storage in the first release."},
 		"rationale":   {"Referencing by content address avoids introducing binary storage."},
 	})
 	tick()
 	decisions = b.get(loc)
+	pendingTimeline := b.get(linkHrefFor(t, decisions, "Timeline"))
+	pendingEvidenceIdentity := "evidence:" + scenario.EvidenceIDs["A-1"] + "/" + scenario.EvidenceIDs["A-1"] + "-REV-1"
+	pendingReferenceHref := codeLinkHrefFor(t, pendingTimeline, pendingEvidenceIdentity)
+	pendingReference := b.get(pendingReferenceHref)
+	if !strings.Contains(pendingReference, "Pending evidence reference") || !strings.Contains(pendingReference, pendingEvidenceIdentity) {
+		t.Fatalf("expected an honest pending Decision evidence target, got %s", pendingReference)
+	}
 
 	// 7. Back to Revisions to add and accept Revision 2.
 	revisionsHref = linkHrefFor(t, decisions, "Revisions")
@@ -276,8 +290,9 @@ func runCanonicalScenarioThroughUIBrowser(t *testing.T, uow application.UnitOfWo
 	}
 
 	// 9. The traced Requirements support the drafting -> specified milestone.
-	overviewHref := linkHrefFor(t, requirements, "Overview")
-	overview = b.get(overviewHref)
+	// Navigate normally after C8; no action captured from stale pre-C8 HTML is
+	// reused to bypass the pending citation.
+	overview = b.get(linkHrefFor(t, requirements, "Overview"))
 	loc = b.submit(formActionAfter(t, overview, "Assign a lifecycle state"), url.Values{
 		"assignment_id": {scenario.SpecifiedAssignmentID}, "state": {"specified"},
 		"transition_record_artifact_id": {scenario.TransitionRecordArtifactID},
@@ -288,8 +303,7 @@ func runCanonicalScenarioThroughUIBrowser(t *testing.T, uow application.UnitOfWo
 
 	// 10. Establish the validation plan after specified.
 	overview = b.get(loc)
-	validationHref := linkHrefFor(t, overview, "Validation")
-	validation := b.get(validationHref)
+	validation := b.get(linkHrefFor(t, overview, "Validation"))
 	loc = b.submit(formActionAfter(t, validation, "Establish a validation plan"), url.Values{
 		"artifact_id": {scenario.PlanArtifactID}, "revision_id": {scenario.PlanRevisionID},
 		"acceptance_record_id": {"ACC-VP-1"},
@@ -298,17 +312,24 @@ func runCanonicalScenarioThroughUIBrowser(t *testing.T, uow application.UnitOfWo
 			"A-3|manual-inspection|Satisfied when the inspector confirms the attachment representation is resolvable.|REQ-3|REQ-3-REV-1|Inspection note"},
 	})
 	tick()
-	validation = b.get(loc)
 
 	// 11. Complete the first execution and evidence before entering
-	// under-validation; record its claim only after the transition.
+	// under-validation; record its claim only after the transition. The C10
+	// action is discovered from the post-C8, still-readable Validation page.
+	validation = b.get(loc)
 	loc = b.submit(formActionAfter(t, validation, "Record a validation run"), url.Values{
 		"execution_id": {"ER-1"}, "activity_key": {"A-1"}, "method": {"manual-review"}, "outcome": {"completed"},
 		"evidence_artifact_id": {"EV-1"}, "evidence_revision_id": {"EV-1-REV-1"}, "evidence_locator": {"https://evidence.example/EV-1"},
 	})
 	tick()
 	validation = b.get(loc)
-	overviewHref = linkHrefFor(t, validation, "Overview")
+	resolvedReference := b.get(pendingReferenceHref)
+	if strings.Contains(resolvedReference, "Pending evidence reference") ||
+		!strings.Contains(resolvedReference, "A matching authoritative source representation is present") ||
+		!strings.Contains(resolvedReference, "Evidence recorded") {
+		t.Fatalf("expected the original Decision reference target to resolve after C10, got %s", resolvedReference)
+	}
+	overviewHref := linkHrefFor(t, validation, "Overview")
 	overview = b.get(overviewHref)
 	loc = b.submit(formActionAfter(t, overview, "Assign a lifecycle state"), url.Values{
 		"assignment_id": {scenario.UnderValidationAssignmentID}, "state": {"under-validation"},
@@ -318,7 +339,7 @@ func runCanonicalScenarioThroughUIBrowser(t *testing.T, uow application.UnitOfWo
 	})
 	tick()
 	overview = b.get(loc)
-	validationHref = linkHrefFor(t, overview, "Validation")
+	validationHref := linkHrefFor(t, overview, "Validation")
 	validation = b.get(validationHref)
 	loc = b.submit(formActionAfter(t, validation, "Record a claim"), url.Values{
 		"claim_id": {scenario.ClaimForR1}, "requirement_artifact_id": {"REQ-1"}, "requirement_revision_id": {"REQ-1-REV-1"},
@@ -428,12 +449,16 @@ func assertCanonicalEndStateThroughUIBrowser(t *testing.T, handler http.Handler)
 	}
 
 	timeline := b.get("/features/" + scenario.FeatureCardID + "/timeline")
-	if !strings.Contains(timeline, "Decision recorded") || !strings.Contains(timeline, "evidence:"+scenario.DecisionEvidenceID+"/"+scenario.DecisionEvidenceID+"-REV-1") {
+	if !strings.Contains(timeline, "Decision recorded") || !strings.Contains(timeline, "evidence:"+scenario.EvidenceIDs["A-1"]+"/"+scenario.EvidenceIDs["A-1"]+"-REV-1") {
 		t.Errorf("expected the decision and its evidence reference on the unfiltered timeline, got %s", timeline)
 	}
-	if count := strings.Count(timeline, `<li class="timeline-item">`); count != 29 {
-		t.Errorf("timeline renders %d events, want 29", count)
+	if count := strings.Count(timeline, `<li class="timeline-item"`); count != 28 {
+		t.Errorf("timeline renders %d events, want 28", count)
 	}
+	if strings.Contains(timeline, "no internal read route") {
+		t.Errorf("canonical Timeline still contains a non-navigable reference: %s", timeline)
+	}
+	assertEveryTimelineLinkIsReadable(t, b, timeline)
 }
 
 // TestCanonicalScenarioThroughUIBrowser is FF-021's highest-value test
