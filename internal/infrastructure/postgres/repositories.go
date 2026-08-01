@@ -859,6 +859,32 @@ func (r orderRepo) ListByArtifact(ctx context.Context, artifactID string) ([]eng
 type requirementTraceRepo struct{ tx pgx.Tx }
 
 func (r requirementTraceRepo) Put(ctx context.Context, trace engineering.RequirementCriterionTrace) error {
+	// Validate both references before conflict resolution, matching the memory
+	// adapter and the repository contract. PostgreSQL may choose the
+	// ON CONFLICT no-op path without evaluating foreign keys for the excluded
+	// row; without these checks, reusing an occupied Requirement identity with
+	// a missing capability reference would incorrectly report immutable
+	// conflict instead of ErrReferencedValueMissing.
+	for _, reference := range []struct {
+		label string
+		key   engineering.RevisionKey
+	}{
+		{label: "requirement", key: trace.RequirementRevision},
+		{label: "capability", key: trace.CapabilityRevision},
+	} {
+		var found bool
+		if err := r.tx.QueryRow(ctx, `
+            SELECT EXISTS (
+                SELECT 1 FROM revision_envelopes
+                WHERE artifact_id = $1 AND revision_id = $2)`,
+			reference.key.ArtifactID, reference.key.RevisionID).Scan(&found); err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("%w: requirement trace references missing %s revision %s", application.ErrReferencedValueMissing, reference.label, reference.key)
+		}
+	}
+
 	tag, err := r.tx.Exec(ctx, `
         INSERT INTO requirement_criterion_traces (
             requirement_artifact_id, requirement_revision_id,
