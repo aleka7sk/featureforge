@@ -1,6 +1,7 @@
 package peos
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/aleka7sk/featureforge/internal/engineering"
@@ -29,6 +30,44 @@ func (Recorder) RecordCapabilityArtifact(artifactID string, recordedAt time.Time
 // RecordCapabilityRevision constructs a capability specification revision.
 func (Recorder) RecordCapabilityRevision(in engineering.CapabilityRevisionInput) (engineering.RevisionEnvelope, error) {
 	return BuildCapabilityRevision(in)
+}
+
+// RecordAIAssistedCapabilityRevision constructs the only AI-assisted
+// capability-revision representation admitted by AD-034/FF-024. Actor and
+// method remain fixed by this adapter; the caller supplies only the immutable
+// PEOS-free witness values.
+func (Recorder) RecordAIAssistedCapabilityRevision(in engineering.CapabilityRevisionInput, proposalDigest, contextDigest engineering.Digest, sources []string) (engineering.RevisionEnvelope, error) {
+	witness, err := engineering.NewAIAssistanceWitness(proposalDigest, contextDigest, sources)
+	if err != nil {
+		return engineering.RevisionEnvelope{}, err
+	}
+	in.AIAssistance = witness
+	return BuildCapabilityRevision(in)
+}
+
+// InspectAIAssistedCapabilityRevision validates the complete authoritative
+// payload before classifying its provenance form. found is false only for the
+// valid ordinary capability-revision representation; malformed AI metadata and
+// non-capability revisions return an error.
+func (Recorder) InspectAIAssistedCapabilityRevision(env engineering.RevisionEnvelope) (proposalDigest, contextDigest engineering.Digest, sources []string, found bool, err error) {
+	if err := (Recorder{}).ValidateRevision(env); err != nil {
+		return engineering.Digest{}, engineering.Digest{}, nil, false, err
+	}
+	if env.RevisionFamily != engineering.RevisionFamilyCapability {
+		return engineering.Digest{}, engineering.Digest{}, nil, false, fmt.Errorf("revision is not a capability")
+	}
+	revision, err := DecodeArtifactRevision(env.Payload)
+	if err != nil {
+		return engineering.Digest{}, engineering.Digest{}, nil, false, err
+	}
+	witness, found, err := inspectCapabilityRevisionAssistance(revision)
+	if err != nil {
+		return engineering.Digest{}, engineering.Digest{}, nil, false, err
+	}
+	if !found {
+		return engineering.Digest{}, engineering.Digest{}, nil, false, nil
+	}
+	return witness.ProposalDigest(), witness.ContextDigest(), witness.Sources(), true, nil
 }
 
 // RecordEvidence constructs the evidence Artifact and its one revision.

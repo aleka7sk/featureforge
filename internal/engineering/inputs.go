@@ -17,6 +17,10 @@ type CapabilityRevisionInput struct {
 	RevisionID    string
 	ContentDigest Digest
 	RecordedAt    time.Time
+	// AIAssistance is zero for the byte-identical ordinary capability form.
+	// Its only non-zero values are exact AD-034/FF-024 witnesses constructed
+	// by NewAIAssistanceWitness.
+	AIAssistance AIAssistanceWitness
 }
 
 // EvidenceInput records an evidence Artifact and its one revision, cited by

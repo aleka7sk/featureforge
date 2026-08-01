@@ -160,13 +160,16 @@ func BuildCapabilityRevision(in CapabilityRevisionInput) (engineering.RevisionEn
 	if err != nil {
 		return engineering.RevisionEnvelope{}, wrapPEOS("capability revision id", err)
 	}
-	origin, err := core.NewOrigin(core.OriginKindKnown, "")
+	origin, err := core.NewOrigin(core.OriginKindKnown, in.AIAssistance.OriginNote())
 	if err != nil {
 		return engineering.RevisionEnvelope{}, wrapPEOS("origin", err)
 	}
 	provenance, err := provenanceFor(in.RecordedAt)
 	if err != nil {
 		return engineering.RevisionEnvelope{}, err
+	}
+	if !in.AIAssistance.IsZero() {
+		provenance = provenance.WithMethod(ProvenanceMethodAIAssisted)
 	}
 	integrity, err := contentAddressedIntegrity(in.ContentDigest)
 	if err != nil {

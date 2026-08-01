@@ -370,8 +370,20 @@ func validateFeatureForgeRevisionRepresentation(env engineering.RevisionEnvelope
 	if origin.Kind().String() != core.OriginKindKnown.String() {
 		return fmt.Errorf("revision origin is not the configured known origin")
 	}
-	if _, hasNote := origin.Note(); hasNote || !origin.Extension().IsZero() {
-		return fmt.Errorf("revision origin carries unsupported metadata")
+	if !origin.Extension().IsZero() {
+		return fmt.Errorf("revision origin carries an unsupported extension")
+	}
+	if env.RevisionFamily == engineering.RevisionFamilyCapability {
+		if _, _, err := inspectCapabilityRevisionAssistance(revision); err != nil {
+			return err
+		}
+	} else {
+		if _, hasNote := origin.Note(); hasNote {
+			return fmt.Errorf("non-capability revision origin carries an unsupported note")
+		}
+		if _, hasMethod := revision.Provenance().Method(); hasMethod {
+			return fmt.Errorf("non-capability revision provenance carries an unsupported method")
+		}
 	}
 
 	switch env.RevisionFamily {
@@ -429,6 +441,25 @@ func validateFeatureForgeRevisionRepresentation(env engineering.RevisionEnvelope
 	default:
 		return fmt.Errorf("unsupported FeatureForge revision family %q", env.RevisionFamily)
 	}
+}
+
+func inspectCapabilityRevisionAssistance(revision core.ArtifactRevision) (engineering.AIAssistanceWitness, bool, error) {
+	method, hasMethod := revision.Provenance().Method()
+	note, hasNote := revision.Origin().Note()
+	if !hasMethod && !hasNote {
+		return engineering.AIAssistanceWitness{}, false, nil
+	}
+	if !hasMethod || method.String() != ProvenanceMethodAIAssisted.String() {
+		return engineering.AIAssistanceWitness{}, false, fmt.Errorf("capability revision carries an unsupported provenance method/origin combination")
+	}
+	if !hasNote {
+		return engineering.AIAssistanceWitness{}, false, fmt.Errorf("AI-assisted capability revision has no origin witness")
+	}
+	witness, err := engineering.ParseAIAssistanceOriginNote(note)
+	if err != nil {
+		return engineering.AIAssistanceWitness{}, false, fmt.Errorf("AI-assisted capability revision origin witness: %w", err)
+	}
+	return witness, true, nil
 }
 
 func validateContentAddressedRevisionIntegrity(revision core.ArtifactRevision, digest engineering.Digest) error {
@@ -963,7 +994,7 @@ func validateCanonicalPayload(payload []byte, coreRevision core.ArtifactRevision
 }
 
 func validateProvenanceProjection(provenance core.Provenance, actor string, hasActor bool, recordedAt time.Time, hasTime bool, envelopeRecordedAt time.Time) error {
-	if err := validateFeatureForgeProvenance(provenance); err != nil {
+	if err := validateFeatureForgeRevisionProvenance(provenance); err != nil {
 		return err
 	}
 	actualActor, actualHasActor := provenance.Actor()
@@ -999,13 +1030,22 @@ func validateRecordTime(provenance core.Provenance, env engineering.RecordEnvelo
 }
 
 func validateFeatureForgeProvenance(provenance core.Provenance) error {
+	if err := validateFeatureForgeRevisionProvenance(provenance); err != nil {
+		return err
+	}
+	if _, hasMethod := provenance.Method(); hasMethod {
+		return fmt.Errorf("provenance is not the configured local actor/time-only shape")
+	}
+	return nil
+}
+
+func validateFeatureForgeRevisionProvenance(provenance core.Provenance) error {
 	actor, hasActor := provenance.Actor()
 	_, hasTime := provenance.RecordedAt()
 	_, hasSource := provenance.Source()
-	_, hasMethod := provenance.Method()
 	_, hasExternalSource := provenance.ExternalSourceID()
-	if !hasActor || actor != LocalActorRef || !hasTime || hasSource || hasMethod || hasExternalSource || !provenance.Extension().IsZero() {
-		return fmt.Errorf("provenance is not the configured local actor/time-only shape")
+	if !hasActor || actor != LocalActorRef || !hasTime || hasSource || hasExternalSource || !provenance.Extension().IsZero() {
+		return fmt.Errorf("revision provenance is not the configured local actor/time shape")
 	}
 	return nil
 }

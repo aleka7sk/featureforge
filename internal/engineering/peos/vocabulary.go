@@ -62,6 +62,11 @@ var (
 // algorithm used for content-addressed representations and integrity values.
 var ContentAddressAlgorithm = mustVocabularyValue("sha256")
 
+// ProvenanceMethodAIAssisted is the sole additional provenance method admitted
+// by AD-034/FF-024, and only on capability revisions carrying the exact
+// governed known-Origin witness.
+var ProvenanceMethodAIAssisted = mustVocabularyValue("ai-assisted")
+
 // Validation methods (FF-011 §3).
 var (
 	ValidationMethodManualReview     = core.NewValidationMethod(mustVocabularyValue("manual-review"))
