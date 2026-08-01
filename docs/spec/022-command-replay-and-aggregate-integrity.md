@@ -1,6 +1,6 @@
 # FF-022 — Command replay and aggregate integrity
 
-Status: Accepted for implementation
+Status: Implemented (M.5 command replay and aggregate-integrity correction)
 Date: 2026-08-01
 Phase: M.5 correctness closure before domain analysis
 Governs: command-level idempotency for C1–C12, persisted-act integrity
@@ -18,9 +18,9 @@ is the accepted architecture decision implemented by this packet. AD-019,
 AD-021, AD-026, and AD-029 retain the portions AD-030 explicitly preserves;
 the reconciliation matrix in §3 names every corrected statement.
 
-This document is initially an accepted implementation contract, not
-implementation evidence. §15 must be completed from committed, independently
-verified results before the status may change to `Implemented`.
+This document was accepted as an implementation contract before work began.
+§15 now records the committed, independently verified completion evidence that
+advanced its status to `Implemented`.
 
 ## 1. Baseline and evidence that forced the correction
 
@@ -512,22 +512,20 @@ PostgreSQL gate is not completion evidence.
 
 ## 15. Implementation evidence
 
-Status at packet acceptance: **not yet implemented**.
+Status at packet acceptance: **not yet implemented**. Completion evidence,
+recorded 2026-08-01:
 
-This section is reserved for append-only completion evidence. Before changing
-the document status to `Implemented`, record:
-
-| Evidence | Required entry |
+| Evidence | Committed result |
 |---|---|
-| implementation commits | hashes and one-line scope |
-| C1–C12 advancing-clock replay | test names and result |
-| changed-semantics / corrupt-state zero-write proof | test names and result |
-| C7 closure matrix | test names and result |
-| C9 A/R/O/M and current-plan resolution | test names and result |
-| memory/PostgreSQL contract parity | test names and result |
-| canonical scenario double-run | test names and result |
-| full verification | commands and passing result |
-| independent closure audit | reviewed commit and disposition |
+| implementation commit | Published branch commit [`cf5f96526ffadda47f1bd5e67be3d810dce73be3`](https://github.com/aleka7sk/featureforge/commit/cf5f96526ffadda47f1bd5e67be3d810dce73be3), "Close command replay and aggregate integrity". Its tree is `11f1256e78b43f8ad3b31479765885e3b226e690`; the independently audited local commit `05bfd9e95cfc21341c3e4c6ffe9f3bd794b8818b` has that exact tree. |
+| C1–C12 advancing-clock replay | `TestC1ThroughC12ReplayAfterClockAdvance` passes and rejects every replay write. `assertCanonicalScenarioHTTPReplay` drives all twelve POSTs twice after clock advance on memory and PostgreSQL. |
+| changed-semantics / corrupt-state zero-write proof | `TestCommandConflictingReplay`, `TestCorruptPersistedActMapsTo500AndAttemptsZeroWrites`, the semantic-conflict suite, and the C6/C7/C9/C10/C11/C12 integrity regressions pass behind complete snapshots or the rejecting/counting `replaygate` UnitOfWork. |
+| C7 closure matrix | `TestC7CallerMemberIdentityAndReplayOnlyOmission`, `TestC7LaterRevisionUsesSharedArtifactAndReplaysWithoutWrites`, `TestC7CallerOwnedMembersDoNotRepeatTheRemovedConcatenationCollision`, `TestC7WithdrawnHistoryReplaysUsingOriginalSemanticMember`, `TestC7RejectsZeroAndMultipleAcceptedMembersAsStoredIntegrity`, `TestC7LegacyOpaqueMemberAndMalformedNonmatchingIdentity`, and candidate-corruption precedence pass. |
+| C9 A/R/O/M and current-plan resolution | `TestC9CallerMemberIdentityAndRequiredReplayPresence`, `TestC9LaterRevisionBecomesCurrentAndReplaysWithoutWrites`, `TestC9WithdrawnHistoryHasNoCurrentRevisionButStillReplaysItsAct`, `TestC9RejectsPartialZeroAndMultipleMemberState`, the stable-scope tests, and the applicable-plan resolver tests pass. |
+| memory/PostgreSQL contract parity | `TestRepositoryContractSuite` and `TestPostgresRepositoryContractSuite` pass, including acceptance lookup by `RecordID`, revision-order history, immutable conflict, and idempotent put. PostgreSQL corrupt-materialization tests also pass without state change. |
+| canonical scenario double-run | `TestCanonicalScenarioReplayMemory` and `TestCanonicalScenarioReplayPostgres` run the complete command stream twice, return identical results, attempt zero second-run writes, and compare the complete persisted snapshot byte-for-byte. The HTTP PostgreSQL replay and browser PostgreSQL scenario pass as well. |
+| full verification | GitHub Actions [`Verify` run `30678968317`](https://github.com/aleka7sk/featureforge/actions/runs/30678968317) on exact commit `cf5f965` completed `success`: formatting, `go vet ./...`, `go build ./...`, `go test ./... -count=1`, and `go test ./... -race -count=1`. Both test steps ran with a healthy `postgres:16-alpine` service and `FEATUREFORGE_POSTGRES_TEST_DSN`; the PostgreSQL suite was not skipped. |
+| independent closure audit | An independent read-only reviewer audited local `05bfd9e`, verified remote `cf5f965` has the same tree, checked the published branch and successful exact-hash workflow, and returned `READY` with no production or governance blocker. |
 
 No predicted test, local uncommitted observation, or repository-level
 `IdempotentIdenticalPut` result may be recorded as command-replay evidence.
@@ -549,5 +547,7 @@ Only then may the status become:
 Status: Implemented (M.5 command replay and aggregate-integrity correction)
 ```
 
-Until then, domain analysis is blocked. Nothing in this packet authorizes a
-change to `internal/domain`, PEOS, or database migrations.
+All five conditions are satisfied by the evidence in §15. The pre-domain block
+is closed. Nothing in this packet itself authorizes a change to
+`internal/domain`, PEOS, or database migrations; later work still requires its
+own governing scope.

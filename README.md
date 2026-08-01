@@ -13,13 +13,13 @@ corrections, and history. It does not implement the capability itself.
 
 ## Status
 
-Phase **M.5 — HTTP API and Minimal UI** is implemented. A pre-domain
-correctness audit then found that the published command replay guarantee was
-stronger than its evidence and that Validation Plan revisions had drifted from
-FF-004 ordering/current-state rules. [AD-030](docs/decisions/ad-030-command-idempotency-and-replay-conformance.md)
-records the correction; [FF-022](docs/spec/022-command-replay-and-aggregate-integrity.md)
-is accepted for implementation. Domain analysis remains blocked until FF-022
-is implemented and its advancing-clock, both-adapter evidence gate is complete.
+Phase **M.5 — HTTP API and Minimal UI** and its pre-domain correctness closure
+are implemented. [AD-030](docs/decisions/ad-030-command-idempotency-and-replay-conformance.md)
+records the command-replay and aggregate-integrity correction;
+[FF-022](docs/spec/022-command-replay-and-aggregate-integrity.md) records its
+advancing-clock, zero-write, memory/PostgreSQL and independent-audit evidence.
+The pre-domain block is closed; subsequent work proceeds under its own
+governing scope.
 
 The M.4 canonical scenario continues to run end to end against a real PEOS
 v1.0.0 SDK on both an in-memory store and PostgreSQL. Historical milestone
