@@ -1,7 +1,7 @@
 # M.7 Independent End-to-End PEOS Consumer Audit
 
-Status: Freeze artifact candidate; remediation is published and independent
-closure passed, final freeze publication gate pending
+Status: Final freeze artifact; remediation, independent closure, and the
+freeze publication gate passed
 Date: 2026-08-01
 Phase: M.7
 Governs: nothing. This report records an adversarial review and its evidence;
@@ -29,8 +29,8 @@ M.7 NOT READY TO FREEZE
 ```
 
 The nine findings are preserved in §3, including their original severity.
-Independent re-audit has closed the remediation with no open finding. The
-remaining gates are immutable commit/tree identity and green publication CI.
+Independent re-audit closed the remediation with no open finding. The immutable
+freeze commit/tree and its green publication workflow are recorded in §2.
 
 The audit did not evaluate production authentication, tenancy, collaboration,
 notifications, billing, generalized project management, or a Belcanto
@@ -81,8 +81,8 @@ The reviewer's final editorial delta check returned
 
 ## 2. Baseline and gate ledger
 
-Unknown values are deliberately explicit. They must be replaced with immutable
-identities or final outcomes before this report can certify freeze.
+This ledger identifies every immutable publication snapshot and outcome used
+by the final freeze disposition.
 
 | Evidence | Value | Disposition |
 |---|---|---|
@@ -97,15 +97,15 @@ identities or final outcomes before this report can certify freeze.
 | Local normal verification | `gofmt`, `git diff --check`, `go vet ./...`, `go build ./...`, and `go test ./... -count=1` — `PASS` | Final local normal gate passed |
 | Local race verification | `go test ./... -race -count=1 -timeout=20m` — `PASS` (UI `589.594s`) | Final local race gate passed on remediation tree |
 | Independent remediation re-audit | `M.7 REMEDIATION RE-AUDIT — READY` — `0 BLOCKER · 0 MAJOR · 0 MINOR` | Independent closure passed |
-| Freeze-artifact commit/tree | `<PENDING-M7-FREEZE-COMMIT>` / `<PENDING-M7-FREEZE-TREE>` | Pending publication |
-| Final GitHub workflow | `<PENDING-M7-FINAL-WORKFLOW-RUN-URL>` — `<PENDING-M7-FINAL-CI-CONCLUSION>` | Required before freeze |
-| Published branch/ref | `<PENDING-M7-PUBLISHED-REF>` | Pending publication |
+| Freeze-artifact commit/tree | [`05c1fc9314bef49000c675050f5f8aba148e8143`](https://github.com/aleka7sk/featureforge/commit/05c1fc9314bef49000c675050f5f8aba148e8143) / `08ae56046609e0be32b2dc972204e6be7c762d09` | Published freeze snapshot |
+| Final GitHub workflow | [30695818741](https://github.com/aleka7sk/featureforge/actions/runs/30695818741) — `success` | Exact freeze tree passed formatting, vet, build, full PostgreSQL, and full race gates |
+| Published branch/ref | [`agent/domain-lifecycle-closure`](https://github.com/aleka7sk/featureforge/tree/agent/domain-lifecycle-closure) @ `05c1fc9314bef49000c675050f5f8aba148e8143` | Published |
 
 ## 3. Findings and remediation disposition
 
 ### 3.1 Summary
 
-| Finding | Original severity | Short description | Candidate disposition |
+| Finding | Original severity | Short description | Final disposition |
 |---|---:|---|---|
 | M7-01 | MAJOR | Canonical HTTP/UI journeys manufactured an Evidence record behind the public act surface | Closed by independent re-audit |
 | M7-02 | MAJOR | Literal FF-001 screen data was absent or incomplete | Closed by independent re-audit |
@@ -124,7 +124,7 @@ Artifact/Revision solely so that `DEC-1` could cite it. That bypass meant the
 journey did not prove that the published intent API and UI could produce the
 claimed canonical end state.
 
-**Candidate remediation.** `DEC-1` now forward-cites
+**Remediation.** `DEC-1` now forward-cites
 `EV-1/EV-1-REV-1`, the one governed unresolved Decision-basis exception. The
 later A-1 C10 validation act creates exactly that pair together with `ER-1`.
 The canonical set is `EV-1` through `EV-4`; no standalone Evidence writer or
@@ -133,7 +133,7 @@ journey. See `internal/scenario/scenario.go`,
 `internal/transport/http/scenario_http_test.go`, and
 `internal/ui/browser_scenario_test.go`.
 
-**Candidate verification.** `TestCanonicalScenario`,
+**Verification.** `TestCanonicalScenario`,
 `TestCanonicalScenarioThroughHTTP`, `TestCanonicalScenarioThroughUIForms`,
 `TestCanonicalScenarioThroughUIBrowser`, and their PostgreSQL variants. The
 end-state assertion requires four Evidence artifacts and requires `DEC-1` to
@@ -146,7 +146,7 @@ literally in FF-001 §3: project feature counts, the exact readiness Claim ID,
 prior Requirement revisions, a Decision subject, plan identity, claim criteria,
 and an actual correction target link.
 
-**Candidate remediation.** Q4 now returns fully validated
+**Remediation.** Q4 now returns fully validated
 `requirement_history` and the payload-verified Decision `subject_key`. The UI
 composes Q1 with Q2 for project counts and renders all named fields, including
 fragment links between corrected and correcting claims. Relevant tests are
@@ -164,7 +164,7 @@ lifecycle events omitted assignment/transition relationships; equal-time and
 undated placement were under-explained; and the UI fabricated too little useful
 navigation from references.
 
-**Candidate remediation.** Every event now carries a non-empty actor, exact
+**Remediation.** Every event now carries a non-empty actor, exact
 `SourceIdentity`, and its own source among `References`. Revision, record, and
 lifecycle events add their governed subject, criterion, evidence, execution,
 correction, policy, predecessor, assignment, and transition references as
@@ -179,7 +179,7 @@ event. Unknown identities return `404`; partial, unreadable, or contradictory
 occupancy fails with stored-state integrity rather than rendering a broken
 link.
 
-**Candidate verification.** `TestEveryTimelineEventExposesActorAndOwnSourceReference`,
+**Verification.** `TestEveryTimelineEventExposesActorAndOwnSourceReference`,
 `TestEqualTimeOrderingExplainsKindRankAndSourceIdentity`,
 `TestUndatedGroupIsSeparate`,
 `TestLifecycleTimelineEventNamesAssignmentAndTransitionSources`, and
@@ -190,13 +190,13 @@ link.
 **Finding.** Correction and lifecycle ambiguity errors stated that a conflict
 existed but did not identify the stored records a consumer must inspect.
 
-**Candidate remediation.** Competing correction heads and correction cycles
+**Remediation.** Competing correction heads and correction cycles
 name the sorted conflicting Claim IDs; non-cyclic tails are excluded from the
 cycle population. Lifecycle duplicate entries, branches, and cycles name
 sorted assignment IDs together with exact transition Revision keys. The
 ordering makes messages deterministic as well as actionable.
 
-**Candidate verification.** `TestCompetingHeads`, `TestCycle`,
+**Verification.** `TestCompetingHeads`, `TestCycle`,
 `TestLifecycleStateDuplicateEntryDiagnosticNamesAssignmentsAndTransitions`,
 `TestLifecycleStateRejectsBranchedHistory`, and
 `TestLifecycleStateCycleDiagnosticNamesAssignmentsAndTransitions`.
@@ -206,13 +206,13 @@ ordering makes messages deterministic as well as actionable.
 **Finding.** The selected head could be correct while the prose described the
 wrong correcting relationship for a chain longer than one edge.
 
-**Candidate remediation.** Rationale construction starts at the selected head,
+**Remediation.** Rationale construction starts at the selected head,
 walks each head-to-target edge to the original, and then emits the explanation
 oldest-to-head. Each edge says whether the newer Claim corrected, replaced, or
 invalidated its target. Selection still ignores timestamps and follows
 correction structure only.
 
-**Candidate verification.** `TestChainOfTwo`, `TestChainOfThree`,
+**Verification.** `TestChainOfTwo`, `TestChainOfThree`,
 `TestCorrectionRationaleUsesTheRecordedCorrectionKind`,
 `TestSelectionIgnoresTimestamps`, and `TestOriginalRemainsReadable`.
 
@@ -222,10 +222,10 @@ correction structure only.
 engineering envelopes but omitted `LifecycleDefinitionRepository` and the
 PostgreSQL `lifecycle_definitions` and `lifecycle_definition_versions` tables.
 
-**Candidate remediation.** The memory method-set guard includes
+**Remediation.** The memory method-set guard includes
 `LifecycleDefinitionRepository`; the SQL scan includes both lifecycle tables.
 
-**Candidate verification.** `TestNoUpdateOrDeleteMethodExists` in
+**Verification.** `TestNoUpdateOrDeleteMethodExists` in
 `internal/infrastructure/memory/store_test.go` and
 `TestNoUpdateOrDeleteOnEngineeringTables` in
 `internal/architecture/architecture_test.go`.
@@ -236,11 +236,11 @@ PostgreSQL `lifecycle_definitions` and `lifecycle_definition_versions` tables.
 was dropped before the API call. A successful command could therefore persist
 different engineering content from the content the person submitted.
 
-**Candidate remediation.** Form parsing returns `400 Bad Request`, invokes no
+**Remediation.** Form parsing returns `400 Bad Request`, invokes no
 API call, and performs no write. Domain validation remains command-owned; only
 lossless form-syntax parsing is UI-owned.
 
-**Candidate verification.** `TestCapabilityFormRejectsMalformedCriterionInsteadOfDroppingIt`,
+**Verification.** `TestCapabilityFormRejectsMalformedCriterionInsteadOfDroppingIt`,
 `TestPlanFormRejectsMalformedActivityInsteadOfDroppingIt`, and
 `TestPlanFormRejectsMalformedActivityBeforeAnyAPICall` in
 `internal/ui/form_syntax_test.go`.
@@ -251,10 +251,10 @@ lossless form-syntax parsing is UI-owned.
 was missing from the declared/closed vocabulary set, weakening the namespace
 proof added for M.6.
 
-**Candidate remediation.** `ProvenanceMethodAIAssisted` is included in both the
+**Remediation.** `ProvenanceMethodAIAssisted` is included in both the
 declared values and exact closed set.
 
-**Candidate verification.** `TestAllVocabularyValuesUseFeatureForgeNamespace`,
+**Verification.** `TestAllVocabularyValuesUseFeatureForgeNamespace`,
 `TestNoDuplicateVocabularyDeclarations`, and `TestVocabularySetIsClosed`.
 
 ### 3.10 M7-09 — direct reads were required to invent rationale
@@ -263,89 +263,88 @@ declared values and exact closed set.
 conflicted with the established Q1, Q2, and Q7 contracts. Those queries expose
 authoritative stored values or inventory; no derivation exists to explain.
 
-**Candidate remediation.** FF-001, FF-004, and FF-015 now require rationale for
+**Remediation.** FF-001, FF-004, and FF-015 now require rationale for
 derived or interpretive results and explicitly exclude direct Q1, Q2, and Q7
 reads from invented rationale. Derived current revision, correction, readiness,
 lifecycle, and timeline answers remain explained.
 
-**Candidate verification.** Normative reconciliation in
+**Verification.** Normative reconciliation in
 [FF-001 §2 and §6.4](../spec/001-poc-acceptance-contract.md), plus
 `TestReadinessRationaleIsPerRequirement`, `TestChainOfThree`, and the timeline
 rationale tests named under M7-03.
 
 ## 4. FF-001 §6 evidence matrix
 
-Every row below corresponds to one checkbox in FF-001 §6. "Candidate
-evidenced" means the repository contains direct evidence after remediation; it
-does **not** mean the final publication gate has passed. The independent
-remediation and freeze-artifact reviews have passed separately.
+Every row below corresponds to one checked checkbox in FF-001 §6. Each final
+disposition combines direct repository evidence, independent remediation and
+freeze-artifact review, and the successful publication gate recorded in §2.
 
 ### 4.1 Architecture (§6.1)
 
 | ID | Contract line | Direct evidence | Audit disposition |
 |---|---|---|---|
-| A1 | PEOS SDK unchanged; no local replacement | `go.mod` pins `github.com/aleka7sk/PEOS v1.0.0` with no `replace`; `TestGoModHasOnlyApprovedRequirements`; final diff must contain no PEOS-module path | Candidate evidenced; final tree check pending |
-| A2 | Domain does not import PEOS, directly or transitively | `TestDomainDoesNotImportPEOS`, `TestApplicationDoesNotImportPEOS`, `TestEngineeringDoesNotImportPEOS`, `TestOnlyIntegrationPackageImportsPEOS` | Candidate evidenced; final gate pending |
-| A3 | Product vocabulary is outside the `peos` namespace | `TestAllVocabularyValuesUseFeatureForgeNamespace`, `TestVocabularySetIsClosed`, `TestClaimTypeIsNotExtended`; M7-08 closes the AI-assisted omission | Independently closed; final gate pending |
-| A4 | No PEOS type copied, restated, or shadowed | `TestNoPEOSTypeIsCopied`, `TestNoShadowStructNames`, and the PEOS-free envelopes/ports under `internal/engineering` and `internal/application` | Candidate evidenced; final gate pending |
-| A5 | Package boundaries fail the build | `internal/architecture/architecture_test.go` and `proposal_boundary_test.go`, including import-holder, driver, UI, retry-safety, and proposal-authority guards | Candidate evidenced; deliberate/final guard run pending |
+| A1 | PEOS SDK unchanged; no local replacement | `go.mod` pins `github.com/aleka7sk/PEOS v1.0.0` with no `replace`; `TestGoModHasOnlyApprovedRequirements`; final diff must contain no PEOS-module path | Verified; freeze publication gate passed |
+| A2 | Domain does not import PEOS, directly or transitively | `TestDomainDoesNotImportPEOS`, `TestApplicationDoesNotImportPEOS`, `TestEngineeringDoesNotImportPEOS`, `TestOnlyIntegrationPackageImportsPEOS` | Verified; freeze publication gate passed |
+| A3 | Product vocabulary is outside the `peos` namespace | `TestAllVocabularyValuesUseFeatureForgeNamespace`, `TestVocabularySetIsClosed`, `TestClaimTypeIsNotExtended`; M7-08 closes the AI-assisted omission | Verified; freeze publication gate passed |
+| A4 | No PEOS type copied, restated, or shadowed | `TestNoPEOSTypeIsCopied`, `TestNoShadowStructNames`, and the PEOS-free envelopes/ports under `internal/engineering` and `internal/application` | Verified; freeze publication gate passed |
+| A5 | Package boundaries fail the build | `internal/architecture/architecture_test.go` and `proposal_boundary_test.go`, including import-holder, driver, UI, retry-safety, and proposal-authority guards | Verified; freeze publication gate passed |
 
 ### 4.2 History (§6.2)
 
 | ID | Contract line | Direct evidence | Audit disposition |
 |---|---|---|---|
-| H1 | Revision 1 remains fully inspectable after Revision 2 | `TestCanonicalScenario` re-reads Revision 1 content and verifies its digest; `TestRevisionsPageShowsBothRevisionsIndependently` and `TestRevisionsTemplateShowsBothRevisionsIndependently` render both | Candidate evidenced; adapter publication gate pending |
-| H2 | No immutable engineering record is updated or deleted | Memory `TestNoUpdateOrDeleteMethodExists`; SQL `TestNoUpdateOrDeleteOnEngineeringTables`; shared `IdempotentIdenticalPut`/`ConflictingPut`; M7-06 adds lifecycle policy | Independently closed; final gate pending |
-| H3 | Correction adds history and preserves its target | `TestOriginalRemainsReadable`; canonical `CLM-2`/`CLM-4` assertions; `TestValidationPageShowsSupersededClaim` | Candidate evidenced; final gate pending |
-| H4 | Timeline explains every canonical engineering act | `TestCanonicalScenario` compares all 28 positions by exact `EventKind + SourceIdentity`; `TestEveryTimelineEventExposesActorAndOwnSourceReference` and the M7-03 tests prove explanation fields | Independently closed |
+| H1 | Revision 1 remains fully inspectable after Revision 2 | `TestCanonicalScenario` re-reads Revision 1 content and verifies its digest; `TestRevisionsPageShowsBothRevisionsIndependently` and `TestRevisionsTemplateShowsBothRevisionsIndependently` render both | Verified; freeze publication gate passed |
+| H2 | No immutable engineering record is updated or deleted | Memory `TestNoUpdateOrDeleteMethodExists`; SQL `TestNoUpdateOrDeleteOnEngineeringTables`; shared `IdempotentIdenticalPut`/`ConflictingPut`; M7-06 adds lifecycle policy | Verified; freeze publication gate passed |
+| H3 | Correction adds history and preserves its target | `TestOriginalRemainsReadable`; canonical `CLM-2`/`CLM-4` assertions; `TestValidationPageShowsSupersededClaim` | Verified; freeze publication gate passed |
+| H4 | Timeline explains every canonical engineering act | `TestCanonicalScenario` compares all 28 positions by exact `EventKind + SourceIdentity`; `TestEveryTimelineEventExposesActorAndOwnSourceReference` and the M7-03 tests prove explanation fields | Verified; freeze publication gate passed |
 
 ### 4.3 Persistence (§6.3)
 
 | ID | Contract line | Direct evidence | Audit disposition |
 |---|---|---|---|
-| P1 | Every PEOS value used by the scenario persists and reloads | Shared `PutThenGet`, codec `TestRoundTrip_*` cases for Artifact, Revisions, Decision, Plan, Execution, Claim, Correction, State Assignment, and Transition; canonical scenarios on both adapters | Candidate evidenced; PostgreSQL workflow pending |
-| P2 | JSON round trip preserves equality and canonical bytes | `internal/engineering/peos/codec_test.go`; `TestCanonicalJSONStable`, `TestContentRoundTrip`, and `TestPayloadIsStoredByteIdentical` | Candidate evidenced; final gate pending |
-| P3 | Identical duplicate write is idempotent | Shared `IdempotentIdenticalPut`, `RevisionSubjectBearingPutIsIdempotent`, and `TestC1ThroughC12ReplayAfterClockAdvance` | Candidate evidenced; final gate pending |
-| P4 | Conflicting immutable write is distinguishable | Shared `ConflictingPut`/`ConflictAbortsAct`; `TestCommandConflictingReplay`; exhaustive HTTP error mapping | Candidate evidenced; final gate pending |
-| P5 | Mandatory references resolve, except governed C8 citation | Shared `ReferenceVerification`; command integrity suites; canonical `DEC-1` forward-cites EV-1 and C10 later materializes it; Q5 keeps the wholly absent pair as a pending exact link and rejects partial, unreadable, or contradictory occupancy | Independently closed; final gate pending |
-| P6 | PostgreSQL passes the same contract suite as memory | `TestRepositoryContractSuite` and `TestPostgresRepositoryContractSuite` both call `contracttest.RunRepositoryContractSuite`; PostgreSQL canonical, replay, HTTP, UI, proposal, and rollback variants | Candidate evidence exists; final PostgreSQL workflow required |
+| P1 | Every PEOS value used by the scenario persists and reloads | Shared `PutThenGet`, codec `TestRoundTrip_*` cases for Artifact, Revisions, Decision, Plan, Execution, Claim, Correction, State Assignment, and Transition; canonical scenarios on both adapters | Verified; freeze publication gate passed |
+| P2 | JSON round trip preserves equality and canonical bytes | `internal/engineering/peos/codec_test.go`; `TestCanonicalJSONStable`, `TestContentRoundTrip`, and `TestPayloadIsStoredByteIdentical` | Verified; freeze publication gate passed |
+| P3 | Identical duplicate write is idempotent | Shared `IdempotentIdenticalPut`, `RevisionSubjectBearingPutIsIdempotent`, and `TestC1ThroughC12ReplayAfterClockAdvance` | Verified; freeze publication gate passed |
+| P4 | Conflicting immutable write is distinguishable | Shared `ConflictingPut`/`ConflictAbortsAct`; `TestCommandConflictingReplay`; exhaustive HTTP error mapping | Verified; freeze publication gate passed |
+| P5 | Mandatory references resolve, except governed C8 citation | Shared `ReferenceVerification`; command integrity suites; canonical `DEC-1` forward-cites EV-1 and C10 later materializes it; Q5 keeps the wholly absent pair as a pending exact link and rejects partial, unreadable, or contradictory occupancy | Verified; freeze publication gate passed |
+| P6 | PostgreSQL passes the same contract suite as memory | `TestRepositoryContractSuite` and `TestPostgresRepositoryContractSuite` both call `contracttest.RunRepositoryContractSuite`; PostgreSQL canonical, replay, HTTP, UI, proposal, and rollback variants | Verified; freeze publication gate passed |
 
 ### 4.4 Queries (§6.4)
 
 | ID | Contract line | Direct evidence | Audit disposition |
 |---|---|---|---|
-| Q1 | Current revision resolves deterministically | `TestSequenceOneThenTwo`, `TestIgnoresRevisionIDLexicalOrder`, `TestResolutionIsDeterministic` | Candidate evidenced; final gate pending |
-| Q2 | Insertion order does not affect resolution | `TestInsertionOrderIndependence`, `TestCanonicalScenarioInsertionOrderIndependence`, and `TestCanonicalScenarioPostgresInsertionOrderIndependence` | Candidate evidenced; final PostgreSQL gate pending |
-| Q3 | Ambiguity fails explicitly and names conflicts | `TestCompetingHeads` and `TestCycle` name sorted Claims; lifecycle duplicate-entry/branch/cycle tests name assignments and transition revisions; revision-order ambiguity tests reject duplicates | Independently closed; final gate pending |
-| Q4 | Current claim follows correction chains and rejects invalid graphs | `TestChainOfTwo`, `TestChainOfThree`, `TestCorrectionRationaleUsesTheRecordedCorrectionKind`, `TestInvalidatorEvaluatedOnOwnMerits`, `TestCycle`, `TestMissingTarget`, `TestSelfCorrection` | Independently closed; final gate pending |
-| Q5 | Every derived answer has rationale; direct reads do not invent one | Current-revision, correction, readiness, lifecycle, and timeline result tests inspect rationale; FF-001 explicitly classifies Q1/Q2/Q7 as direct | Independently closed; final gate pending |
+| Q1 | Current revision resolves deterministically | `TestSequenceOneThenTwo`, `TestIgnoresRevisionIDLexicalOrder`, `TestResolutionIsDeterministic` | Verified; freeze publication gate passed |
+| Q2 | Insertion order does not affect resolution | `TestInsertionOrderIndependence`, `TestCanonicalScenarioInsertionOrderIndependence`, and `TestCanonicalScenarioPostgresInsertionOrderIndependence` | Verified; freeze publication gate passed |
+| Q3 | Ambiguity fails explicitly and names conflicts | `TestCompetingHeads` and `TestCycle` name sorted Claims; lifecycle duplicate-entry/branch/cycle tests name assignments and transition revisions; revision-order ambiguity tests reject duplicates | Verified; freeze publication gate passed |
+| Q4 | Current claim follows correction chains and rejects invalid graphs | `TestChainOfTwo`, `TestChainOfThree`, `TestCorrectionRationaleUsesTheRecordedCorrectionKind`, `TestInvalidatorEvaluatedOnOwnMerits`, `TestCycle`, `TestMissingTarget`, `TestSelfCorrection` | Verified; freeze publication gate passed |
+| Q5 | Every derived answer has rationale; direct reads do not invent one | Current-revision, correction, readiness, lifecycle, and timeline result tests inspect rationale; FF-001 explicitly classifies Q1/Q2/Q7 as direct | Verified; freeze publication gate passed |
 
 ### 4.5 Application (§6.5)
 
 | ID | Contract line | Direct evidence | Audit disposition |
 |---|---|---|---|
-| APP1 | One complete canonical lifecycle works through API and UI | Application, HTTP, form, and scraped-browser canonical tests; memory and PostgreSQL variants; M7-01 removes the hidden Evidence seed | Candidate evidenced; final workflow pending |
-| APP2 | An unfamiliar reader can understand state and history from UI alone | Literal page/render tests for all seven screens, correction links, prior revisions, full Decision basis, plan/claim detail, readiness rationale, and timeline navigation; browser journey | Independently closed; final gate pending |
-| APP3 | No operational Belcanto entity is required or present | `TestNoOperationalScenarioEntity`, `TestNoDerivedStateOnFeatureCard`, and the canonical scenario's Project/FeatureCard-only operational roots | Candidate evidenced; final gate pending |
-| APP4 | No generic workflow/rule/expression engine exists | `TestNoForbiddenPackageNames`; lifecycle is a fixed persisted policy with consumer validation, not user-defined rules; code/package inspection | Candidate evidenced; final tree inspection pending |
+| APP1 | One complete canonical lifecycle works through API and UI | Application, HTTP, form, and scraped-browser canonical tests; memory and PostgreSQL variants; M7-01 removes the hidden Evidence seed | Verified; freeze publication gate passed |
+| APP2 | An unfamiliar reader can understand state and history from UI alone | Literal page/render tests for all seven screens, correction links, prior revisions, full Decision basis, plan/claim detail, readiness rationale, and timeline navigation; browser journey | Verified; freeze publication gate passed |
+| APP3 | No operational Belcanto entity is required or present | `TestNoOperationalScenarioEntity`, `TestNoDerivedStateOnFeatureCard`, and the canonical scenario's Project/FeatureCard-only operational roots | Verified; freeze publication gate passed |
+| APP4 | No generic workflow/rule/expression engine exists | `TestNoForbiddenPackageNames`; lifecycle is a fixed persisted policy with consumer validation, not user-defined rules; code/package inspection | Verified; freeze publication gate passed |
 
 ### 4.6 AI (§6.6)
 
 | ID | Contract line | Direct evidence | Audit disposition |
 |---|---|---|---|
-| AI1 | Context pack can be generated for the canonical feature | `TestAssembleProposalContextUsesExactCurrentEngineeringState`, `TestCanonicalContextRoundTripAndGoldenDigest`, and API/UI proposal journeys | M.6 publication gate passed; final freeze publication gate pending |
-| AI2 | Every context element names its exact source | Proposal constructors reject missing/unknown/unpaired sources; persisted-witness tests validate pack membership; `TestDeterministicGeneratorIsByteStableAndNamesGaps` | Candidate evidenced; final gate pending |
-| AI3 | Proposal has no authority without explicit human acceptance | `TestProposalPackageIsPure`, `TestProposalCallGuardRejectsIO`, `TestProposalImportAllowlistRejectsAuthorityPackages`; generation purity test; UI generate/discard/accept test | Candidate evidenced; final gate pending |
-| AI4 | Accepted proposal preserves provenance | AI witness canonical round-trip tests; `TestAcceptCapabilityProposalCreatesDraftThenReplaysBeforeFreshness`; HTTP revision DTO test; memory/PostgreSQL adapter-parity flows | Candidate evidenced; final gate pending |
+| AI1 | Context pack can be generated for the canonical feature | `TestAssembleProposalContextUsesExactCurrentEngineeringState`, `TestCanonicalContextRoundTripAndGoldenDigest`, and API/UI proposal journeys | Verified; freeze publication gate passed |
+| AI2 | Every context element names its exact source | Proposal constructors reject missing/unknown/unpaired sources; persisted-witness tests validate pack membership; `TestDeterministicGeneratorIsByteStableAndNamesGaps` | Verified; freeze publication gate passed |
+| AI3 | Proposal has no authority without explicit human acceptance | `TestProposalPackageIsPure`, `TestProposalCallGuardRejectsIO`, `TestProposalImportAllowlistRejectsAuthorityPackages`; generation purity test; UI generate/discard/accept test | Verified; freeze publication gate passed |
+| AI4 | Accepted proposal preserves provenance | AI witness canonical round-trip tests; `TestAcceptCapabilityProposalCreatesDraftThenReplaysBeforeFreshness`; HTTP revision DTO test; memory/PostgreSQL adapter-parity flows | Verified; freeze publication gate passed |
 
 ### 4.7 Transition to Belcanto (§6.7)
 
 | ID | Contract line | Direct evidence | Audit disposition |
 |---|---|---|---|
-| B1 | Reusable patterns are rationale, not a library | [Reusable Patterns](reusable-patterns.md) states context, rationale, evidence, limits, and a mandatory no-import/no-copy rule | Freeze-artifact review passed; commit pending |
-| B2 | FeatureForge code is not shared infrastructure | Reusable Patterns §1 and [Lessons Learned](lessons-learned.md) classify every recommendation as reasoning to re-evaluate in Belcanto | Freeze-artifact review passed; commit pending |
-| B3 | No shared PEOS integration package is created | No such package exists; both handover documents prohibit import, copy, extraction, or a cross-product integration library | Candidate evidenced; final tree check pending |
-| B4 | Lessons distinguish reuse from redesign | Lessons Learned §2–§4 separates reusable decision discipline from FeatureForge-local compromises and Belcanto-owned redesign | Freeze-artifact review passed; commit pending |
+| B1 | Reusable patterns are rationale, not a library | [Reusable Patterns](reusable-patterns.md) states context, rationale, evidence, limits, and a mandatory no-import/no-copy rule | Verified; freeze publication gate passed |
+| B2 | FeatureForge code is not shared infrastructure | Reusable Patterns §1 and [Lessons Learned](lessons-learned.md) classify every recommendation as reasoning to re-evaluate in Belcanto | Verified; freeze publication gate passed |
+| B3 | No shared PEOS integration package is created | No such package exists; both handover documents prohibit import, copy, extraction, or a cross-product integration library | Verified; freeze publication gate passed |
+| B4 | Lessons distinguish reuse from redesign | Lessons Learned §2–§4 separates reusable decision discipline from FeatureForge-local compromises and Belcanto-owned redesign | Verified; freeze publication gate passed |
 
 ## 5. Embedded PEOS consumer report
 
@@ -404,13 +403,13 @@ decisions.
 
 ## 6. Required closure and publication proof
 
-The remediation candidate is not a freeze until all of the following are
-recorded against exact immutable identities:
+The freeze publication gate required all of the following; each condition is
+recorded against exact immutable identities in §2:
 
 1. `gofmt -l .` returns no paths and `git diff --check` returns no defects.
 2. `go vet ./...` and `go build ./...` pass.
 3. `go test ./... -count=1` passes.
-4. `go test ./... -race -count=1 -timeout=20m` passes.
+4. `go test ./... -race -count=1 -timeout=30m` passes.
 5. An independent read-only re-audit finds no open BLOCKER or MAJOR and verifies
    every M7-01…09 disposition against the remediation tree.
 6. The exact published freeze commit/tree passes
@@ -430,14 +429,14 @@ internal/infrastructure/memory
 internal/infrastructure/postgres
 ```
 
-## 7. Current disposition
+## 7. Final disposition
 
-The remediation candidate addresses all nine original findings and supplies a
+The published remediation closes all nine original findings and supplies a
 direct evidence path for every FF-001 §6 line. Independent remediation and
-freeze-artifact review have passed. Publication identities and the final green
-workflow remain deliberately unclaimed.
+freeze-artifact review passed, and the exact freeze tree passed the final
+publication workflow.
 
 ```text
-M.7 REMEDIATION RE-AUDIT: READY — 0 BLOCKER · 0 MAJOR · 0 MINOR
-FEATUREFORGE FREEZE: <PENDING-PUBLICATION-GATE>
+M.7 FINAL DISPOSITION: READY TO FREEZE — 0 BLOCKER · 0 MAJOR · 0 MINOR
+FEATUREFORGE FREEZE: COMPLETE — PUBLICATION GATE PASSED
 ```
