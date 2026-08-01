@@ -19,16 +19,18 @@ type ProjectRepository interface {
 	List(ctx context.Context) ([]domain.Project, error)
 }
 
-// FeatureCardRepository persists FeatureCards. Put is create-only, and
-// returns ErrReferencedValueMissing if the card's ProjectID does not name a
-// stored Project (AD-021).
+// FeatureCardRepository persists FeatureCards. Put is create-only over the
+// card's base establishment fields, and returns ErrReferencedValueMissing if
+// the card's ProjectID does not name a stored Project (AD-021). The separately
+// persisted capability link does not participate in Put equality and can be
+// established only through LinkCapability.
 //
 // LinkCapability is a narrowly-scoped addition beyond FF-009 §5's table,
 // documented in the M.3 implementation report: it is the one-time monotonic
 // completion of a card's capability link, required because ArtifactEnvelope
 // carries no FeatureCardID field and Put's create-only semantics cannot
 // re-establish an existing card with different content. It is idempotent if
-// the same artifact is already linked, and returns ErrImmutableValueConflict
+// the same artifact is already linked, and returns ErrCapabilityAlreadyLinked
 // if a different one is.
 type FeatureCardRepository interface {
 	Put(ctx context.Context, c domain.FeatureCard) error
@@ -43,18 +45,23 @@ type ArtifactEnvelopeRepository interface {
 	Get(ctx context.Context, key engineering.ArtifactKey) (engineering.ArtifactEnvelope, bool, error)
 }
 
-// RevisionEnvelopeRepository persists RevisionEnvelopes. ListByArtifact
-// returns entries ordered by key ascending (FF-009 §5).
+// RevisionEnvelopeRepository persists RevisionEnvelopes. ListAll returns the
+// complete population and ListByArtifact returns one artifact's population;
+// both are ordered by key ascending (FF-009 §5). Integrity-sensitive discovery
+// uses ListAll, validates authoritative payload/projection agreement, and only
+// then filters by family or subject (AD-032, FF-023).
 //
 // ListByFamilyAndSubject returns every revision of family whose SubjectKey
 // equals subjectKey exactly, ordered by RevisionKey.String() ascending, like
 // ListByArtifact (AD-025, FF-016 §4). Revisions with no subject (§3.3) never
 // match a non-empty subjectKey, and a non-matching or empty result is an
 // empty slice with a nil error, never ErrNotFound. It never decodes a PEOS
-// payload; it reads only the projected SubjectKey.
+// payload; it reads only the projected SubjectKey and is therefore not an
+// authoritative completeness witness.
 type RevisionEnvelopeRepository interface {
 	Put(ctx context.Context, env engineering.RevisionEnvelope) error
 	Get(ctx context.Context, key engineering.RevisionKey) (engineering.RevisionEnvelope, bool, error)
+	ListAll(ctx context.Context) ([]engineering.RevisionEnvelope, error)
 	ListByArtifact(ctx context.Context, artifactID string) ([]engineering.RevisionEnvelope, error)
 	ListByFamilyAndSubject(ctx context.Context, family engineering.RevisionFamily, subjectKey string) ([]engineering.RevisionEnvelope, error)
 }
@@ -67,7 +74,9 @@ type StructuredContentRepository interface {
 }
 
 // RecordEnvelopeRepository persists RecordEnvelopes: executions, claims,
-// decisions, and state assignments.
+// decisions, and state assignments. ListAll returns the complete population in
+// key order so integrity-sensitive discovery can validate each authoritative
+// payload before filtering on Kind or SubjectKey (AD-032, FF-023).
 //
 // Put returns ErrReferencedValueMissing if SubjectKey does not resolve --
 // through engineering.ParseSubjectKey -- to a stored ArtifactEnvelope or
@@ -78,6 +87,7 @@ type StructuredContentRepository interface {
 type RecordEnvelopeRepository interface {
 	Put(ctx context.Context, env engineering.RecordEnvelope) error
 	Get(ctx context.Context, key engineering.RecordKey) (engineering.RecordEnvelope, bool, error)
+	ListAll(ctx context.Context) ([]engineering.RecordEnvelope, error)
 	ListByKind(ctx context.Context, kind engineering.RecordKind) ([]engineering.RecordEnvelope, error)
 	ListByKindAndSubject(ctx context.Context, kind engineering.RecordKind, subjectKey string) ([]engineering.RecordEnvelope, error)
 }
@@ -88,6 +98,15 @@ type RevisionOrderRepository interface {
 	Put(ctx context.Context, order engineering.RevisionOrderMetadata) error
 	Get(ctx context.Context, key engineering.RevisionKey) (engineering.RevisionOrderMetadata, bool, error)
 	ListByArtifact(ctx context.Context, artifactID string) ([]engineering.RevisionOrderMetadata, error)
+}
+
+// RequirementCriterionTraceRepository persists the create-only structured
+// source link for each Requirement Revision (AD-033, FF-023 §3). The
+// Requirement RevisionKey is the trace identity; Get returns the zero value,
+// false and nil when no trace exists.
+type RequirementCriterionTraceRepository interface {
+	Put(ctx context.Context, trace engineering.RequirementCriterionTrace) error
+	Get(ctx context.Context, key engineering.RevisionKey) (engineering.RequirementCriterionTrace, bool, error)
 }
 
 // RevisionAcceptanceRepository persists the append-only acceptance journal.
@@ -110,14 +129,16 @@ type RevisionAcceptanceRepository interface {
 // Repositories are reachable only inside Do (FF-009 §6) -- no field here is
 // otherwise obtainable.
 type Repositories struct {
-	Projects           ProjectRepository
-	FeatureCards       FeatureCardRepository
-	Artifacts          ArtifactEnvelopeRepository
-	Revisions          RevisionEnvelopeRepository
-	StructuredContent  StructuredContentRepository
-	Records            RecordEnvelopeRepository
-	RevisionOrder      RevisionOrderRepository
-	RevisionAcceptance RevisionAcceptanceRepository
+	Projects             ProjectRepository
+	FeatureCards         FeatureCardRepository
+	Artifacts            ArtifactEnvelopeRepository
+	Revisions            RevisionEnvelopeRepository
+	StructuredContent    StructuredContentRepository
+	Records              RecordEnvelopeRepository
+	RevisionOrder        RevisionOrderRepository
+	RevisionAcceptance   RevisionAcceptanceRepository
+	RequirementTraces    RequirementCriterionTraceRepository
+	LifecycleDefinitions LifecycleDefinitionRepository
 }
 
 // UnitOfWork runs one engineering act as a single transaction. Returning

@@ -1,12 +1,16 @@
 package http_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/aleka7sk/featureforge/internal/application"
+	"github.com/aleka7sk/featureforge/internal/engineering"
 	transporthttp "github.com/aleka7sk/featureforge/internal/transport/http"
 )
 
@@ -24,11 +28,30 @@ func getJSON(t *testing.T, handler http.Handler, path string, out any) *httptest
 
 // seedForQueries drives C1-C11 through the real handler so the query tests
 // below read real, engine-produced state rather than hand-built fixtures.
-// It intentionally omits C12/C6, which the canonical order test already
-// covers; queries only need one requirement, one decision, one plan
-// activity, one execution, and one claim to exercise every field.
-func seedForQueries(t *testing.T, handler http.Handler) {
+// Decision evidence is the one directly recorded prerequisite because the
+// bounded command surface has no standalone evidence endpoint. It
+// intentionally omits C12/C6, which the canonical order test already covers;
+// queries only need one requirement, one decision, one plan activity, one
+// execution, and one claim to exercise every field.
+func seedForQueries(t *testing.T, deps transporthttp.Dependencies, handler http.Handler) {
 	t.Helper()
+	decisionEvidenceArtifact, decisionEvidenceRevision, err := deps.Recorder.RecordEvidence(engineering.EvidenceInput{
+		ArtifactID: "EV-0",
+		RevisionID: "EV-0-REV-1",
+		Locator:    "https://evidence.example/EV-0",
+		RecordedAt: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("constructing decision evidence: %v", err)
+	}
+	if err := deps.UOW.Do(context.Background(), func(repos application.Repositories) error {
+		if err := repos.Artifacts.Put(context.Background(), decisionEvidenceArtifact); err != nil {
+			return err
+		}
+		return repos.Revisions.Put(context.Background(), decisionEvidenceRevision)
+	}); err != nil {
+		t.Fatalf("seeding decision evidence: %v", err)
+	}
 	steps := []struct {
 		path string
 		body map[string]any
@@ -37,11 +60,13 @@ func seedForQueries(t *testing.T, handler http.Handler) {
 		{"/api/v1/features", map[string]any{"feature_card_id": "FC-1", "project_id": "PRJ-1", "title": "Homework", "description": "d"}},
 		{"/api/v1/capabilities", map[string]any{
 			"feature_card_id": "FC-1", "artifact_id": "CAP-1", "revision_id": "CAP-1-REV-1",
-			"content": map[string]any{"schema_version": 1, "title": "Homework", "problem_statement": "No follow-up."},
+			"content": map[string]any{"schema_version": 1, "title": "Homework", "problem_statement": "No follow-up.",
+				"acceptance_criteria": []map[string]any{{"key": "AC-1", "text": "Homework is visible."}}},
 		}},
 		{"/api/v1/capabilities/CAP-1/acceptances", map[string]any{"record_id": "ACC-1", "revision_id": "CAP-1-REV-1", "state": "accepted"}},
 		{"/api/v1/requirements", map[string]any{
 			"artifact_id": "REQ-1", "revision_id": "REQ-1-REV-1", "acceptance_record_id": "ACC-REQ-1",
+			"source_capability_revision_id": "CAP-1-REV-1", "source_acceptance_criterion_key": "AC-1",
 			"statement": "Statement.", "subject_artifact_id": "CAP-1",
 		}},
 		{"/api/v1/decisions", map[string]any{
@@ -85,7 +110,7 @@ func seedForQueries(t *testing.T, handler http.Handler) {
 func TestListFeaturesHandler(t *testing.T) {
 	deps := newTestDeps()
 	handler := transporthttp.NewHandler(deps)
-	seedForQueries(t, handler)
+	seedForQueries(t, deps, handler)
 
 	var resp struct {
 		Data struct {
@@ -110,7 +135,7 @@ func TestListFeaturesHandler(t *testing.T) {
 func TestGetFeatureStateHandler(t *testing.T) {
 	deps := newTestDeps()
 	handler := transporthttp.NewHandler(deps)
-	seedForQueries(t, handler)
+	seedForQueries(t, deps, handler)
 
 	var resp struct {
 		Data struct {
@@ -181,7 +206,7 @@ func TestGetFeatureStateHandler(t *testing.T) {
 func TestGetFeatureStateHandler_ReadSurfaceContent(t *testing.T) {
 	deps := newTestDeps()
 	handler := transporthttp.NewHandler(deps)
-	seedForQueries(t, handler)
+	seedForQueries(t, deps, handler)
 
 	var resp struct {
 		Data struct {
@@ -272,7 +297,7 @@ func TestGetFeatureStateHandler_ReadSurfaceContent(t *testing.T) {
 func TestGetFeatureHandler(t *testing.T) {
 	deps := newTestDeps()
 	handler := transporthttp.NewHandler(deps)
-	seedForQueries(t, handler)
+	seedForQueries(t, deps, handler)
 
 	var resp struct {
 		Data struct {
@@ -311,7 +336,7 @@ func TestGetFeatureHandler(t *testing.T) {
 func TestGetFeatureTimelineHandler(t *testing.T) {
 	deps := newTestDeps()
 	handler := transporthttp.NewHandler(deps)
-	seedForQueries(t, handler)
+	seedForQueries(t, deps, handler)
 
 	var resp struct {
 		Data struct {
@@ -358,7 +383,7 @@ func TestGetFeatureTimelineHandler(t *testing.T) {
 func TestListCapabilityRevisionsHandler(t *testing.T) {
 	deps := newTestDeps()
 	handler := transporthttp.NewHandler(deps)
-	seedForQueries(t, handler)
+	seedForQueries(t, deps, handler)
 	postJSON(t, handler, "/api/v1/capabilities/CAP-1/revisions", map[string]any{
 		"revision_id": "CAP-1-REV-2",
 		"content":     map[string]any{"schema_version": 1, "title": "Homework", "problem_statement": "No follow-up.", "user_outcome": "Updated."},
@@ -412,7 +437,7 @@ func TestListCapabilityRevisionsHandler(t *testing.T) {
 func TestGetCapabilityRevisionHandler(t *testing.T) {
 	deps := newTestDeps()
 	handler := transporthttp.NewHandler(deps)
-	seedForQueries(t, handler)
+	seedForQueries(t, deps, handler)
 
 	var resp struct {
 		Data struct {

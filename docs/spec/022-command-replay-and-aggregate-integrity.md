@@ -3,6 +3,19 @@
 Status: Implemented (M.5 command replay and aggregate-integrity correction)
 Date: 2026-08-01
 Phase: M.5 correctness closure before domain analysis
+
+**Forward lifecycle correction.** AD-032/FF-023 preserve this document's
+occupied-act replay and zero-write precedence for C6, then add persisted
+Definition/DefinitionVersion validation and a linear-head rule for genuinely
+new transitions. Exact C6 replay is still recognized before new-transition
+validation. Illegal new edges are 422, a stale valid predecessor is 409, and an
+invalid stored lifecycle graph is opaque 500.
+
+**Forward C7 trace correction.** AD-033/FF-023 add one immutable
+`RequirementCriterionTrace` to C7's completed act and two new request-semantic
+fields naming the exact capability Revision and revision-local acceptance
+criterion. Missing/contradictory trace occupancy is 500; no legacy trace is
+inferred.
 Governs: command-level idempotency for C1–C12, persisted-act integrity
 inspection, C7/C9 acceptance-member identity, Validation Plan ordering and
 current resolution, and the evidence required before domain analysis begins
@@ -212,7 +225,7 @@ as the application equality witness.
 | C4 | capability A/R pair | valid owning A, R, content, original O | canonical capability content | recover stored sequence; never recompute `max+1` on replay |
 | C5 | `record_id` | valid Revision and exactly the named journal record | pair, target state, reason, presence-aware effective time | lookup record before transition validation |
 | C6 | `assignment_id` and transition A/R pair | shared transition A, R, assignment record, predecessor when non-entry | all transition/assignment inputs and presence-aware times | classify every split-occupancy combination |
-| C7 | Requirement A/R pair and new `acceptance_record_id` | valid shared A, R, O and semantic M | canonical Requirement statement, subject and fixed vocabulary | §7 |
+| C7 | Requirement A/R pair, new `acceptance_record_id`, source capability revision and criterion | valid shared A, R, O, semantic M and exact RequirementCriterionTrace T | canonical Requirement statement, subject, fixed vocabulary and exact source trace | §7 |
 | C8 | `decision_id` | Decision record and complete capability subject; structurally valid, optionally unresolved Evidence citation | every decision input including ordered collections | ignore server `RecordedAt`; do not dereference the evidence citation |
 | C9 | Validation Plan A/R pair and `acceptance_record_id` | valid shared A, R, O and semantic M | canonical scope and ordered plan activities | §8 |
 | C10 | `execution_id` and Evidence A/R pair | Evidence A, R and Execution record | plan/activity/subject/method/outcome/locator and presence-aware completion | classify evidence/execution split occupancy |
@@ -240,11 +253,11 @@ and no complete Decision citation, or a corrupt cited pair, returns 500.
 For `P = (artifact_id, revision_id)`:
 
 ```text
-OCC(P) = {Revision R, RevisionOrderMetadata O, acceptance journal J}
+OCC(P) = {Revision R, RevisionOrderMetadata O, acceptance journal J, RequirementCriterionTrace T}
 ```
 
 The Requirement Artifact `A` is a shared owning root. `P` is absent exactly
-when R and O are absent and J is empty, regardless of whether A exists.
+when R, O and T are absent and J is empty, regardless of whether A exists.
 
 An occupied P is complete only when:
 
@@ -255,6 +268,11 @@ An occupied P is complete only when:
 - every J record is readable, names P, and the total journal order describes
   permitted acceptance transitions;
 - exactly one J record has stored state `accepted`;
+- T exists, names P, and coherently identifies an exact source capability
+  Revision, its extant revision-local criterion, and a valid journal proving
+  that source was accepted. Only a genuinely new C7 act requires the source to
+  be current; a later capability revision or withdrawal does not corrupt an
+  already completed historical C7 act;
 - every required cross-reference resolves.
 - every Requirement revision under A has the same canonical subject.
 
@@ -264,13 +282,20 @@ record is history and does not replace M.
 ### 7.1 Presence and grammar
 
 - New P: `acceptance_record_id` is required, caller-owned, and must satisfy
-  FF-010 grammar.
-- Complete P: omission is allowed only for replay recovery.
+  FF-010 grammar; `source_capability_revision_id` and
+  `source_acceptance_criterion_key` are also mandatory request semantics.
+- Complete P: only `acceptance_record_id` may be omitted for replay recovery;
+  `source_capability_revision_id` and
+  `source_acceptance_criterion_key` remain mandatory on every request and are
+  compared with the stored trace T.
 - Exact supplied stored M ID: may replay even if that opaque historical value
   fails the later grammar.
 - Non-matching malformed supplied ID: 400.
 - No historical ID is regenerated from a prefix, concatenation, hash, or other
   formula.
+- New-P missing/foreign/stale source or absent criterion is 422; unreadable or
+  contradictory source/trace state is 500; a complete-P trace mismatch is 409
+  after the 500 integrity precedence.
 
 ### 7.2 C7 outcome matrix
 

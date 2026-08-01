@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/aleka7sk/featureforge/internal/application"
@@ -27,6 +28,7 @@ func TestGetFeatureTimelineForCard_PreservesPriorRevisionActivity(t *testing.T) 
 	if _, err := (application.EstablishRequirementCommand{
 		ArtifactID: "REQ-1", RevisionID: "REQ-1-REV-1",
 		Statement: "Students see homework.", SubjectArtifactID: "CAP-1",
+		SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
 		AcceptanceRecordID: memberID("MEM-REQ-1"),
 	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
@@ -74,6 +76,86 @@ func TestGetFeatureTimelineForCard_PreservesPriorRevisionActivity(t *testing.T) 
 	}
 }
 
+func TestGetFeatureTimelineForCardIncludesValidatedDecisionEvidence(t *testing.T) {
+	f := newCommandFixture()
+	ctx := context.Background()
+	seedCapability(t, f)
+	seedEvidenceRevision(t, f, "EV-DEC", "EV-DEC-REV-1")
+	if _, err := (application.RecordArchitectureDecisionCommand{
+		DecisionID: "DEC-1", SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1",
+		Question: "What supports the decision?", OutcomeStatement: "The cited evidence does.",
+		EvidenceArtifactID: "EV-DEC", EvidenceRevisionID: "EV-DEC-REV-1",
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
+		t.Fatal(err)
+	}
+
+	timeline, err := application.GetFeatureTimelineForCard(ctx, f.uow, f.rec, mustFeatureCardID(t, "FC-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, event := range append(timeline.Dated, timeline.Undated...) {
+		if event.Kind == application.EventEvidenceRecorded && event.SourceIdentity == "EV-DEC/EV-DEC-REV-1" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("decision evidence timeline count = %d, want exactly 1", count)
+	}
+}
+
+func TestGetFeatureTimelineForCardRejectsUnresolvedDecisionEvidence(t *testing.T) {
+	f := newCommandFixture()
+	ctx := context.Background()
+	seedCapability(t, f)
+	if _, err := (application.RecordArchitectureDecisionCommand{
+		DecisionID: "DEC-1", SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1",
+		Question: "What supports the decision?", OutcomeStatement: "An unresolved citation.",
+		EvidenceArtifactID: "EV-MISSING", EvidenceRevisionID: "EV-MISSING-REV-1",
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := application.GetFeatureTimelineForCard(ctx, f.uow, f.rec, mustFeatureCardID(t, "FC-1"))
+	if !errors.Is(err, application.ErrTimelineSourceInvalid) {
+		t.Fatalf("err = %v, want ErrTimelineSourceInvalid", err)
+	}
+}
+
+func TestGetFeatureTimelineForCardRejectsCorruptDecisionEvidence(t *testing.T) {
+	f := newCommandFixture()
+	ctx := context.Background()
+	seedCapability(t, f)
+	if err := f.uow.Do(ctx, func(r application.Repositories) error {
+		artifact, revision, err := f.rec.RecordEvidence(engineering.EvidenceInput{
+			ArtifactID: "EV-CORRUPT", RevisionID: "EV-CORRUPT-REV-1",
+			Locator: "https://evidence.example/EV-CORRUPT", RecordedAt: f.clock.Now(),
+		})
+		if err != nil {
+			return err
+		}
+		revision.Payload = []byte(`{"corrupt":"payload"}`)
+		if err := r.Artifacts.Put(ctx, artifact); err != nil {
+			return err
+		}
+		return r.Revisions.Put(ctx, revision)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (application.RecordArchitectureDecisionCommand{
+		DecisionID: "DEC-1", SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1",
+		Question: "What supports the decision?", OutcomeStatement: "A corrupt citation.",
+		EvidenceArtifactID: "EV-CORRUPT", EvidenceRevisionID: "EV-CORRUPT-REV-1",
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := application.GetFeatureTimelineForCard(ctx, f.uow, f.rec, mustFeatureCardID(t, "FC-1"))
+	if !errors.Is(err, application.ErrStoredStateIntegrity) {
+		t.Fatalf("err = %v, want ErrStoredStateIntegrity", err)
+	}
+}
+
 // TestGetFeatureEngineeringStateForCard_PriorRevisionClaimStaysStale proves
 // D1's other half: the M-1 fix must not broaden Q3/Q4. A claim recorded
 // against a superseded revision must not satisfy the new current revision's
@@ -87,6 +169,7 @@ func TestGetFeatureEngineeringStateForCard_PriorRevisionClaimStaysStale(t *testi
 	if _, err := (application.EstablishRequirementCommand{
 		ArtifactID: "REQ-1", RevisionID: "REQ-1-REV-1",
 		Statement: "Students see homework.", SubjectArtifactID: "CAP-1",
+		SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
 		AcceptanceRecordID: memberID("MEM-REQ-1"),
 	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)

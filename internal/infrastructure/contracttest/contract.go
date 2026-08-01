@@ -13,6 +13,7 @@ package contracttest
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -38,6 +39,8 @@ func RunRepositoryContractSuite(t *testing.T, newUOW func() application.UnitOfWo
 	t.Run("IdempotentIdenticalPut", func(t *testing.T) { testIdempotentIdenticalPut(t, newUOW()) })
 	t.Run("ConflictingPut", func(t *testing.T) { testConflictingPut(t, newUOW()) })
 	t.Run("ListIsDeterministic", func(t *testing.T) { testListIsDeterministic(t, newUOW()) })
+	t.Run("RevisionListAll", func(t *testing.T) { testRevisionListAll(t, newUOW()) })
+	t.Run("RecordListAll", func(t *testing.T) { testRecordListAll(t, newUOW()) })
 	t.Run("ReferenceVerification", func(t *testing.T) { testReferenceVerification(t, newUOW()) })
 	t.Run("ReturnedSlicesAreCopies", func(t *testing.T) { testReturnedSlicesAreCopies(t, newUOW()) })
 
@@ -51,11 +54,27 @@ func RunRepositoryContractSuite(t *testing.T, newUOW func() application.UnitOfWo
 	t.Run("AcceptanceLookupByRecordID", func(t *testing.T) { testAcceptanceLookupByRecordID(t, newUOW()) })
 	t.Run("RevisionOrderHistory", func(t *testing.T) { testRevisionOrderHistory(t, newUOW()) })
 	t.Run("SequenceUniquenessEnforced", func(t *testing.T) { testSequenceUniquenessEnforced(t, newUOW()) })
+	t.Run("RequirementCriterionTrace", func(t *testing.T) { testRequirementCriterionTrace(t, newUOW()) })
+	t.Run("RequirementCriterionTraceRollback", func(t *testing.T) { testRequirementCriterionTraceRollback(t, newUOW()) })
+	t.Run("LifecycleDefinitionsPutGetList", func(t *testing.T) { testLifecycleDefinitionsPutGetList(t, newUOW()) })
+	t.Run("LifecycleDefinitionVersionsPutGetList", func(t *testing.T) { testLifecycleDefinitionVersionsPutGetList(t, newUOW()) })
+	t.Run("LifecycleConfigurationCreateOnly", func(t *testing.T) { testLifecycleConfigurationCreateOnly(t, newUOW()) })
+	t.Run("LifecycleConfigurationReferenceAndRollback", func(t *testing.T) { testLifecycleConfigurationReferenceAndRollback(t, newUOW()) })
 
 	// AD-021: invariants the specifications declare and both adapters must
 	// now enforce identically.
 	t.Run("FeatureCardPutRequiresExistingProject", func(t *testing.T) { testFeatureCardRequiresProject(t, newUOW()) })
 	t.Run("CapabilityLinkRequiresExistingFeatureCard", func(t *testing.T) { testCapabilityLinkRequiresFeatureCard(t, newUOW()) })
+
+	// AD-031: the link is a separate monotonic value, materialized by reads
+	// but excluded from base FeatureCard Put equality.
+	t.Run("CapabilityLinkIsMaterialized", func(t *testing.T) { testCapabilityLinkIsMaterialized(t, newUOW()) })
+	t.Run("CapabilityLinkSameValueIsIdempotent", func(t *testing.T) { testCapabilityLinkSameValueIsIdempotent(t, newUOW()) })
+	t.Run("CapabilityLinkDifferentValueConflicts", func(t *testing.T) { testCapabilityLinkDifferentValueConflicts(t, newUOW()) })
+	t.Run("CapabilityLinkRollsBack", func(t *testing.T) { testCapabilityLinkRollsBack(t, newUOW()) })
+	t.Run("FeatureCardBasePutIgnoresMaterializedLink", func(t *testing.T) { testFeatureCardBasePutIgnoresMaterializedLink(t, newUOW()) })
+	t.Run("FeatureCardPutCannotEstablishLink", func(t *testing.T) { testFeatureCardPutCannotEstablishLink(t, newUOW()) })
+
 	t.Run("RecordEnvelopePutRequiresResolvableSubject", func(t *testing.T) { testRecordRequiresSubject(t, newUOW()) })
 	t.Run("RecordEnvelopePutRejectsMalformedSubjectKey", func(t *testing.T) { testRecordRejectsMalformedSubject(t, newUOW()) })
 	t.Run("AcceptanceRecordIDIsUnique", func(t *testing.T) { testAcceptanceRecordIDIsUnique(t, newUOW()) })
@@ -232,6 +251,322 @@ func testListIsDeterministic(t *testing.T, uow application.UnitOfWork) {
 			t.Errorf("list not sorted ascending by ID: %v", first)
 		}
 	}
+}
+
+func listAllRevisionFixture(t *testing.T) []engineering.RevisionEnvelope {
+	t.Helper()
+	capabilitySubject := engineering.ArtifactSubjectKey("A-CAP-LIST-ALL")
+	specs := []struct {
+		artifactID string
+		revisionID string
+		family     engineering.RevisionFamily
+		subject    string
+	}{
+		{"A-CAP-LIST-ALL", "REV-A", engineering.RevisionFamilyCapability, ""},
+		{"B-TRANSITION-LIST-ALL", "REV-B", engineering.RevisionFamilyTransitionRecord, capabilitySubject},
+		{"M-PLAN-LIST-ALL", "REV-M", engineering.RevisionFamilyValidationPlan, capabilitySubject},
+		{"Y-EVIDENCE-LIST-ALL", "REV-Y", engineering.RevisionFamilyEvidence, ""},
+		{"Z-REQUIREMENT-LIST-ALL", "REV-Z", engineering.RevisionFamilyRequirement, capabilitySubject},
+	}
+	want := make([]engineering.RevisionEnvelope, len(specs))
+	for i, spec := range specs {
+		key, err := engineering.NewRevisionKey(spec.artifactID, spec.revisionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want[i] = mustRevisionEnvelopeWithSubject(t, key, spec.family, spec.subject)
+	}
+	return want
+}
+
+func putListAllRevisions(t *testing.T, r application.Repositories, revisions []engineering.RevisionEnvelope) error {
+	t.Helper()
+	ctx := context.Background()
+	// Deliberately insert in neither key nor family order.
+	for _, index := range []int{4, 1, 3, 0, 2} {
+		revision := revisions[index]
+		if err := r.Artifacts.Put(ctx, mustArtifactEnvelope(t, revision.Key.ArtifactID)); err != nil {
+			return err
+		}
+		if err := r.Revisions.Put(ctx, revision); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func assertRevisionListAll(t *testing.T, got, want []engineering.RevisionEnvelope) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("ListAll returned %d revisions, want %d: %v", len(got), len(want), revisionKeys(got))
+	}
+	seenFamilies := make(map[engineering.RevisionFamily]bool, len(got))
+	for i := range want {
+		seenFamilies[got[i].RevisionFamily] = true
+		if got[i].Key != want[i].Key || got[i].RevisionFamily != want[i].RevisionFamily ||
+			got[i].SubjectKey != want[i].SubjectKey || string(got[i].Payload) != string(want[i].Payload) {
+			t.Fatalf("ListAll[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	for _, family := range []engineering.RevisionFamily{
+		engineering.RevisionFamilyCapability,
+		engineering.RevisionFamilyRequirement,
+		engineering.RevisionFamilyValidationPlan,
+		engineering.RevisionFamilyTransitionRecord,
+		engineering.RevisionFamilyEvidence,
+	} {
+		if !seenFamilies[family] {
+			t.Errorf("ListAll projection-filtered revision family %q", family)
+		}
+	}
+}
+
+func revisionKeys(revisions []engineering.RevisionEnvelope) []engineering.RevisionKey {
+	keys := make([]engineering.RevisionKey, len(revisions))
+	for i, revision := range revisions {
+		keys[i] = revision.Key
+	}
+	return keys
+}
+
+func testRevisionListAll(t *testing.T, uow application.UnitOfWork) {
+	ctx := context.Background()
+	want := listAllRevisionFixture(t)
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		// Keep the oracle's nested slices independent from the values handed to
+		// the adapter, so a shallow storage alias cannot mask a shallow read.
+		if err := putListAllRevisions(t, r, listAllRevisionFixture(t)); err != nil {
+			return err
+		}
+		got, err := r.Revisions.ListAll(ctx)
+		if err != nil {
+			return err
+		}
+		assertRevisionListAll(t, got, want)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		for i := range 10 {
+			got, err := r.Revisions.ListAll(ctx)
+			if err != nil {
+				return err
+			}
+			assertRevisionListAll(t, got, want)
+			if i == 0 {
+				// Both the returned slice and every nested payload are caller-owned.
+				got[0].Payload[0] = '!'
+				got[1] = engineering.RevisionEnvelope{}
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rollbackKey, _ := engineering.NewRevisionKey("C-ROLLBACK-LIST-ALL", "REV-C")
+	rollbackRevision := mustRevisionEnvelopeWithSubject(t, rollbackKey, engineering.RevisionFamilyRequirement,
+		engineering.ArtifactSubjectKey("A-CAP-LIST-ALL"))
+	sentinel := errors.New("rollback revision ListAll member")
+	err := uow.Do(ctx, func(r application.Repositories) error {
+		if err := r.Artifacts.Put(ctx, mustArtifactEnvelope(t, rollbackKey.ArtifactID)); err != nil {
+			return err
+		}
+		if err := r.Revisions.Put(ctx, rollbackRevision); err != nil {
+			return err
+		}
+		got, err := r.Revisions.ListAll(ctx)
+		if err != nil {
+			return err
+		}
+		if len(got) != len(want)+1 || !containsRevisionKey(got, rollbackKey) {
+			t.Errorf("same-act rollback candidate is not visible: %v", revisionKeys(got))
+		}
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("rollback err = %v, want sentinel", err)
+	}
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		got, err := r.Revisions.ListAll(ctx)
+		if err != nil {
+			return err
+		}
+		assertRevisionListAll(t, got, want)
+		if containsRevisionKey(got, rollbackKey) {
+			t.Errorf("rolled-back revision survived: %v", revisionKeys(got))
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func containsRevisionKey(revisions []engineering.RevisionEnvelope, key engineering.RevisionKey) bool {
+	for _, revision := range revisions {
+		if revision.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+func listAllRecordFixture(t *testing.T) []engineering.RecordEnvelope {
+	t.Helper()
+	subject := engineering.ArtifactSubjectKey("CAP-RECORD-LIST-ALL")
+	specs := []struct {
+		kind engineering.RecordKind
+		id   string
+	}{
+		{engineering.RecordKindClaim, "Z-CLAIM-LIST-ALL"},
+		{engineering.RecordKindDecision, "A-DECISION-LIST-ALL"},
+		{engineering.RecordKindExecution, "M-EXECUTION-LIST-ALL"},
+		{engineering.RecordKindStateAssignment, "B-STATE-LIST-ALL"},
+	}
+	want := make([]engineering.RecordEnvelope, len(specs))
+	for i, spec := range specs {
+		key, err := engineering.NewRecordKey(spec.kind, spec.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload := []byte(`{"id":"` + spec.id + `"}`)
+		want[i], err = engineering.NewRecordEnvelope(engineering.RecordEnvelopeInput{
+			Key: key, SubjectKey: subject, Scope: "featureforge:list-all", Outcome: "peos:test",
+			OccurredAt: fixedContractTime(), HasOccurredAt: true,
+			CriterionKeys: []string{"criterion:" + spec.id}, EvidenceKeys: []string{"evidence:" + spec.id},
+			ExecutionKeys: []string{"execution:" + spec.id}, StateID: "featureforge:test-state",
+			Payload: payload, PayloadDigest: engineering.ComputeDigest(payload), RecordedAt: fixedContractTime(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	return want
+}
+
+func assertRecordListAll(t *testing.T, got, want []engineering.RecordEnvelope) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("ListAll returned %d records, want %d: %v", len(got), len(want), recordKeys(got))
+	}
+	seenKinds := make(map[engineering.RecordKind]bool, len(got))
+	for i := range want {
+		seenKinds[got[i].Key.Kind] = true
+		if got[i].Key != want[i].Key || got[i].Kind != want[i].Kind || got[i].SubjectKey != want[i].SubjectKey ||
+			got[i].Scope != want[i].Scope || got[i].Outcome != want[i].Outcome || got[i].StateID != want[i].StateID ||
+			string(got[i].Payload) != string(want[i].Payload) ||
+			!slices.Equal(got[i].CriterionKeys, want[i].CriterionKeys) ||
+			!slices.Equal(got[i].EvidenceKeys, want[i].EvidenceKeys) ||
+			!slices.Equal(got[i].ExecutionKeys, want[i].ExecutionKeys) {
+			t.Fatalf("ListAll[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	for _, kind := range []engineering.RecordKind{
+		engineering.RecordKindDecision,
+		engineering.RecordKindExecution,
+		engineering.RecordKindClaim,
+		engineering.RecordKindStateAssignment,
+	} {
+		if !seenKinds[kind] {
+			t.Errorf("ListAll projection-filtered record kind %q", kind)
+		}
+	}
+}
+
+func recordKeys(records []engineering.RecordEnvelope) []engineering.RecordKey {
+	keys := make([]engineering.RecordKey, len(records))
+	for i, record := range records {
+		keys[i] = record.Key
+	}
+	return keys
+}
+
+func testRecordListAll(t *testing.T, uow application.UnitOfWork) {
+	ctx := context.Background()
+	want := listAllRecordFixture(t)
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		if err := r.Artifacts.Put(ctx, mustArtifactEnvelope(t, "CAP-RECORD-LIST-ALL")); err != nil {
+			return err
+		}
+		candidates := listAllRecordFixture(t)
+		for _, index := range []int{3, 0, 2, 1} {
+			if err := r.Records.Put(ctx, candidates[index]); err != nil {
+				return err
+			}
+		}
+		got, err := r.Records.ListAll(ctx)
+		if err != nil {
+			return err
+		}
+		assertRecordListAll(t, got, want)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		for i := range 10 {
+			got, err := r.Records.ListAll(ctx)
+			if err != nil {
+				return err
+			}
+			assertRecordListAll(t, got, want)
+			if i == 0 {
+				got[0].Payload[0] = '!'
+				got[0].CriterionKeys[0] = "mutated"
+				got[0].EvidenceKeys[0] = "mutated"
+				got[0].ExecutionKeys[0] = "mutated"
+				got[1] = engineering.RecordEnvelope{}
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rollback := mustRecordEnvelope(t, engineering.RecordKindDecision, "ROLLBACK-LIST-ALL",
+		engineering.ArtifactSubjectKey("CAP-RECORD-LIST-ALL"))
+	sentinel := errors.New("rollback record ListAll member")
+	err := uow.Do(ctx, func(r application.Repositories) error {
+		if err := r.Records.Put(ctx, rollback); err != nil {
+			return err
+		}
+		got, err := r.Records.ListAll(ctx)
+		if err != nil {
+			return err
+		}
+		if len(got) != len(want)+1 || !containsRecordKey(got, rollback.Key) {
+			t.Errorf("same-act rollback candidate is not visible: %v", recordKeys(got))
+		}
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("rollback err = %v, want sentinel", err)
+	}
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		got, err := r.Records.ListAll(ctx)
+		if err != nil {
+			return err
+		}
+		assertRecordListAll(t, got, want)
+		if containsRecordKey(got, rollback.Key) {
+			t.Errorf("rolled-back record survived: %v", recordKeys(got))
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func containsRecordKey(records []engineering.RecordEnvelope, key engineering.RecordKey) bool {
+	for _, record := range records {
+		if record.Key == key {
+			return true
+		}
+	}
+	return false
 }
 
 func testReferenceVerification(t *testing.T, uow application.UnitOfWork) {
@@ -650,6 +985,503 @@ func testSequenceUniquenessEnforced(t *testing.T, uow application.UnitOfWork) {
 	}
 }
 
+func testRequirementCriterionTrace(t *testing.T, uow application.UnitOfWork) {
+	ctx := context.Background()
+	requirementKey, err := engineering.NewRevisionKey("REQ-TRACE", "REQ-TRACE-REV-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	capabilityKey, err := engineering.NewRevisionKey("CAP-TRACE", "CAP-TRACE-REV-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := engineering.NewRequirementCriterionTrace(requirementKey, capabilityKey, "AC-1", fixedContractTime())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = uow.Do(ctx, func(r application.Repositories) error {
+		for _, key := range []engineering.RevisionKey{requirementKey, capabilityKey} {
+			if err := r.Artifacts.Put(ctx, mustArtifactEnvelope(t, key.ArtifactID)); err != nil {
+				return err
+			}
+			if err := r.Revisions.Put(ctx, mustRevisionEnvelope(t, key)); err != nil {
+				return err
+			}
+		}
+		if err := r.RequirementTraces.Put(ctx, want); err != nil {
+			return err
+		}
+		got, found, err := r.RequirementTraces.Get(ctx, requirementKey)
+		if err != nil {
+			return err
+		}
+		if !found || !got.Equal(want) {
+			t.Errorf("same-transaction trace = (%+v, %v), want %+v", got, found, want)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Exact re-Put is a no-op across transaction boundaries.
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		return r.RequirementTraces.Put(ctx, want)
+	}); err != nil {
+		t.Fatalf("identical trace re-Put: %v", err)
+	}
+
+	err = uow.Do(ctx, func(r application.Repositories) error {
+		got, found, err := r.RequirementTraces.Get(ctx, requirementKey)
+		if err != nil {
+			return err
+		}
+		if !found || !got.Equal(want) {
+			t.Errorf("committed trace = (%+v, %v), want %+v", got, found, want)
+		}
+		missingKey, _ := engineering.NewRevisionKey("REQ-TRACE", "REQ-MISSING")
+		missing, found, err := r.RequirementTraces.Get(ctx, missingKey)
+		if err != nil {
+			return err
+		}
+		if found || !missing.IsZero() {
+			t.Errorf("missing trace = (%+v, %v), want zero/false", missing, found)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	different, err := engineering.NewRequirementCriterionTrace(requirementKey, capabilityKey, "AC-2", fixedContractTime())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = uow.Do(ctx, func(r application.Repositories) error {
+		return r.RequirementTraces.Put(ctx, different)
+	})
+	if !errors.Is(err, application.ErrImmutableValueConflict) {
+		t.Errorf("conflicting trace err = %v, want ErrImmutableValueConflict", err)
+	}
+
+	missingRequirement, _ := engineering.NewRevisionKey("REQ-GHOST", "REQ-GHOST-REV-1")
+	invalid, _ := engineering.NewRequirementCriterionTrace(missingRequirement, capabilityKey, "AC-1", fixedContractTime())
+	err = uow.Do(ctx, func(r application.Repositories) error {
+		return r.RequirementTraces.Put(ctx, invalid)
+	})
+	if !errors.Is(err, application.ErrReferencedValueMissing) {
+		t.Errorf("missing requirement reference err = %v, want ErrReferencedValueMissing", err)
+	}
+
+	missingCapability, _ := engineering.NewRevisionKey("CAP-GHOST", "CAP-GHOST-REV-1")
+	invalid, _ = engineering.NewRequirementCriterionTrace(requirementKey, missingCapability, "AC-1", fixedContractTime())
+	err = uow.Do(ctx, func(r application.Repositories) error {
+		return r.RequirementTraces.Put(ctx, invalid)
+	})
+	if !errors.Is(err, application.ErrReferencedValueMissing) {
+		t.Errorf("missing capability reference err = %v, want ErrReferencedValueMissing", err)
+	}
+}
+
+func testRequirementCriterionTraceRollback(t *testing.T, uow application.UnitOfWork) {
+	ctx := context.Background()
+	requirementKey, _ := engineering.NewRevisionKey("REQ-TRACE-ROLLBACK", "REQ-TRACE-ROLLBACK-REV-1")
+	capabilityKey, _ := engineering.NewRevisionKey("CAP-TRACE-ROLLBACK", "CAP-TRACE-ROLLBACK-REV-1")
+	trace, _ := engineering.NewRequirementCriterionTrace(requirementKey, capabilityKey, "AC-1", fixedContractTime())
+	sentinel := errors.New("rollback trace")
+	err := uow.Do(ctx, func(r application.Repositories) error {
+		for _, key := range []engineering.RevisionKey{requirementKey, capabilityKey} {
+			if err := r.Artifacts.Put(ctx, mustArtifactEnvelope(t, key.ArtifactID)); err != nil {
+				return err
+			}
+			if err := r.Revisions.Put(ctx, mustRevisionEnvelope(t, key)); err != nil {
+				return err
+			}
+		}
+		if err := r.RequirementTraces.Put(ctx, trace); err != nil {
+			return err
+		}
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("rollback err = %v, want sentinel", err)
+	}
+	err = uow.Do(ctx, func(r application.Repositories) error {
+		got, found, err := r.RequirementTraces.Get(ctx, requirementKey)
+		if err != nil {
+			return err
+		}
+		if found || !got.IsZero() {
+			t.Errorf("rolled-back trace survived: (%+v, %v)", got, found)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// --- AD-032: persisted lifecycle configuration parity across adapters ---
+
+func mustLifecycleDefinitionEnvelope(t *testing.T, definitionID, marker string) engineering.LifecycleDefinitionEnvelope {
+	t.Helper()
+	payload := []byte(`{"definition_id":"` + definitionID + `","marker":"` + marker + `"}`)
+	env, err := engineering.NewLifecycleDefinitionEnvelope(definitionID, payload, engineering.ComputeDigest(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return env
+}
+
+func mustLifecycleVersionEnvelope(t *testing.T, definitionID, versionID, marker string, recordedAt time.Time) engineering.LifecycleDefinitionVersionEnvelope {
+	t.Helper()
+	key, err := engineering.NewLifecycleDefinitionVersionKey(definitionID, versionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte(`{"definition_id":"` + definitionID + `","version_id":"` + versionID + `","marker":"` + marker + `"}`)
+	env, err := engineering.NewLifecycleDefinitionVersionEnvelope(key, payload, engineering.ComputeDigest(payload), recordedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return env
+}
+
+func sameLifecycleDefinition(a, b engineering.LifecycleDefinitionEnvelope) bool {
+	return a.DefinitionID == b.DefinitionID && string(a.Payload) == string(b.Payload) && a.PayloadDigest.Equal(b.PayloadDigest)
+}
+
+func sameLifecycleVersion(a, b engineering.LifecycleDefinitionVersionEnvelope) bool {
+	return a.Key == b.Key && string(a.Payload) == string(b.Payload) &&
+		a.PayloadDigest.Equal(b.PayloadDigest) && a.RecordedAt.Equal(b.RecordedAt)
+}
+
+func testLifecycleDefinitionsPutGetList(t *testing.T, uow application.UnitOfWork) {
+	ctx := context.Background()
+	ids := []string{"LCD-Z", "LCD-A", "LCD-M"}
+	expected := make(map[string]engineering.LifecycleDefinitionEnvelope, len(ids))
+	for _, id := range ids {
+		expected[id] = mustLifecycleDefinitionEnvelope(t, id, "canonical")
+	}
+
+	// Writes and reads are visible inside one act. Mutating the caller-owned
+	// payload after Put must not mutate the transaction's stored value.
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		for _, id := range ids {
+			candidate := mustLifecycleDefinitionEnvelope(t, id, "canonical")
+			if err := r.LifecycleDefinitions.PutDefinition(ctx, candidate); err != nil {
+				return err
+			}
+			candidate.Payload[0] = '!'
+		}
+		got, found, err := r.LifecycleDefinitions.GetDefinition(ctx, "LCD-A")
+		if err != nil {
+			return err
+		}
+		if !found || !sameLifecycleDefinition(got, expected["LCD-A"]) {
+			t.Errorf("same-act GetDefinition = (%+v, %v), want %+v", got, found, expected["LCD-A"])
+		}
+		listed, err := r.LifecycleDefinitions.ListDefinitions(ctx)
+		if err != nil {
+			return err
+		}
+		if len(listed) != 3 || listed[0].DefinitionID != "LCD-A" || listed[1].DefinitionID != "LCD-M" || listed[2].DefinitionID != "LCD-Z" {
+			t.Errorf("ListDefinitions order = %v, want LCD-A, LCD-M, LCD-Z", lifecycleDefinitionIDs(listed))
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Get and List both return defensive payload copies, and committed list
+	// order remains deterministic across repeated calls.
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		got, found, err := r.LifecycleDefinitions.GetDefinition(ctx, "LCD-M")
+		if err != nil {
+			return err
+		}
+		if !found {
+			t.Fatal("committed lifecycle definition not found")
+		}
+		got.Payload[0] = '!'
+		again, found, err := r.LifecycleDefinitions.GetDefinition(ctx, "LCD-M")
+		if err != nil {
+			return err
+		}
+		if !found || !sameLifecycleDefinition(again, expected["LCD-M"]) {
+			t.Errorf("GetDefinition leaked mutable payload: (%+v, %v)", again, found)
+		}
+
+		for i := range 10 {
+			listed, err := r.LifecycleDefinitions.ListDefinitions(ctx)
+			if err != nil {
+				return err
+			}
+			if len(listed) != 3 || listed[0].DefinitionID != "LCD-A" || listed[1].DefinitionID != "LCD-M" || listed[2].DefinitionID != "LCD-Z" {
+				t.Fatalf("ListDefinitions iteration %d order = %v", i, lifecycleDefinitionIDs(listed))
+			}
+			listed[0].Payload[0] = '!'
+			listed[1] = engineering.LifecycleDefinitionEnvelope{}
+		}
+		listed, err := r.LifecycleDefinitions.ListDefinitions(ctx)
+		if err != nil {
+			return err
+		}
+		if !sameLifecycleDefinition(listed[0], expected["LCD-A"]) {
+			t.Errorf("ListDefinitions leaked mutable payload: %+v", listed[0])
+		}
+
+		missing, found, err := r.LifecycleDefinitions.GetDefinition(ctx, "LCD-MISSING")
+		if err != nil {
+			return err
+		}
+		if found || missing.DefinitionID != "" || len(missing.Payload) != 0 || !missing.PayloadDigest.IsZero() {
+			t.Errorf("missing definition = (%+v, %v), want zero/false", missing, found)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func lifecycleDefinitionIDs(definitions []engineering.LifecycleDefinitionEnvelope) []string {
+	ids := make([]string, len(definitions))
+	for i, definition := range definitions {
+		ids[i] = definition.DefinitionID
+	}
+	return ids
+}
+
+func testLifecycleDefinitionVersionsPutGetList(t *testing.T, uow application.UnitOfWork) {
+	ctx := context.Background()
+	definition := mustLifecycleDefinitionEnvelope(t, "LCD-VERSIONS", "parent")
+	otherDefinition := mustLifecycleDefinitionEnvelope(t, "LCD-OTHER", "parent")
+	versionIDs := []string{"LCDV-Z", "LCDV-A", "LCDV-M"}
+	expected := make(map[string]engineering.LifecycleDefinitionVersionEnvelope, len(versionIDs))
+	for i, id := range versionIDs {
+		expected[id] = mustLifecycleVersionEnvelope(t, definition.DefinitionID, id, "canonical", fixedContractTime().Add(time.Duration(i)*time.Minute))
+	}
+
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		if err := r.LifecycleDefinitions.PutDefinition(ctx, definition); err != nil {
+			return err
+		}
+		if err := r.LifecycleDefinitions.PutDefinition(ctx, otherDefinition); err != nil {
+			return err
+		}
+		for _, id := range versionIDs {
+			candidate := mustLifecycleVersionEnvelope(t, definition.DefinitionID, id, "canonical", expected[id].RecordedAt)
+			if err := r.LifecycleDefinitions.PutVersion(ctx, candidate); err != nil {
+				return err
+			}
+			candidate.Payload[0] = '!'
+		}
+		other := mustLifecycleVersionEnvelope(t, otherDefinition.DefinitionID, "LCDV-OTHER", "other", fixedContractTime())
+		if err := r.LifecycleDefinitions.PutVersion(ctx, other); err != nil {
+			return err
+		}
+
+		got, found, err := r.LifecycleDefinitions.GetVersion(ctx, expected["LCDV-A"].Key)
+		if err != nil {
+			return err
+		}
+		if !found || !sameLifecycleVersion(got, expected["LCDV-A"]) {
+			t.Errorf("same-act GetVersion = (%+v, %v), want %+v", got, found, expected["LCDV-A"])
+		}
+		listed, err := r.LifecycleDefinitions.ListVersions(ctx, definition.DefinitionID)
+		if err != nil {
+			return err
+		}
+		if len(listed) != 3 || listed[0].Key.VersionID != "LCDV-A" || listed[1].Key.VersionID != "LCDV-M" || listed[2].Key.VersionID != "LCDV-Z" {
+			t.Errorf("ListVersions order/filter = %v, want LCDV-A, LCDV-M, LCDV-Z", lifecycleVersionIDs(listed))
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		got, found, err := r.LifecycleDefinitions.GetVersion(ctx, expected["LCDV-M"].Key)
+		if err != nil {
+			return err
+		}
+		if !found {
+			t.Fatal("committed lifecycle definition version not found")
+		}
+		got.Payload[0] = '!'
+		again, found, err := r.LifecycleDefinitions.GetVersion(ctx, expected["LCDV-M"].Key)
+		if err != nil {
+			return err
+		}
+		if !found || !sameLifecycleVersion(again, expected["LCDV-M"]) {
+			t.Errorf("GetVersion leaked mutable payload: (%+v, %v)", again, found)
+		}
+
+		for i := range 10 {
+			listed, err := r.LifecycleDefinitions.ListVersions(ctx, definition.DefinitionID)
+			if err != nil {
+				return err
+			}
+			if len(listed) != 3 || listed[0].Key.VersionID != "LCDV-A" || listed[1].Key.VersionID != "LCDV-M" || listed[2].Key.VersionID != "LCDV-Z" {
+				t.Fatalf("ListVersions iteration %d order = %v", i, lifecycleVersionIDs(listed))
+			}
+			listed[0].Payload[0] = '!'
+			listed[1] = engineering.LifecycleDefinitionVersionEnvelope{}
+		}
+		listed, err := r.LifecycleDefinitions.ListVersions(ctx, definition.DefinitionID)
+		if err != nil {
+			return err
+		}
+		if !sameLifecycleVersion(listed[0], expected["LCDV-A"]) {
+			t.Errorf("ListVersions leaked mutable payload: %+v", listed[0])
+		}
+
+		missingKey, _ := engineering.NewLifecycleDefinitionVersionKey(definition.DefinitionID, "LCDV-MISSING")
+		missing, found, err := r.LifecycleDefinitions.GetVersion(ctx, missingKey)
+		if err != nil {
+			return err
+		}
+		if found || !missing.Key.IsZero() || len(missing.Payload) != 0 || !missing.PayloadDigest.IsZero() || !missing.RecordedAt.IsZero() {
+			t.Errorf("missing version = (%+v, %v), want zero/false", missing, found)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func lifecycleVersionIDs(versions []engineering.LifecycleDefinitionVersionEnvelope) []string {
+	ids := make([]string, len(versions))
+	for i, version := range versions {
+		ids[i] = version.Key.VersionID
+	}
+	return ids
+}
+
+func testLifecycleConfigurationCreateOnly(t *testing.T, uow application.UnitOfWork) {
+	ctx := context.Background()
+	definition := mustLifecycleDefinitionEnvelope(t, "LCD-CREATE-ONLY", "canonical")
+	version := mustLifecycleVersionEnvelope(t, definition.DefinitionID, "LCDV-CREATE-ONLY", "canonical", fixedContractTime())
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		if err := r.LifecycleDefinitions.PutDefinition(ctx, definition); err != nil {
+			return err
+		}
+		if err := r.LifecycleDefinitions.PutDefinition(ctx, mustLifecycleDefinitionEnvelope(t, definition.DefinitionID, "canonical")); err != nil {
+			return err
+		}
+		if err := r.LifecycleDefinitions.PutVersion(ctx, version); err != nil {
+			return err
+		}
+		return r.LifecycleDefinitions.PutVersion(ctx, mustLifecycleVersionEnvelope(t, definition.DefinitionID, version.Key.VersionID, "canonical", fixedContractTime()))
+	}); err != nil {
+		t.Fatalf("same-act identical Put: %v", err)
+	}
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		if err := r.LifecycleDefinitions.PutDefinition(ctx, mustLifecycleDefinitionEnvelope(t, definition.DefinitionID, "canonical")); err != nil {
+			return err
+		}
+		return r.LifecycleDefinitions.PutVersion(ctx, mustLifecycleVersionEnvelope(t, definition.DefinitionID, version.Key.VersionID, "canonical", fixedContractTime()))
+	}); err != nil {
+		t.Fatalf("cross-act identical Put: %v", err)
+	}
+
+	err := uow.Do(ctx, func(r application.Repositories) error {
+		return r.LifecycleDefinitions.PutDefinition(ctx, mustLifecycleDefinitionEnvelope(t, definition.DefinitionID, "different"))
+	})
+	if !errors.Is(err, application.ErrImmutableValueConflict) {
+		t.Errorf("definition conflict err = %v, want ErrImmutableValueConflict", err)
+	}
+	err = uow.Do(ctx, func(r application.Repositories) error {
+		return r.LifecycleDefinitions.PutVersion(ctx, mustLifecycleVersionEnvelope(t, definition.DefinitionID, version.Key.VersionID, "different", fixedContractTime()))
+	})
+	if !errors.Is(err, application.ErrImmutableValueConflict) {
+		t.Errorf("version payload conflict err = %v, want ErrImmutableValueConflict", err)
+	}
+	err = uow.Do(ctx, func(r application.Repositories) error {
+		return r.LifecycleDefinitions.PutVersion(ctx, mustLifecycleVersionEnvelope(t, definition.DefinitionID, version.Key.VersionID, "canonical", fixedContractTime().Add(time.Second)))
+	})
+	if !errors.Is(err, application.ErrImmutableValueConflict) {
+		t.Errorf("version recorded-at conflict err = %v, want ErrImmutableValueConflict", err)
+	}
+}
+
+func testLifecycleConfigurationReferenceAndRollback(t *testing.T, uow application.UnitOfWork) {
+	ctx := context.Background()
+	missingParentVersion := mustLifecycleVersionEnvelope(t, "LCD-GHOST", "LCDV-GHOST", "orphan", fixedContractTime())
+	err := uow.Do(ctx, func(r application.Repositories) error {
+		return r.LifecycleDefinitions.PutVersion(ctx, missingParentVersion)
+	})
+	if !errors.Is(err, application.ErrReferencedValueMissing) {
+		t.Errorf("missing definition err = %v, want ErrReferencedValueMissing", err)
+	}
+
+	definition := mustLifecycleDefinitionEnvelope(t, "LCD-ROLLBACK", "rollback")
+	version := mustLifecycleVersionEnvelope(t, definition.DefinitionID, "LCDV-ROLLBACK", "rollback", fixedContractTime())
+	sentinel := errors.New("rollback lifecycle configuration")
+	err = uow.Do(ctx, func(r application.Repositories) error {
+		if err := r.LifecycleDefinitions.PutDefinition(ctx, definition); err != nil {
+			return err
+		}
+		if err := r.LifecycleDefinitions.PutVersion(ctx, version); err != nil {
+			return err
+		}
+		gotDefinition, found, err := r.LifecycleDefinitions.GetDefinition(ctx, definition.DefinitionID)
+		if err != nil {
+			return err
+		}
+		if !found || !sameLifecycleDefinition(gotDefinition, definition) {
+			t.Errorf("definition not visible before rollback: (%+v, %v)", gotDefinition, found)
+		}
+		gotVersion, found, err := r.LifecycleDefinitions.GetVersion(ctx, version.Key)
+		if err != nil {
+			return err
+		}
+		if !found || !sameLifecycleVersion(gotVersion, version) {
+			t.Errorf("version not visible before rollback: (%+v, %v)", gotVersion, found)
+		}
+		definitions, err := r.LifecycleDefinitions.ListDefinitions(ctx)
+		if err != nil {
+			return err
+		}
+		versions, err := r.LifecycleDefinitions.ListVersions(ctx, definition.DefinitionID)
+		if err != nil {
+			return err
+		}
+		if len(definitions) != 1 || len(versions) != 1 {
+			t.Errorf("same-act lists = (%d definitions, %d versions), want (1, 1)", len(definitions), len(versions))
+		}
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("rollback err = %v, want sentinel", err)
+	}
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		gotDefinition, definitionFound, err := r.LifecycleDefinitions.GetDefinition(ctx, definition.DefinitionID)
+		if err != nil {
+			return err
+		}
+		gotVersion, versionFound, err := r.LifecycleDefinitions.GetVersion(ctx, version.Key)
+		if err != nil {
+			return err
+		}
+		definitions, err := r.LifecycleDefinitions.ListDefinitions(ctx)
+		if err != nil {
+			return err
+		}
+		versions, err := r.LifecycleDefinitions.ListVersions(ctx, definition.DefinitionID)
+		if err != nil {
+			return err
+		}
+		if definitionFound || gotDefinition.DefinitionID != "" || versionFound || !gotVersion.Key.IsZero() || len(definitions) != 0 || len(versions) != 0 {
+			t.Errorf("rolled-back lifecycle configuration survived: definition=(%+v,%v), version=(%+v,%v), lists=(%d,%d)", gotDefinition, definitionFound, gotVersion, versionFound, len(definitions), len(versions))
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // --- AD-021: spec-declared invariants enforced identically by both adapters ---
 
 // testFeatureCardRequiresProject asserts a FeatureCard cannot be written into
@@ -705,6 +1537,250 @@ func testCapabilityLinkRequiresFeatureCard(t *testing.T, uow application.UnitOfW
 		return nil
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func storeFeatureCard(t *testing.T, uow application.UnitOfWork, suffix string) (domain.Project, domain.FeatureCard) {
+	t.Helper()
+	project := mustProject(t, "PRJ-LINK-"+suffix)
+	card, err := domain.NewFeatureCard(
+		mustFeatureCardID(t, "FC-LINK-"+suffix), project.ID(),
+		"Capability link "+suffix, "AD-031 repository contract", fixedContractTime(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		if err := r.Projects.Put(ctx, project); err != nil {
+			return err
+		}
+		return r.FeatureCards.Put(ctx, card)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return project, card
+}
+
+func assertCapabilityLink(t *testing.T, card domain.FeatureCard, want string, wantLinked bool) {
+	t.Helper()
+	got, linked := card.CapabilityArtifactID()
+	if linked != wantLinked || got != want {
+		t.Fatalf("CapabilityArtifactID() = (%q, %v), want (%q, %v)", got, linked, want, wantLinked)
+	}
+}
+
+func testCapabilityLinkIsMaterialized(t *testing.T, uow application.UnitOfWork) {
+	project, card := storeFeatureCard(t, uow, "MATERIALIZED")
+	ctx := context.Background()
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		return r.FeatureCards.LinkCapability(ctx, card.ID(), "CAP-MATERIALIZED")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		stored, found, err := r.FeatureCards.Get(ctx, card.ID())
+		if err != nil {
+			return err
+		}
+		if !found {
+			t.Fatal("linked FeatureCard not found")
+		}
+		assertCapabilityLink(t, stored, "CAP-MATERIALIZED", true)
+
+		cards, err := r.FeatureCards.ListByProject(ctx, project.ID())
+		if err != nil {
+			return err
+		}
+		if len(cards) != 1 || cards[0].ID() != card.ID() {
+			t.Fatalf("ListByProject() = %+v, want the linked FeatureCard", cards)
+		}
+		assertCapabilityLink(t, cards[0], "CAP-MATERIALIZED", true)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testCapabilityLinkSameValueIsIdempotent(t *testing.T, uow application.UnitOfWork) {
+	_, card := storeFeatureCard(t, uow, "IDEMPOTENT")
+	ctx := context.Background()
+	for i := range 3 {
+		if err := uow.Do(ctx, func(r application.Repositories) error {
+			return r.FeatureCards.LinkCapability(ctx, card.ID(), "CAP-IDEMPOTENT")
+		}); err != nil {
+			t.Fatalf("LinkCapability replay %d: %v", i, err)
+		}
+	}
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		stored, found, err := r.FeatureCards.Get(ctx, card.ID())
+		if err != nil {
+			return err
+		}
+		if !found {
+			t.Fatal("linked FeatureCard not found")
+		}
+		assertCapabilityLink(t, stored, "CAP-IDEMPOTENT", true)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testCapabilityLinkDifferentValueConflicts(t *testing.T, uow application.UnitOfWork) {
+	_, card := storeFeatureCard(t, uow, "CONFLICT")
+	ctx := context.Background()
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		return r.FeatureCards.LinkCapability(ctx, card.ID(), "CAP-ORIGINAL")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := uow.Do(ctx, func(r application.Repositories) error {
+		return r.FeatureCards.LinkCapability(ctx, card.ID(), "CAP-DIFFERENT")
+	})
+	if !errors.Is(err, application.ErrCapabilityAlreadyLinked) {
+		t.Fatalf("different link err = %v, want ErrCapabilityAlreadyLinked", err)
+	}
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		stored, found, err := r.FeatureCards.Get(ctx, card.ID())
+		if err != nil {
+			return err
+		}
+		if !found {
+			t.Fatal("linked FeatureCard not found")
+		}
+		assertCapabilityLink(t, stored, "CAP-ORIGINAL", true)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testCapabilityLinkRollsBack(t *testing.T, uow application.UnitOfWork) {
+	_, card := storeFeatureCard(t, uow, "ROLLBACK")
+	ctx := context.Background()
+	sentinel := errors.New("deliberate capability-link rollback")
+	err := uow.Do(ctx, func(r application.Repositories) error {
+		if err := r.FeatureCards.LinkCapability(ctx, card.ID(), "CAP-ROLLBACK"); err != nil {
+			return err
+		}
+		stored, found, err := r.FeatureCards.Get(ctx, card.ID())
+		if err != nil {
+			return err
+		}
+		if !found {
+			t.Fatal("FeatureCard not found inside transaction")
+		}
+		assertCapabilityLink(t, stored, "CAP-ROLLBACK", true)
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("rollback err = %v, want sentinel", err)
+	}
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		stored, found, err := r.FeatureCards.Get(ctx, card.ID())
+		if err != nil {
+			return err
+		}
+		if !found {
+			t.Fatal("FeatureCard not found after rollback")
+		}
+		assertCapabilityLink(t, stored, "", false)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testFeatureCardBasePutIgnoresMaterializedLink(t *testing.T, uow application.UnitOfWork) {
+	_, base := storeFeatureCard(t, uow, "BASE-PUT")
+	ctx := context.Background()
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		return r.FeatureCards.LinkCapability(ctx, base.ID(), "CAP-BASE-PUT")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	materialized, err := base.WithCapabilityArtifactID("CAP-BASE-PUT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	differentProjection, err := base.WithCapabilityArtifactID("CAP-IGNORED")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		for _, candidate := range []domain.FeatureCard{base, materialized, differentProjection} {
+			if err := r.FeatureCards.Put(ctx, candidate); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("identical base Put after linking: %v", err)
+	}
+
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		stored, found, err := r.FeatureCards.Get(ctx, base.ID())
+		if err != nil {
+			return err
+		}
+		if !found {
+			t.Fatal("FeatureCard not found after base Put")
+		}
+		assertCapabilityLink(t, stored, "CAP-BASE-PUT", true)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	conflict, err := domain.NewFeatureCard(base.ID(), base.ProjectID(), "Changed establishment", base.Description(), base.CreatedAt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = uow.Do(ctx, func(r application.Repositories) error {
+		return r.FeatureCards.Put(ctx, conflict)
+	})
+	if !errors.Is(err, application.ErrImmutableValueConflict) {
+		t.Fatalf("changed base Put err = %v, want ErrImmutableValueConflict", err)
+	}
+}
+
+func testFeatureCardPutCannotEstablishLink(t *testing.T, uow application.UnitOfWork) {
+	ctx := context.Background()
+	project := mustProject(t, "PRJ-LINK-PUT-ONLY")
+	base, err := domain.NewFeatureCard(
+		mustFeatureCardID(t, "FC-LINK-PUT-ONLY"), project.ID(),
+		"Put cannot establish link", "AD-031 repository contract", fixedContractTime(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkedProjection, err := base.WithCapabilityArtifactID("CAP-MUST-BE-IGNORED")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		if err := r.Projects.Put(ctx, project); err != nil {
+			return err
+		}
+		return r.FeatureCards.Put(ctx, linkedProjection)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := uow.Do(ctx, func(r application.Repositories) error {
+		stored, found, err := r.FeatureCards.Get(ctx, base.ID())
+		if err != nil {
+			return err
+		}
+		if !found {
+			t.Fatal("FeatureCard not found after Put")
+		}
+		assertCapabilityLink(t, stored, "", false)
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 }

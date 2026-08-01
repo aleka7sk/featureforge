@@ -54,15 +54,36 @@ func (g *Gate) beforeWrite() error {
 
 func (g *Gate) wrap(r application.Repositories) application.Repositories {
 	return application.Repositories{
-		Projects:           projectRepository{ProjectRepository: r.Projects, gate: g},
-		FeatureCards:       featureCardRepository{FeatureCardRepository: r.FeatureCards, gate: g},
-		Artifacts:          artifactRepository{ArtifactEnvelopeRepository: r.Artifacts, gate: g},
-		Revisions:          revisionRepository{RevisionEnvelopeRepository: r.Revisions, gate: g},
-		StructuredContent:  structuredContentRepository{StructuredContentRepository: r.StructuredContent, gate: g},
-		Records:            recordRepository{RecordEnvelopeRepository: r.Records, gate: g},
-		RevisionOrder:      revisionOrderRepository{RevisionOrderRepository: r.RevisionOrder, gate: g},
-		RevisionAcceptance: revisionAcceptanceRepository{RevisionAcceptanceRepository: r.RevisionAcceptance, gate: g},
+		Projects:             projectRepository{ProjectRepository: r.Projects, gate: g},
+		FeatureCards:         featureCardRepository{FeatureCardRepository: r.FeatureCards, gate: g},
+		Artifacts:            artifactRepository{ArtifactEnvelopeRepository: r.Artifacts, gate: g},
+		Revisions:            revisionRepository{RevisionEnvelopeRepository: r.Revisions, gate: g},
+		StructuredContent:    structuredContentRepository{StructuredContentRepository: r.StructuredContent, gate: g},
+		Records:              recordRepository{RecordEnvelopeRepository: r.Records, gate: g},
+		RevisionOrder:        revisionOrderRepository{RevisionOrderRepository: r.RevisionOrder, gate: g},
+		RevisionAcceptance:   revisionAcceptanceRepository{RevisionAcceptanceRepository: r.RevisionAcceptance, gate: g},
+		RequirementTraces:    requirementTraceRepository{RequirementCriterionTraceRepository: r.RequirementTraces, gate: g},
+		LifecycleDefinitions: lifecycleDefinitionRepository{LifecycleDefinitionRepository: r.LifecycleDefinitions, gate: g},
 	}
+}
+
+type lifecycleDefinitionRepository struct {
+	application.LifecycleDefinitionRepository
+	gate *Gate
+}
+
+func (r lifecycleDefinitionRepository) PutDefinition(ctx context.Context, value engineering.LifecycleDefinitionEnvelope) error {
+	if err := r.gate.beforeWrite(); err != nil {
+		return err
+	}
+	return r.LifecycleDefinitionRepository.PutDefinition(ctx, value)
+}
+
+func (r lifecycleDefinitionRepository) PutVersion(ctx context.Context, value engineering.LifecycleDefinitionVersionEnvelope) error {
+	if err := r.gate.beforeWrite(); err != nil {
+		return err
+	}
+	return r.LifecycleDefinitionRepository.PutVersion(ctx, value)
 }
 
 type projectRepository struct {
@@ -159,6 +180,18 @@ func (r revisionOrderRepository) Put(ctx context.Context, value engineering.Revi
 type revisionAcceptanceRepository struct {
 	application.RevisionAcceptanceRepository
 	gate *Gate
+}
+
+type requirementTraceRepository struct {
+	application.RequirementCriterionTraceRepository
+	gate *Gate
+}
+
+func (r requirementTraceRepository) Put(ctx context.Context, value engineering.RequirementCriterionTrace) error {
+	if err := r.gate.beforeWrite(); err != nil {
+		return err
+	}
+	return r.RequirementCriterionTraceRepository.Put(ctx, value)
 }
 
 func (r revisionAcceptanceRepository) Append(ctx context.Context, value engineering.RevisionAcceptanceRecord) error {

@@ -119,7 +119,8 @@ These are not re-litigated. They are inputs.
 - **`internal/engineering/peos` remains the only PEOS importer** (AD-005).
   Transport models are built from `domain`, `engineering`, and `application`
   types, never PEOS ones. FF-007 lists this as a test-enforced deliverable.
-- **No `UPDATE`/`DELETE` semantics.** Engineering records are immutable. This
+- **No `UPDATE`/`DELETE` semantics.** Engineering records are immutable; AD-031
+  separately keeps Project and FeatureCard establishment stable in this POC. This
   has a direct HTTP consequence (§6.3).
 - **Derived state is never stored** (AD-006). The transport caches nothing.
 
@@ -310,6 +311,26 @@ It is **not** the general HTTP API or UI implementation: no route, handler, or
 UI screen exists yet. §16 still orders that work, now unblocked at the step
 this section names.
 
+**Forward integrity-discovery correction (AD-032, FF-023).** The investigation
+above correctly established why the subject projections and their indexed
+lookups were needed, but those projection-only lookups are not authoritative
+completeness witnesses. Current Q3/Q4/Q5 composition enumerates all Revision
+and Record envelopes through deterministic `ListAll`, validates each payload,
+digest and projection, and only then filters by family, kind and subject. This
+detects an inverse projection mismatch that `ListByFamilyAndSubject` or
+`ListByKindAndSubject` would otherwise silently omit. The indexed methods
+remain supported adapter queries; they no longer define the integrity-sensitive
+application algorithm.
+
+Q5's Evidence population is the deduplicated union of exact Evidence citations
+from its validated Decisions, history-wide Executions and history-wide Claims.
+Every cited pair must resolve and pass authoritative family/payload/projection
+inspection before its event is emitted. A deliberately unresolved C8 Decision
+citation is the governed `409 timeline_source_invalid` read outcome; a dangling
+Execution/Claim reference violates their mandatory write invariant and is
+opaque stored-state integrity (`500`). Both fail the whole timeline rather than
+returning a partial list.
+
 ### 6.3 Methods
 
 `GET` and `POST` only. **No `PUT`, `PATCH`, or `DELETE` anywhere**, mirroring
@@ -414,12 +435,22 @@ Handlers return errors; one function maps them to status codes.
 | `ErrCapabilityAlreadyLinked` | `409` | One-time link already made |
 | `ErrReferencedValueMissing` | `422` | Well-formed but references something that does not exist |
 | `ErrAcceptanceTransitionInvalid` | `422` | Legal request, illegal transition |
+| `ErrLifecycleTransitionInvalid` | `422` | New lifecycle act names an unknown or source/target/time-illegal transition |
+| `ErrLifecycleHeadConflict` | `409` | A valid predecessor is no longer the current linear lifecycle head |
 | `ErrCorrectionSelfReference`, `ErrCorrectionCycle`, `ErrCorrectionFamilyMismatch`, `ErrCorrectionTargetMissing` | `422` | Correction graph would be invalid |
-| `ErrRevisionSequenceConflict`, `ErrCurrentRevisionAmbiguous`, `ErrRevisionOrderMissing`, `ErrRevisionReferenceMismatch` | `409` | Ordering invariant violated |
-| `ErrEngineeringStateIndeterminate`, `ErrAmbiguousLifecycleState`, `ErrTimelineSourceInvalid` | `409` | The store is in a state no answer can be derived from |
+| `ErrRevisionSequenceConflict`, `ErrRevisionSequenceInvalid`, `ErrCurrentRevisionAmbiguous`, `ErrRevisionOrderMissing`, `ErrRevisionReferenceMismatch`, `ErrNoAcceptedRevision` | `409` | Ordering/current-selection invariant or required accepted state is absent |
+| `ErrEngineeringStateIndeterminate`, `ErrTimelineSourceInvalid`, `ErrCorrectionAmbiguous`, `ErrValidationPlanAmbiguous` | `409` | A governed derived answer cannot be produced uniquely from coherent inputs |
+| `ErrStoredStateIntegrity`, `ErrStoredPayloadUnreadable` | `500` | Persisted configuration or aggregate is partial, unreadable, contradictory, branched, or otherwise corrupt; response is opaque |
 | `ErrNestedTransaction` | `500` | A transport bug by construction — a handler called `Do` |
 | `ErrTransactionAborted` | `503` + `Retry-After` | Retries exhausted; the request is safe to retry (§10) |
 | unmapped | `500` | Never leak an internal message; log it, return an opaque body |
+
+**AD-032 correction.** C6 accepts no lifecycle Definition Version from the
+client, so the former `ErrUnknownDefinitionVersion` sentinel is removed rather
+than retained as a client-facing 422 condition.
+A wrong version in persisted lifecycle history is
+`ErrStoredStateIntegrity -> 500 internal_error`. Q4/Q5 expose the validated
+stored Definition/Version and establishing revision on success.
 
 **Error body shape:**
 
@@ -428,9 +459,10 @@ Handlers return errors; one function maps them to status codes.
 ```
 
 `code` is a stable machine string derived from the sentinel; `message` is
-human-facing. The mapping table is exhaustive over `internal/application`'s
-sentinel set, and a test asserts every exported `Err*` in that package appears
-in it — so adding a sentinel without deciding its status fails the build.
+human-facing. The mapping table is exhaustive over the exported application
+sentinel set; adding an exported `Err*` without deciding its status fails the
+build. AD-032 removes the two superseded lifecycle sentinels rather than
+maintaining an inactive client contract.
 
 ## 9. Validation strategy
 
@@ -563,9 +595,9 @@ Reusing the strategies M.4 validated, adapted to transport.
 real in-memory-backed application stack — not a mocked application layer.
 Mocking the layer under test would prove only that the mock matches the test.
 
-**Error-mapping exhaustiveness.** A test enumerating every exported `Err*` in
-`internal/application` and asserting each appears in the status map. Adding a
-sentinel without classifying it fails the build.
+**Error-mapping exhaustiveness.** A test enumerates every exported `Err*` in
+`internal/application` and asserts that each appears in the status map. Adding
+a sentinel without classifying it fails the build.
 
 **Scenario-through-HTTP.** The canonical FF-011 scenario driven end to end
 through HTTP requests, asserting the same end state

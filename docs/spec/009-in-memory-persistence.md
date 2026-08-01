@@ -36,6 +36,12 @@ Three shapes were weighed.
 plus `CapabilitySpecificationContent`, `RevisionOrderMetadata`, and
 `RevisionAcceptanceRecord`.
 
+That is the original M.3 set. AD-032/FF-023 add the dedicated
+`LifecycleDefinitionEnvelope` and `LifecycleDefinitionVersionEnvelope`
+configuration carriers, and AD-033 adds the product-owned
+`RequirementCriterionTrace`. The trace is exact-revision metadata, not a
+fourth PEOS envelope family.
+
 `RelationEnvelope` is **not** created in M.3. When a relation is first required,
 it is added as a fourth envelope with its own composite uniqueness rule —
 relations have no normative PEOS identity, so they are keyed by
@@ -262,13 +268,15 @@ No method returns `map`, `any`, or `interface{}`. No method exposes a PEOS type.
 | Repository | Operations |
 |---|---|
 | `ProjectRepository` | `Put` (create-only), `Get`, `List` |
-| `FeatureCardRepository` | `Put` (create-only), `Get`, `ListByProject` |
+| `FeatureCardRepository` | `Put` the stable base establishment value, `Get`, `ListByProject`, `LinkCapability` once |
 | `ArtifactEnvelopeRepository` | `Put`, `Get(ArtifactKey)` |
-| `RevisionEnvelopeRepository` | `Put`, `Get(RevisionKey)`, `ListByArtifact(artifactID)` |
+| `RevisionEnvelopeRepository` | `Put`, `Get(RevisionKey)`, `ListAll`, `ListByArtifact(artifactID)`, `ListByFamilyAndSubject(family, subjectKey)` |
 | `StructuredContentRepository` | `Put`, `Get(RevisionKey)` |
-| `RecordEnvelopeRepository` | `Put`, `Get(RecordKey)`, `ListByKind(kind)`, `ListByKindAndSubject(kind, subjectKey)` |
+| `RecordEnvelopeRepository` | `Put`, `Get(RecordKey)`, `ListAll`, `ListByKind(kind)`, `ListByKindAndSubject(kind, subjectKey)` |
 | `RevisionOrderRepository` | `Put`, `Get(RevisionKey)`, `ListByArtifact(artifactID)` |
 | `RevisionAcceptanceRepository` | `Append`, `GetByRecordID(recordID)`, `ListByRevision(RevisionKey)`, `ListByArtifact(artifactID)` |
+| `RequirementCriterionTraceRepository` | `Put`, `Get(RevisionKey)` |
+| `LifecycleDefinitionRepository` | `PutDefinition`, `GetDefinition`, `ListDefinitions`, `PutVersion`, `GetVersion(DefinitionVersionKey)`, `ListVersions(definitionID)` |
 | `UnitOfWork` | `Do(ctx, func(Repositories) error) error` |
 
 **Forward correction (AD-030, FF-022).** `GetByRecordID` is the one narrow
@@ -278,6 +286,18 @@ or stored-integrity failure. It is read-only; the journal remains append-only.
 Absence returns `(zero, false, nil)`, one readable record returns
 `(record, true, nil)`, and unreadable or contradictory persistence returns an
 error rather than masquerading as absence.
+
+**Forward integrity-discovery correction (AD-032, FF-023).** `ListAll` on
+Revision and Record envelopes is the later, concrete addition required by
+integrity-sensitive Q3/Q4/Q5 and lifecycle discovery. Both operations return
+the complete envelope population in typed-key ascending order inside the
+ambient UnitOfWork. The application must inspect every authoritative payload,
+digest and projection before filtering by `RevisionFamily`, `Kind` or
+`SubjectKey`. `ListByFamilyAndSubject` and `ListByKindAndSubject` remain valid
+projection queries, but they are not completeness witnesses: using either as
+the first integrity filter could silently omit an envelope whose stored
+projection contradicts its payload. No speculative `ListByFamily` port is
+introduced.
 
 ### Per-operation semantics
 
@@ -297,11 +317,15 @@ itself proof that a whole application command is replay-safe: AD-030 and
 FF-022 require the application to recover and compare the complete persisted
 semantic act before reconstructing server-owned time, order, or provenance.
 
-`ProjectRepository.Put` and `FeatureCardRepository.Put` are create-only: a second
-`Put` for an existing ID with different content is `ErrImmutableValueConflict`.
-M.1 established these entities are created once and not edited during the
-canonical scenario, so **no update or delete operation is defined for any
-repository in M.3**. That absence is itself asserted by a test.
+`ProjectRepository.Put` and `FeatureCardRepository.Put` establish the stable
+base value selected by AD-031: a second `Put` for an existing ID with different
+establishment content is `ErrImmutableValueConflict`. The separately stored
+capability link is excluded from FeatureCard `Put` equality; after linking, an
+identical base `Put` remains an idempotent no-op in both adapters.
+`LinkCapability` performs the sole supported operational transition: absent to
+one Artifact ID, same-link no-op, different-link
+`ErrCapabilityAlreadyLinked`. No general update or delete operation is defined
+for this bounded POC.
 
 ## 6. Transaction model
 
@@ -311,7 +335,7 @@ UnitOfWork.Do(ctx, func(r Repositories) error { ... })
 
 | Aspect | Rule |
 |---|---|
-| Interface | `Repositories` is a struct of the eight repository interfaces, handed to the callback. Repositories are reachable **only** inside `Do`. |
+| Interface | `Repositories` is a struct of the ten repository interfaces, handed to the callback. Repositories are reachable **only** inside `Do`. |
 | Callback semantics | Returning `nil` commits. Returning an error rolls back and propagates that error unchanged, so `errors.Is` still matches the original cause. A panic rolls back and re-panics. |
 | Rollback | No write performed inside the callback is visible after a rollback — not to a later transaction, and not to a concurrent reader. |
 | Conflict propagation | `ErrImmutableValueConflict` from any `Put` propagates out and aborts the act. It is never swallowed or downgraded to a no-op. |
@@ -336,13 +360,14 @@ required behaviour that the PostgreSQL adapter must reproduce in M.4.
 | Composite uniqueness | Revision keys are composite `(ArtifactID, RevisionID)`; record keys are `(Kind, ID)`. Distinct kinds may share an ID string without colliding. |
 | Deterministic listing | Every `List` sorts explicitly by its documented key before returning. A test seeds keys whose insertion order differs from sorted order and asserts stable output across repeated calls. |
 | Explicit not-found | `(zero, false, nil)`; never a zero value that reads as valid |
-| Reference verification | Where the repository owns the constraint, `Put` verifies referenced keys exist and returns `ErrReferencedValueMissing`. Applies to: a revision's artifact; content's revision; order metadata's revision; an acceptance record's revision; a record envelope's subject; a claim's cited execution records and correction target. |
+| Reference verification | Where the repository owns the constraint, `Put` verifies referenced keys exist and returns `ErrReferencedValueMissing`. Applies to: a revision's artifact; content's revision; order metadata's revision; an acceptance record's revision; a Requirement Criterion Trace's Requirement and source capability revisions; a Lifecycle Definition Version's owning Definition; a record envelope's subject; and a claim's cited execution records and correction target. |
 | Failure injection | `Store` accepts an optional hook that fails the *n*th write of a given kind, so rollback is tested without contriving a real conflict |
 | No exposed maps | Internal collections are unexported. Every accessor returns copies; a caller mutating a returned slice cannot affect stored state. |
 
 Conceptual collections: projects, feature cards, artifact envelopes, revision
 envelopes, structured content, record envelopes, revision order metadata,
-acceptance journal. Eight maps, each keyed by its typed key.
+acceptance journal, requirement criterion traces, lifecycle definitions, and
+lifecycle definition versions. Eleven maps, each keyed by its typed key.
 
 ## 8. Error model
 
@@ -389,7 +414,16 @@ FeatureForge's obligation. Recorded as **AD-017**.
 ### Query
 
 `ErrEngineeringStateIndeterminate`, `ErrTimelineSourceInvalid`,
-`ErrAmbiguousLifecycleState`, `ErrUnknownDefinitionVersion`
+`ErrValidationPlanAmbiguous`
+
+### Lifecycle and stored integrity (AD-032/FF-023)
+
+`ErrLifecycleTransitionInvalid`, `ErrLifecycleHeadConflict`,
+`ErrStoredStateIntegrity`
+
+The former `ErrAmbiguousLifecycleState` and `ErrUnknownDefinitionVersion`
+sentinels are removed. Branching/equal-time ambiguity and a wrong stored
+Definition Version are persisted integrity failures, not client choices.
 
 ### Serialization
 

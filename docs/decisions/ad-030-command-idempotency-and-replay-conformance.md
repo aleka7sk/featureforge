@@ -6,6 +6,12 @@ Phase: M.5 correctness closure before domain analysis
 Supersedes: the replay mechanism asserted by AD-029 and FF-018 §11; the
 Validation Plan narrowing asserted by FF-018 §6.6 and FF-020 §6
 
+**Forward amendment (AD-033, FF-023).** A complete C7 Requirement revision act
+also includes one immutable `RequirementCriterionTrace` to an exact capability
+Revision and acceptance-criterion key. Missing or contradictory trace occupancy
+is partial state (`500`); the two source fields participate in replay semantics.
+No historical trace is inferred from subject, statement text, or Origin note.
+
 ## Context
 
 [FF-010 §1](../spec/010-application-contracts.md#1-identity-strategy)
@@ -140,7 +146,7 @@ tuple by itself is not an authoritative equality witness.
 | C4 `ReviseCapabilitySpecification` | `artifact_id`, `revision_id` | Revision, structured content, its original order metadata under a valid capability Artifact |
 | C5 `AcceptCapabilityRevision` | `record_id` | one valid acceptance journal record under the named Revision |
 | C6 `AssignLifecycleState` | `assignment_id`, transition Artifact/revision pair | shared Transition Artifact, transition Revision, StateAssignment and required predecessor references |
-| C7 `EstablishRequirement` | Requirement pair plus `acceptance_record_id` for a new act | shared Requirement Artifact, Revision, order metadata and semantic acceptance member |
+| C7 `EstablishRequirement` | Requirement pair plus `acceptance_record_id` and exact source revision/criterion for a new act | shared Requirement Artifact, Revision, order metadata, semantic acceptance member and RequirementCriterionTrace |
 | C8 `RecordArchitectureDecision` | `decision_id` | Decision record and a complete capability subject; its evidence citation must be structurally valid but may be unresolved |
 | C9 `EstablishValidationPlan` | Validation Plan pair plus `acceptance_record_id` | shared Validation Plan Artifact, Revision, order metadata and semantic acceptance member |
 | C10 `RecordValidationRun` | `execution_id`, evidence Artifact/revision pair | Evidence Artifact, Evidence Revision and Execution record |
@@ -169,11 +175,13 @@ A = ArtifactEnvelope(artifact_id)
 R = RevisionEnvelope(P)
 O = RevisionOrderMetadata(P)
 J = all RevisionAcceptanceRecord where Key == P
-OCC(P) = {R, O, J}
+T = RequirementCriterionTrace(P)
+OCC(P) = {R, O, J, T}
 ```
 
 `A` is a shared owning root and prerequisite. Its existence alone does not
-occupy `P`. `P` is absent exactly when `R` and `O` are absent and `J` is empty.
+occupy `P`. `P` is absent exactly when `R`, `O`, and `T` are absent and `J` is
+empty.
 A valid Requirement Artifact may therefore own several complete revision acts.
 Every revision under that shared Requirement Artifact has one immutable
 canonical subject for the Artifact's entire history. A genuinely new pair

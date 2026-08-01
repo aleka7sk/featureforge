@@ -96,19 +96,20 @@ narrative is in [FF-005](005-validation-scenario.md); the shape is:
 |---|---|---|
 | 1 | Project created | FeatureForge entity |
 | 2 | Feature card created | FeatureForge entity |
-| 3 | Capability specification created | PEOS Artifact |
-| 4 | Capability Revision 1 recorded | PEOS Artifact Revision + FeatureForge content |
-| 5 | Requirements added | PEOS Requirement + Requirement Revision |
+| 3 | Capability specification and Revision 1 recorded | PEOS Artifact + Artifact Revision + FeatureForge content |
+| 4 | Capability Revision 1 accepted | FeatureForge acceptance journal |
+| 5 | Lifecycle entry recorded as `drafting` | PEOS Transition Record + State Assignment |
 | 6 | Decision recorded with basis | PEOS Decision + Decision Basis |
-| 7 | Capability Revision 2 recorded | PEOS Artifact Revision + FeatureForge content |
-| 8 | Validation plan created | PEOS Validation Plan + Plan Revision |
-| 9 | Validation executed | PEOS Validation Execution Record |
-| 10 | Evidence recorded | PEOS Artifact Revision in the Evidence role |
-| 11 | Result and claim recorded | Execution Outcome + PEOS Validation Claim |
-| 12 | Erroneous claim corrected | New PEOS Validation Claim carrying a correction reference |
-| 13 | Lifecycle transition recorded | PEOS Transition Record + State Assignment |
-| 14 | Current state resolved | FeatureForge computed query |
-| 15 | Timeline displayed | FeatureForge computed read model |
+| 7 | Capability Revision 2 recorded and accepted | PEOS Artifact Revision + FeatureForge content + acceptance journal |
+| 8 | Requirements established from Revision 2 criteria | PEOS Requirement + Requirement Revision + exact FeatureForge criterion trace |
+| 9 | Lifecycle transition recorded as `specified` | PEOS Transition Record Revision + State Assignment |
+| 10 | Validation plan created and accepted | PEOS Validation Plan + Plan Revision + semantic acceptance member |
+| 11 | First validation executed and evidence recorded | PEOS Validation Execution Record + Evidence Artifact Revision |
+| 12 | Lifecycle transition recorded as `under-validation` | PEOS Transition Record Revision + State Assignment |
+| 13 | Remaining validation results and claims recorded | Execution Outcome + PEOS Validation Claims |
+| 14 | Erroneous claim corrected | New PEOS Validation Claim carrying a correction reference |
+| 15 | Current state resolved | FeatureForge computed query |
+| 16 | Timeline displayed | FeatureForge computed read model |
 
 Revision 1 remains fully inspectable after Revision 2 exists. The erroneous
 claim remains fully inspectable after its correction exists. Nothing in the

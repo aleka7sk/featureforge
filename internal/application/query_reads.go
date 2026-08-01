@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/aleka7sk/featureforge/internal/domain"
 	"github.com/aleka7sk/featureforge/internal/engineering"
@@ -180,10 +181,11 @@ func GetFeatureEngineeringStateForCard(ctx context.Context, uow UnitOfWork, proj
 
 // GetFeatureTimelineForCard composes GetFeatureTimeline for a caller
 // holding only a FeatureCardID (FF-018 §6.4, Q5). Unlike Q3/Q4's
-// discoverEngineeringStateComponents, execution, claim, and evidence
-// discovery here is history-wide, not scoped to the current revision
+// discoverEngineeringStateComponents, execution and claim discovery here is
+// history-wide, not scoped to the current revision; Evidence is the validated
+// union of their citations and the discovered Decisions' citations
 // (FF-018 §24, M.5 publication remediation D1/D2) -- an empty artifactID
-// (no linked capability) yields no execution/claim/evidence population,
+// (no linked capability) yields no decision/execution/claim/evidence population,
 // matching discoverEngineeringStateComponents's own empty-but-well-formed
 // rule for that case.
 func GetFeatureTimelineForCard(ctx context.Context, uow UnitOfWork, inspector EngineeringReplayInspector, featureCardID domain.FeatureCardID) (TimelineResult, error) {
@@ -200,16 +202,28 @@ func GetFeatureTimelineForCard(ctx context.Context, uow UnitOfWork, inspector En
 		}
 		var executionIDs, claimIDs, evidenceArtifactIDs []string
 		if artifactID != "" {
-			executionIDs, claimIDs, err = DiscoverExecutionAndClaimIDsAllRevisions(ctx, r, artifactID)
+			executionIDs, claimIDs, err = DiscoverExecutionAndClaimIDsAllRevisions(ctx, r, inspector, artifactID)
 			if err != nil {
 				return err
 			}
-			evidenceArtifactIDs, err = DiscoverEvidenceArtifactIDs(ctx, r, executionIDs, claimIDs)
-			if err != nil {
-				return err
+			executionAndClaimEvidence, discoverErr := DiscoverEvidenceArtifactIDs(ctx, r, inspector, executionIDs, claimIDs)
+			if discoverErr != nil {
+				return discoverErr
 			}
+			decisionEvidence, discoverErr := DiscoverDecisionEvidenceArtifactIDs(ctx, r, inspector, components.decisionIDs)
+			if discoverErr != nil {
+				return discoverErr
+			}
+			seenEvidence := make(map[string]bool, len(executionAndClaimEvidence)+len(decisionEvidence))
+			for _, evidenceID := range append(executionAndClaimEvidence, decisionEvidence...) {
+				if !seenEvidence[evidenceID] {
+					seenEvidence[evidenceID] = true
+					evidenceArtifactIDs = append(evidenceArtifactIDs, evidenceID)
+				}
+			}
+			sort.Strings(evidenceArtifactIDs)
 		}
-		timeline, err := GetFeatureTimeline(ctx, r, TimelineInput{
+		timeline, err := GetFeatureTimeline(ctx, r, inspector, TimelineInput{
 			Project: project, FeatureCard: card,
 			CapabilityArtifactID:   artifactID,
 			RequirementArtifactIDs: components.requirementArtifactIDs,
@@ -310,7 +324,7 @@ func discoverEngineeringStateComponents(ctx context.Context, repos Repositories,
 	}
 	c.requirementArtifactIDs = requirementIDs
 
-	decisionIDs, err := DiscoverDecisionIDs(ctx, repos, capabilityArtifactID)
+	decisionIDs, err := DiscoverDecisionIDs(ctx, repos, inspector, capabilityArtifactID)
 	if err != nil {
 		return engineeringStateComponents{}, err
 	}

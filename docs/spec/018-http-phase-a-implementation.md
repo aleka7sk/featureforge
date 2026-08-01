@@ -121,7 +121,8 @@ binding decision; it does not redesign it.
 **Context.** FF-010 §3 decomposed the application layer into commands named for
 engineering acts, with no `Update*`, no `Delete*`, and no generic
 `RecordEngineeringAct`. A resource-CRUD HTTP surface would have to invent
-`PUT`/`DELETE` semantics for values that are immutable by construction, and
+`PUT`/`DELETE` semantics for immutable engineering values and the bounded
+stable-establishment operational surface later made explicit by AD-031, and
 would flatten twelve distinct engineering acts into four verbs.
 
 **Decision.** The public HTTP surface is **intent-oriented, not resource-CRUD**.
@@ -259,7 +260,8 @@ endpoints, nineteen total.** All paths carry the `/api/v1` prefix (FF-015 §11).
 
 In the matrix below, *App entry point* names the exact exported function or
 method verified in `internal/application`. **Every command handler's success
-status is `201 Created`** — each command creates an immutable record — and
+status is `201 Created`** — each command establishes a stable semantic act (an
+immutable engineering record or AD-031 operational establishment) — and
 **every query handler's is `200 OK`**. Every endpoint may additionally return
 `400`, `500`, and `503` per §11; the *Errors* column lists only the
 endpoint-specific ones beyond those.
@@ -303,9 +305,9 @@ names. The verified command fields are:
 - **C4** *(path `artifactID`)* `revision_id`, `content`
 - **C5** *(path `artifactID`)* `record_id`, `revision_id`, `state`, `reason`, `effective_at`
 - **C6** *(path `artifactID`, mapped to `SubjectArtifactID`)* `assignment_id`, `state`, `effective_at`, `transition_record_artifact_id`, `transition_record_revision_id`, `is_entry`, `transition_key`, `from_assignment_id`, `attempted_at`, `completed_at`
-- **C7** `artifact_id`, `revision_id`, `statement`, `subject_artifact_id`
+- **C7** `artifact_id`, `revision_id`, `statement`, `subject_artifact_id`, `acceptance_record_id`, `source_capability_revision_id`, `source_acceptance_criterion_key`
 - **C8** `decision_id`, `subject_artifact_id`, `subject_revision_id`, `question`, `outcome_statement`, `alternatives`, `evidence_artifact_id`, `evidence_revision_id`, `assumptions`, `constraints`, `uncertainties`, `rationale`
-- **C9** `artifact_id`, `revision_id`, `scope_artifact_id`, `activities` (each: `key`, `subject_artifact_id`, `subject_revision_id`, `method`, `outcome_interpretation`, `requirement_artifact_id`, `requirement_revision_id`, `expected_evidence`)
+- **C9** `artifact_id`, `revision_id`, `scope_artifact_id`, `acceptance_record_id`, `activities` (each: `key`, `subject_artifact_id`, `subject_revision_id`, `method`, `outcome_interpretation`, `requirement_artifact_id`, `requirement_revision_id`, `expected_evidence`)
 - **C10** `execution_id`, `plan_artifact_id`, `plan_revision_id`, `activity_key`, `subject_artifact_id`, `subject_revision_id`, `method`, `outcome`, `completed_at`, `evidence_artifact_id`, `evidence_revision_id`, `evidence_locator`
 - **C11** `claim_id`, `scope_artifact_id`, `subject_artifact_id`, `subject_revision_id`, `requirement_artifact_id`, `requirement_revision_id`, `outcome`, `method`, `evidence_artifact_id`, `evidence_revision_id`, `execution_id`, `reasoning`, `timestamp`
 - **C12** as C11, plus `correction_target`, `correction_kind`
@@ -486,37 +488,44 @@ would have required the transport to hold `Repositories`.
 
 ### 6.2 Required application additions
 
-All read-only. All in `internal/application`. Signatures follow the verified
-convention of the two existing discovery functions —
-`(ctx context.Context, repos Repositories, …) ([]string, error)`.
+All read-only. All in `internal/application`. Each integrity-sensitive
+signature receives the PEOS-free `EngineeringReplayInspector` authority in
+addition to `context.Context` and `Repositories`.
 
 ```go
 // query_state.go (beside DiscoverRequirementArtifactIDs)
-func DiscoverDecisionIDs(ctx context.Context, repos Repositories, capabilityArtifactID string) ([]string, error)
+func DiscoverDecisionIDs(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, capabilityArtifactID string) ([]string, error)
 
 // query_timeline.go (beside DiscoverValidationPlanArtifactIDs)
-func DiscoverExecutionAndClaimIDs(ctx context.Context, repos Repositories, capabilityArtifactID, capabilityRevisionID string) (executionIDs, claimIDs []string, err error)
+func DiscoverExecutionAndClaimIDs(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, capabilityArtifactID, capabilityRevisionID string) (executionIDs, claimIDs []string, err error)
 
-func DiscoverEvidenceArtifactIDs(ctx context.Context, repos Repositories, executionIDs, claimIDs []string) ([]string, error)
+func DiscoverExecutionAndClaimIDsAllRevisions(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, capabilityArtifactID string) (executionIDs, claimIDs []string, err error)
+
+func DiscoverEvidenceArtifactIDs(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, executionIDs, claimIDs []string) ([]string, error)
+
+func DiscoverDecisionEvidenceArtifactIDs(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, decisionIDs []string) ([]string, error)
 ```
 
-**A shared helper already exists and must be reused.**
-`discoverArtifactIDsBySubject` (`query_state.go:30`) performs
-list-by-subject → dedupe by artifact ID → `sort.Strings`. The new functions
-follow its dedupe-and-sort discipline exactly; where the shape differs (records
-rather than revisions) they may not reuse the function itself but must match
-its determinism guarantee.
+**Forward authoritative-discovery correction (AD-032, FF-023).** The initial
+M.5 implementation used family/kind/subject projection queries. Those remain
+valid indexed adapter operations but are not completeness witnesses: an
+inverse projection mismatch would disappear before the application could
+inspect it. `listValidatedRevisions` and `listValidatedRecords` now enumerate
+the complete populations through deterministic repository `ListAll`, validate
+every payload/digest/projection, and only then allow family, kind or subject
+filtering. All discovery functions preserve deduplication and `sort.Strings`
+determinism after that validation.
 
 ### 6.3 Exact semantics
 
 **Decision discovery.** A decision's subject is a capability *revision*
 (verified: `TestProjectionFidelity_Decision` asserts
-`ArtifactRevisionSubjectKey("CAP-1", "CAP-1-REV-1")`). Therefore:
-
-1. `repos.Revisions.ListByArtifact(ctx, capabilityArtifactID)` — every revision
-   of the capability, in ascending key order.
-2. For each, `repos.Records.ListByKindAndSubject(ctx, RecordKindDecision, ArtifactRevisionSubjectKey(artifactID, revisionID))`.
-3. Collect `Key.ID`, dedupe, sort ascending.
+`ArtifactRevisionSubjectKey("CAP-1", "CAP-1-REV-1")`). Enumerate and inspect all
+Revision and Record envelopes first. Build the exact subject set from the
+validated revisions of the requested capability, then select validated
+Decisions whose authoritative subject belongs to that set. Validate each
+Decision's complete capability reference before rendering it; collect
+`Key.ID`, dedupe, and sort ascending.
 
 Every revision is consulted, not only the current one — a decision recorded
 against revision 1 remains part of the feature's history after revision 2
@@ -525,11 +534,11 @@ exists, and the timeline must show it.
 **Execution and claim discovery.** Executions and claims name a capability
 revision as subject (verified for both by
 `TestProjectionFidelity_ExecutionRecord` and `TestProjectionFidelity_Claim`).
-Scoped to the revision the caller names:
-
-1. `repos.Records.ListByKindAndSubject(ctx, RecordKindExecution, ArtifactRevisionSubjectKey(capabilityArtifactID, capabilityRevisionID))` → `Key.ID` values.
-2. The same with `RecordKindClaim`.
-3. Each list deduped and sorted ascending, independently.
+Enumerate and inspect all Records, then select the two kinds by the exact
+validated capability-revision subject. Each result is deduplicated and sorted
+ascending independently. Q5 unions this population across every validated
+revision of the capability; Q3/Q4 current-state resolution remains scoped to
+the current revision.
 
 The caller passes the *current* revision ID, obtained from
 `ResolveCurrentRevision`. Where a history-wide view is wanted (the timeline),
@@ -540,17 +549,16 @@ implementation did not actually do this for Q5, and corrects it** —
 timeline uses; this function remains exactly Q3/Q4's current-revision-scoped
 one.
 
-**Evidence discovery.** Executions and claims both project `EvidenceKeys`
-(verified: `RecordEnvelope.EvidenceKeys []string`, populated with
-`engineering.EvidenceKey(artifactID, revisionID)` → `"evidence:" + artifactID + "/" + revisionID`).
-
-1. Fetch each execution and claim by `RecordKey`.
-2. For every entry in `EvidenceKeys`, call `engineering.ParseEvidenceKey`
-   (§10) to obtain the artifact ID.
-3. Dedupe, sort ascending.
-4. A malformed key is an error, not a silent skip — it means a projection is
-   corrupt, which is exactly the class of silent-wrongness AD-025 exists to
-   prevent.
+**Evidence discovery.** Decisions, Executions and Claims project exact
+`EvidenceKeys` (`engineering.EvidenceKey(artifactID, revisionID)` →
+`"evidence:" + artifactID + "/" + revisionID`). Q5 validates each selected
+record and every mandatory cross-reference, parses every exact key, resolves
+and inspects the cited Evidence Artifact/Revision pair, then deduplicates and
+sorts the resulting artifact IDs. The final population is the union of
+Decision-basis Evidence and the Evidence cited by history-wide Executions and
+Claims. A deliberately unresolved C8 citation returns
+`ErrTimelineSourceInvalid` (409); a dangling Execution/Claim citation is stored
+corruption (500). Neither case is silently omitted.
 
 **No application input shape is redesigned for transport convenience.**
 `EngineeringStateInput` (`CapabilityArtifactID`, `RequirementArtifactIDs`,
@@ -568,19 +576,18 @@ the handler (§4) — the sequence is:
 2. `card.CapabilityArtifactID()` → `(artifactID, ok)`. If `!ok`, return an
    empty-but-well-formed state; the feature exists and has no capability yet.
 3. `ResolveCurrentRevision(ctx, repos, artifactID)` → current revision.
-4. `DiscoverRequirementArtifactIDs(ctx, repos, artifactID)` — **the only
+4. `DiscoverRequirementArtifactIDs(ctx, repos, inspector, artifactID)` — **the only
    permitted source of the requirement population**.
-5. `DiscoverValidationPlanArtifactIDs(ctx, repos, artifactID)` →
+5. `DiscoverValidationPlanArtifactIDs(ctx, repos, inspector, artifactID)` →
    `PlanArtifactID`, resolved by the exactly-one contract in §6.6. **Sort order
    never selects a plan.**
-6. `DiscoverDecisionIDs`, plus execution/claim/evidence discovery scoped to
-   this endpoint's own population: Q3/Q4 use the per-revision
-   `DiscoverExecutionAndClaimIDs` against the current revision only; Q5
-   uses the history-wide `DiscoverExecutionAndClaimIDsAllRevisions` (§24 —
-   corrected in M.5 publication remediation; the original text of this step
-   named only the per-revision function for all three endpoints, which was
-   the defect §24 fixes). `DiscoverEvidenceArtifactIDs` is unchanged and
-   consumes whichever execution/claim population its caller discovered.
+6. `DiscoverDecisionIDs` for all three queries. Q3/Q4 let readiness resolve
+   current Claims against the current revision and do not build a separate
+   execution/evidence population. Q5 uses history-wide
+   `DiscoverExecutionAndClaimIDsAllRevisions`, validates the selected
+   Executions/Claims, and unions their exact Evidence with
+   `DiscoverDecisionEvidenceArtifactIDs`; every envelope is inspected before
+   kind/subject filtering (§24, corrected again by AD-032/FF-023).
 7. Build `EngineeringStateInput` / `TimelineInput`; call
    `GetFeatureEngineeringState` / `GetFeatureTimeline`.
 
@@ -822,6 +829,15 @@ well-formed request naming a lifecycle definition that does not exist → `422`,
 matching
 `ErrReferencedValueMissing`.
 
+**Forward correction (AD-032, FF-023).** The historical
+`ErrUnknownDefinitionVersion -> 422` row is superseded because no C6 transport
+field names a Definition Version. Stored wrong-version or invalid lifecycle
+history is opaque `500 internal_error`. New request-side transition failures use
+`ErrLifecycleTransitionInvalid -> 422 lifecycle_transition_invalid`; a stale
+but otherwise valid predecessor uses
+`ErrLifecycleHeadConflict -> 409 lifecycle_head_conflict`. The implemented
+error-exhaustiveness test, not this historical row count, remains authoritative.
+
 Transport-originated errors that are not application sentinels: malformed JSON,
 unknown field, multiple JSON values, oversized body, and unparseable path
 values all map to `400` with code `bad_request` (§12).
@@ -1008,6 +1024,17 @@ ApplicableDecisions, Readiness, Lifecycle}`:
   §16 step 7's "As implemented" note; this replaces this section's original
   wording, which called for a synthesized precedence-rule string here.)
 
+**Forward Q4 correction (AD-032/AD-033/FF-023).** Each
+`effective_requirements[]` element also carries
+`source_capability_artifact_id`, `source_capability_revision_id`, and
+`source_acceptance_criterion_key` from its validated trace. A found lifecycle
+result additionally carries `definition_id`, `definition_version_id`,
+`established_by_artifact_id`, and `established_by_revision_id`.
+`rationale.lifecycle` now means `rule = unique head of validated lifecycle
+predecessor chain` and `total = chain length`; the old `duplicate` tie-break
+projection is omitted because a branch or duplicate edge is integrity failure,
+not a successful resolution.
+
 **Q3 `GET /features/{featureCardID}`** — `data.feature` (as Q2's element) plus
 the whole of Q4's `data` under `data.state`; `rationale` identical to Q4's.
 
@@ -1051,8 +1078,10 @@ derived. `404` when absent.
 
 **AD-030 correction.** The outcomes in this section remain, but the mechanism
 does not. Every command now recognizes a complete persisted semantic act
-inside the application UOW before reconstructing time-bearing values. C7 and
-C9 include `acceptance_record_id`; C10 includes its evidence pair. Repository
+inside the application UOW before reconstructing time-bearing values. C7
+includes `acceptance_record_id` plus its exact source capability
+Revision/criterion fields; C9 includes `acceptance_record_id`; C10 includes its
+evidence pair. Repository
 `Equal` remains a final write guard, not the replay witness. See FF-022 §§4–8.
 
 ### 11.1 Classification
@@ -1357,6 +1386,12 @@ thin reads and Q3/Q4/Q5 composition (`GetFeatureOverview`,
 `ListFeaturesByProject`). All four plan-selection cases proven in
 `internal/application/discovery_test.go`, including the
 insertion-order-independence case.
+
+**Forward correction (AD-032/FF-023).** That paragraph records the initial M.5
+commit. The current discovery surface additionally includes
+`DiscoverExecutionAndClaimIDsAllRevisions` and
+`DiscoverDecisionEvidenceArtifactIDs`; all integrity-sensitive functions take
+the inspector and validate global envelope populations before filtering.
 
 **Step 4 — Transport skeleton and DTO contracts.**
 *Files:* `internal/transport/http/{router,middleware,server,dto_command,dto_query}.go`.
@@ -1675,9 +1710,11 @@ silently swept aside.
 5. `ParseEvidenceKey` implemented and tested
    (`internal/engineering/refkeys.go`, `refkeys_test.go`); `EvidenceKey`'s
    format is untouched — only a parser was added.
-6. `DiscoverDecisionIDs`, `DiscoverExecutionAndClaimIDs`,
-   `DiscoverEvidenceArtifactIDs` proven deterministic and deduplicated in
-   `internal/application/discovery_test.go`.
+6. `DiscoverDecisionIDs`, both Execution/Claim discovery scopes,
+   `DiscoverEvidenceArtifactIDs`, and
+   `DiscoverDecisionEvidenceArtifactIDs` proven deterministic, deduplicated,
+   authoritative-before-filter, and fail-loud on inverse projection or exact
+   reference corruption in `internal/application/discovery_test.go`.
 7. / 7a. `TestResolveApplicableValidationPlanIDZero/One/Many/OrderingDoesNotResolveAmbiguity`
    cover all four cases; `TestCanonicalScenarioThroughHTTP` reaches Q3/Q4/Q5
    with no plan or requirement identifier supplied by the test beyond a
@@ -1811,7 +1848,7 @@ current revision's alone.
 | Query | Population |
 |---|---|
 | Q3 `GetFeatureOverview`, Q4 `GetFeatureEngineeringStateForCard` | Executions, claims: scoped to the **current** capability revision only (unchanged — these are current-*state* queries, and broadening them would let a stale claim read as satisfying the current revision, which FF-010 §7 forbids) |
-| Q5 `GetFeatureTimelineForCard` | Executions and claims: unioned across **every** capability revision, enumerated via `Revisions.ListByArtifact` exactly as `DiscoverDecisionIDs` already does, then deduplicated by their own record ID. Evidence: the deduplicated union of evidence referenced by that history-wide execution/claim population (`DiscoverEvidenceArtifactIDs`, unchanged) |
+| Q5 `GetFeatureTimelineForCard` | Decisions, Executions and Claims are discovered only after globally enumerating and inspecting all Revision/Record envelopes. Executions and Claims are then unioned across **every** validated capability revision and deduplicated by their own record ID. Evidence is the deduplicated union of exact citations from the validated Decisions plus that history-wide Execution/Claim population; every cited pair must resolve and validate before any timeline is returned. |
 
 `DiscoverExecutionAndClaimIDsAllRevisions` (`internal/application/query_timeline.go`)
 is the new, dedicated, history-wide discovery function Q5 uses; the
@@ -1820,11 +1857,13 @@ remains what Q3/Q4's current-state population would use if they ever needed
 one — today they do not consume it at all, since readiness resolves claims
 independently through `ResolveCurrentClaim`, scoped to the current
 revision's subject key. Requirement, decision, and validation-plan discovery
-were already history-wide (or plan-cardinality-appropriate) and are
-unaffected. No repository method, port, adapter operation, migration, or
-stored projection was added; the fix is confined to
-`internal/application`'s existing discovery/composition layer, inside the
-same single `UnitOfWork.Do` each query already used.
+were already history-wide (or plan-cardinality-appropriate) and retain their
+result shapes. The initial publication fix added no repository method; the
+later AD-032/FF-023 integrity correction adds deterministic `ListAll` to both
+Revision and Record repository ports so untrusted projections are never the
+first discovery filter. No migration or stored projection is added; the
+remaining fix stays in `internal/application`'s discovery/composition layer,
+inside the same single `UnitOfWork.Do` each query already used.
 
 **Architecture guards, restated exactly.** §12.3's table above is Phase
 A's, before `internal/ui` existed; it is not rewritten. As currently

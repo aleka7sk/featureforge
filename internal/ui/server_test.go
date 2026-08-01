@@ -1,6 +1,7 @@
 package ui_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,14 +19,24 @@ import (
 // the real API, not a mock (mirrors internal/transport/http's own
 // newTestHandler convention).
 func newTestHandler() http.Handler {
+	_, _, handler := newTestStack()
+	return handler
+}
+
+func newTestStack() (application.UnitOfWork, peos.Recorder, http.Handler) {
+	uow := memory.NewUnitOfWork(memory.NewStore())
+	recorder := peos.NewRecorder()
+	if err := application.EnsureLifecycleConfiguration(context.Background(), uow, recorder, recorder); err != nil {
+		panic(err)
+	}
 	api := transporthttp.NewHandler(transporthttp.Dependencies{
-		UOW:       memory.NewUnitOfWork(memory.NewStore()),
-		Recorder:  peos.NewRecorder(),
-		Inspector: peos.NewRecorder(),
-		Projector: peos.NewRecorder(),
+		UOW:       uow,
+		Recorder:  recorder,
+		Inspector: recorder,
+		Projector: recorder,
 		Clock:     application.SystemClock{},
 	})
-	return ui.NewHandler(ui.Dependencies{API: api})
+	return uow, recorder, ui.NewHandler(ui.Dependencies{API: api})
 }
 
 // TestProjectsPageRendersFromAPI proves the whole AD-028 pipeline end to

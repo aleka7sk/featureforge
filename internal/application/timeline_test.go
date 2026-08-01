@@ -69,7 +69,7 @@ func TestCanonicalTimelineOrdering(t *testing.T) {
 	var result application.TimelineResult
 	err := uow.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		result, err = application.GetFeatureTimeline(context.Background(), r, in)
+		result, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in)
 		return err
 	})
 	if err != nil {
@@ -95,7 +95,7 @@ func TestTimelineInsertionOrderIndependence(t *testing.T) {
 	var result1 application.TimelineResult
 	err := uow1.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		result1, err = application.GetFeatureTimeline(context.Background(), r, in1)
+		result1, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in1)
 		return err
 	})
 	if err != nil {
@@ -107,7 +107,7 @@ func TestTimelineInsertionOrderIndependence(t *testing.T) {
 	var result2 application.TimelineResult
 	err = uow2.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		result2, err = application.GetFeatureTimeline(context.Background(), r, in2)
+		result2, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in2)
 		return err
 	})
 	if err != nil {
@@ -130,7 +130,7 @@ func TestEventIDIsDerived(t *testing.T) {
 	var result application.TimelineResult
 	err := uow.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		result, err = application.GetFeatureTimeline(context.Background(), r, in)
+		result, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in)
 		return err
 	})
 	if err != nil {
@@ -171,7 +171,7 @@ func TestUndatedGroupIsSeparate(t *testing.T) {
 	var result application.TimelineResult
 	err = uow.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		result, err = application.GetFeatureTimeline(context.Background(), r, in)
+		result, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in)
 		return err
 	})
 	if err != nil {
@@ -199,7 +199,7 @@ func TestCorrectedClaimRendersLink(t *testing.T) {
 	var result application.TimelineResult
 	err := uow.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		result, err = application.GetFeatureTimeline(context.Background(), r, in)
+		result, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in)
 		return err
 	})
 	if err != nil {
@@ -234,7 +234,7 @@ func TestDanglingReferenceFails(t *testing.T) {
 	in.ClaimIDs = []string{"CLM-1"}
 
 	err := uow.Do(context.Background(), func(r application.Repositories) error {
-		_, err := application.GetFeatureTimeline(context.Background(), r, in)
+		_, err := application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in)
 		return err
 	})
 	if !errors.Is(err, application.ErrTimelineSourceInvalid) {
@@ -251,7 +251,7 @@ func TestInterruptedOutcomeRenderedVerbatim(t *testing.T) {
 	var result application.TimelineResult
 	err := uow.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		result, err = application.GetFeatureTimeline(context.Background(), r, in)
+		result, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in)
 		return err
 	})
 	if err != nil {
@@ -277,7 +277,7 @@ func TestTimelineIsDeterministic(t *testing.T) {
 	var first application.TimelineResult
 	err := uow.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		first, err = application.GetFeatureTimeline(context.Background(), r, in)
+		first, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in)
 		return err
 	})
 	if err != nil {
@@ -287,7 +287,7 @@ func TestTimelineIsDeterministic(t *testing.T) {
 		var got application.TimelineResult
 		err := uow.Do(context.Background(), func(r application.Repositories) error {
 			var err error
-			got, err = application.GetFeatureTimeline(context.Background(), r, in)
+			got, err = application.GetFeatureTimeline(context.Background(), r, newLenientEnvelopeInspector(), in)
 			return err
 		})
 		if err != nil {

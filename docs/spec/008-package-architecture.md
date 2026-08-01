@@ -123,8 +123,8 @@ an optional capability artifact identity held as a product-owned opaque string.
 
 | | |
 |---|---|
-| Responsibility | The FeatureForge-owned engineering record vocabulary: envelopes, record kinds, structured content, revision order metadata, acceptance records, and the opaque references that name them |
-| Owned types | `ArtifactEnvelope`, `RevisionEnvelope`, `RecordEnvelope`, `RecordKind`, `ArtifactKey`, `RevisionKey`, `RecordKey`, `CapabilitySpecificationContent` and its nested values, `RevisionOrderMetadata`, `RevisionAcceptanceRecord`, `AcceptanceState`, `Digest`, `CanonicalJSON` |
+| Responsibility | The FeatureForge-owned engineering record vocabulary: envelopes, record kinds, structured content, revision order metadata, acceptance records, requirement criterion traces, persisted lifecycle configuration carriers, and the opaque references that name them |
+| Owned types | `ArtifactEnvelope`, `RevisionEnvelope`, `RecordEnvelope`, `RecordKind`, `ArtifactKey`, `RevisionKey`, `RecordKey`, `CapabilitySpecificationContent` and its nested values, `RevisionOrderMetadata`, `RevisionAcceptanceRecord`, `RequirementCriterionTrace`, `LifecycleDefinitionEnvelope`, `LifecycleDefinitionVersionEnvelope`, lifecycle policy projections, `AcceptanceState`, `Digest`, `CanonicalJSON` |
 | Permitted imports | stdlib only (`encoding/json`, `crypto/sha256`, `time`) |
 | Forbidden imports | **PEOS**, `engineering/peos`, `application`, `infrastructure`, `domain` |
 | Exported surface | Envelope constructors with validation; content constructor and canonical-JSON/digest functions; comparison helpers |
@@ -137,8 +137,8 @@ the build entirely. That is the M.3 proof that AD-005 is real.
 
 | | |
 |---|---|
-| Responsibility | The single PEOS boundary: construct PEOS values from validated product input, encode them to canonical JSON, decode stored JSON back into exact PEOS types, project identity and query metadata into envelopes, and verify digests |
-| Owned types | Vocabulary constants; `Codec`; per-family input structs (`CapabilityRevisionInput`, `RequirementInput`, `DecisionInput`, `PlanInput`, `ExecutionInput`, `ClaimInput`, `LifecycleAssignmentInput`); `Fixture` helpers for tests |
+| Responsibility | The single PEOS boundary: construct PEOS values from validated product input, encode them to canonical JSON, decode stored JSON back into exact PEOS types, project identity and query metadata into envelopes, inspect persisted lifecycle assignments/transitions/configuration, and verify digests |
+| Owned types | Vocabulary constants; `Codec`; per-family input structs (`CapabilityRevisionInput`, `RequirementInput`, `DecisionInput`, `PlanInput`, `ExecutionInput`, `ClaimInput`, `LifecycleAssignmentInput`); lifecycle configuration builders/decoders and inspection inputs; `Fixture` helpers for tests |
 | Permitted imports | stdlib, `github.com/aleka7sk/PEOS/peos/...`, `internal/engineering` |
 | Forbidden imports | `application`, `infrastructure`, `domain` |
 | Exported surface | §5.3.1 |

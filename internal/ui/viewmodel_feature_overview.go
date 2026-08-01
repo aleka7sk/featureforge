@@ -5,27 +5,29 @@ package ui
 // handler makes for the current revision key Q3 already returned -- Q4's
 // current_revision carries no content (FF-020 §5 scopes that to Q6/Q7).
 type featureOverviewPageData struct {
-	PageTitle             string
-	FeatureCardID         string
-	ProjectID             string
-	Title                 string
-	Description           string
-	HasCapability         bool
-	CapabilityArtifactID  string
-	CurrentRevisionFound  bool
-	CurrentRevisionID     string
-	CurrentRevisionTitle  string
-	CurrentRevisionSeq    int
-	CurrentRevisionReason string
-	RequirementCount      int
-	ReadinessStatus       string
-	Readiness             []readinessRow
-	LifecycleFound        bool
-	LifecycleStateID      string
-	LifecycleReason       string
-	RecentEvents          []timelineRow
-	FormError             string
-	FormValues            map[string]string
+	PageTitle              string
+	FeatureCardID          string
+	ProjectID              string
+	Title                  string
+	Description            string
+	HasCapability          bool
+	CapabilityArtifactID   string
+	CurrentRevisionFound   bool
+	CurrentRevisionID      string
+	CurrentRevisionTitle   string
+	CurrentRevisionSeq     int
+	CurrentRevisionReason  string
+	RequirementCount       int
+	ReadinessStatus        string
+	Readiness              []readinessRow
+	LifecycleFound         bool
+	LifecycleStateID       string
+	LifecycleDefinition    string
+	LifecycleEstablishedBy string
+	LifecycleReason        string
+	RecentEvents           []timelineRow
+	FormError              string
+	FormValues             map[string]string
 }
 
 func mapFeatureOverviewPageData(
@@ -43,8 +45,10 @@ func mapFeatureOverviewPageData(
 		ReadinessStatus:  state.Readiness.Status,
 		Readiness:        mapReadinessRows(state.Readiness.PerRequirement),
 		LifecycleFound:   state.Lifecycle.Found, LifecycleStateID: state.Lifecycle.StateID,
-		LifecycleReason: rationale.Lifecycle.Rule,
-		RecentEvents:    mapTimelineRows(recentEvents),
+		LifecycleDefinition:    state.Lifecycle.DefinitionID + "/" + state.Lifecycle.DefinitionVersionID,
+		LifecycleEstablishedBy: state.Lifecycle.EstablishedByArtifact + "/" + state.Lifecycle.EstablishedByRevision,
+		LifecycleReason:        rationale.Lifecycle.Rule,
+		RecentEvents:           mapTimelineRows(recentEvents),
 	}
 	if state.CurrentRevision.Found && state.CurrentRevision.Revision != nil {
 		data.CurrentRevisionFound = true

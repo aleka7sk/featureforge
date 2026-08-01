@@ -22,13 +22,13 @@ only if it has its own invariants; otherwise it is a parameter of another.
 | `CreateCapabilitySpecification` | Begin engineering a capability — creates the Artifact **and** its founding revision | Artifact, Revision 1, specification content, sequence 1, FeatureCard link |
 | `CreateCapabilityRevision` | Record a new immutable state of the specification | Revision, specification content, sequence *n* |
 | `AcceptCapabilityRevision` | Declare which revision text is authoritative | Acceptance journal entry |
-| `AddRequirement` | Record an engineering obligation | Requirement Artifact, Requirement Revision |
+| `AddRequirement` | Record an engineering obligation traced to one exact capability criterion | Requirement Artifact when founding, Requirement Revision, revision order, semantic acceptance member, Requirement Criterion Trace |
 | `RecordDecision` | Record a decision with its basis | Decision, basis evidence links |
-| `CreateValidationPlan` | Declare what will be validated and how | Plan Artifact, Plan Revision with activities |
+| `CreateValidationPlan` | Declare what will be validated and how | Plan Artifact when founding, Plan Revision with activities, revision order, semantic acceptance member |
 | `RecordValidationExecution` | Record that an activity ran, with its evidence and outcome | Execution Record, evidence Artifact + Revision |
 | `RecordClaim` | Assert an evaluated outcome | Claim |
 | `CorrectClaim` | Assert a new outcome that corrects an earlier claim | Claim with correction reference |
-| `AssignLifecycleState` | Record a lifecycle transition | Transition Record Revision, State Assignment |
+| `AssignLifecycleState` | Record a lifecycle entry or transition | Shared Transition Record Artifact when founding, Transition Record Revision, State Assignment; exact conditional writes are governed by FF-010/FF-022/FF-023 |
 | `ResolveFeatureEngineeringState` | Answer "where does this stand" | Nothing — read-only |
 | `GetFeatureTimeline` | Answer "how did it get here" | Nothing — read-only |
 
@@ -37,16 +37,20 @@ only if it has its own invariants; otherwise it is a parameter of another.
 | Candidate | Verdict |
 |---|---|
 | `CreateCapabilitySpecification` separate from creating Revision 1 | **Merged.** PEOS-002 permits an Artifact to exist before its first Revision but says such an Artifact must not be treated as reproducible or validated, and `core.Artifact` retains no creation-time provenance of its own. Creating them together makes the founding Revision's provenance the creation record, and removes an unusable intermediate state. |
-| `RecordEvidence` as its own use case | **Merged into `RecordValidationExecution`.** Evidence that exists without the execution that produced it is an orphan. PEOS models this as `ExecutionRecord.ProducedEvidence()` — one act, one transaction. Evidence cited by a Decision's basis is likewise recorded as part of `RecordDecision`. |
+| `RecordEvidence` as its own use case | **Merged into `RecordValidationExecution` for validation evidence.** PEOS models produced evidence as `ExecutionRecord.ProducedEvidence()` — one act, one transaction. C8 is the narrow exception: it stores only an exact Decision-basis evidence citation, which may be unresolved under AD-030/FF-022. The canonical scenario independently records EV-0 before citing it; that fixture order is not a C8 write invariant. |
 | `RecordResult` | **Rejected.** There is no Result construct ([FF-003 §3](003-peos-integration.md#3-result-is-not-a-new-construct--resolved)). The execution outcome belongs to `RecordValidationExecution`; the claim outcome belongs to `RecordClaim`. |
 | `CorrectClaim` separate from `RecordClaim` | **Kept separate.** It has a distinct invariant `RecordClaim` does not: the correction target must exist, must be a claim, must not create a cycle, and the correction kind must be one of the three PEOS defines. Folding it in as an optional parameter would hide that validation. |
-| `UpdateFeatureCard` | **Kept, but not listed above as an engineering act.** Renaming a card is operational bookkeeping. It writes no engineering state and produces no timeline event. |
+| `UpdateFeatureCard` | **Superseded for this POC by AD-031.** Operational state is distinct from engineering state, but FeatureForge keeps Project and FeatureCard establishment fields stable and implements only the one-time capability link. Belcanto must choose its own edit, audit, concurrency, and replay contract. |
 | `AddRequirement` vs. `ReviseRequirement` | **One use case.** Both record a Requirement Revision; the difference is whether the Requirement Artifact already exists. Two use cases would duplicate every invariant. |
 | A generic `RecordEngineeringAct` | **Rejected.** That is a workflow engine, which [FF-000](000-product-overview.md) forbids. |
 
 ### Invariants every write use case enforces
 
-1. Every reference names a record that exists.
+1. Every mandatory internal reference names a record that exists. C8's
+   structurally valid Decision-basis evidence pair is the sole governed
+   external/forward-citation exception (AD-030/FF-022); execution, claim,
+   correction, trace, lifecycle, and other aggregate references remain
+   resolvable at write time.
 2. Every PEOS value is constructed through its SDK constructor — no value is
    assembled by unmarshalling hand-written JSON.
 3. Provenance carries the configured actor and a recorded timestamp.
@@ -109,7 +113,7 @@ screen is where that is demonstrated to a human.
 | | |
 |---|---|
 | Goal | See what must be true, and whether it is |
-| Data | Each requirement's current revision and statement; the acceptance criterion it derives from; its current claim and outcome |
+| Data | Each requirement's current revision and statement; the exact source capability revision and revision-local acceptance criterion from its stored trace; its current claim and outcome |
 | Actions | Add a requirement; revise a requirement |
 | Current state | Per requirement: current revision, current claim, outcome |
 | History | Prior requirement revisions readable |
@@ -173,7 +177,9 @@ FeatureForge:
 
 - the current capability revision's exact reference and its full specification
   content;
-- every effective requirement's exact revision reference and statement;
+- every effective requirement's exact revision reference and statement plus its
+  exact stored source capability revision and revision-local acceptance-
+  criterion key;
 - every current claim with its outcome, criteria, and reasoning — including
   `not-satisfied` and `inconclusive` ones;
 - the applicable decisions with their outcome statements;
@@ -254,7 +260,9 @@ FeatureForge is successful only when **all** of the following are demonstrated.
       canonical JSON is byte-identical.
 - [ ] A duplicate identical write is idempotent.
 - [ ] A conflicting immutable write fails with a distinguishable error.
-- [ ] Every reference remains resolvable.
+- [ ] Every mandatory internal reference remains resolvable; C8's exact
+      Decision-basis evidence citation is the sole governed unresolved-citation
+      exception.
 - [ ] PostgreSQL integration works, passing the same contract test suite as the
       in-memory adapter.
 

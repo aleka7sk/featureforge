@@ -12,6 +12,10 @@ import (
 // display-oriented EngineeringProjector and from EngineeringRecorder's
 // construction authority.
 type EngineeringReplayInspector interface {
+	ConfiguredLifecycleVersionKey() engineering.LifecycleDefinitionVersionKey
+	InspectLifecycleConfiguration(engineering.LifecycleDefinitionEnvelope, engineering.LifecycleDefinitionVersionEnvelope) (engineering.LifecyclePolicy, error)
+	InspectLifecycleAssignment(engineering.RecordEnvelope) (engineering.LifecycleAssignmentDetail, error)
+	InspectLifecycleTransition(engineering.RevisionEnvelope) (engineering.LifecycleTransitionDetail, error)
 	ValidateArtifact(engineering.ArtifactEnvelope) error
 	ArtifactFamily(engineering.ArtifactEnvelope) (engineering.RevisionFamily, error)
 	ValidateCapabilityArtifact(engineering.ArtifactEnvelope) error

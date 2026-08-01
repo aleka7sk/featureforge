@@ -1,13 +1,16 @@
 package ui_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aleka7sk/featureforge/internal/application"
+	"github.com/aleka7sk/featureforge/internal/engineering"
 	"github.com/aleka7sk/featureforge/internal/engineering/peos"
 	"github.com/aleka7sk/featureforge/internal/infrastructure/memory"
 	transporthttp "github.com/aleka7sk/featureforge/internal/transport/http"
@@ -30,11 +33,16 @@ type pageFixture struct {
 
 func seedPageFixture(t *testing.T) pageFixture {
 	t.Helper()
+	uow := memory.NewUnitOfWork(memory.NewStore())
+	recorder := peos.NewRecorder()
+	if err := application.EnsureLifecycleConfiguration(context.Background(), uow, recorder, recorder); err != nil {
+		t.Fatal(err)
+	}
 	api := transporthttp.NewHandler(transporthttp.Dependencies{
-		UOW:       memory.NewUnitOfWork(memory.NewStore()),
-		Recorder:  peos.NewRecorder(),
-		Inspector: peos.NewRecorder(),
-		Projector: peos.NewRecorder(),
+		UOW:       uow,
+		Recorder:  recorder,
+		Inspector: recorder,
+		Projector: recorder,
 		Clock:     application.SystemClock{},
 	})
 	handler := ui.NewHandler(ui.Dependencies{API: api})
@@ -56,14 +64,33 @@ func seedPageFixture(t *testing.T) pageFixture {
 	})
 	post(t, api, "/api/v1/requirements", map[string]any{
 		"artifact_id": "REQ-1", "revision_id": "REQ-1-REV-1",
-		"acceptance_record_id": "ACC-REQ-1",
-		"statement":            "Published homework SHALL be visible to the student.", "subject_artifact_id": "CAP-1",
+		"acceptance_record_id":          "ACC-REQ-1",
+		"source_capability_revision_id": "CAP-1-REV-1", "source_acceptance_criterion_key": "AC-1",
+		"statement": "Published homework SHALL be visible to the student.", "subject_artifact_id": "CAP-1",
 	})
 	post(t, api, "/api/v1/requirements", map[string]any{
 		"artifact_id": "REQ-2", "revision_id": "REQ-2-REV-1",
-		"acceptance_record_id": "ACC-REQ-2",
-		"statement":            "Published homework SHALL NOT be visible to other users.", "subject_artifact_id": "CAP-1",
+		"acceptance_record_id":          "ACC-REQ-2",
+		"source_capability_revision_id": "CAP-1-REV-1", "source_acceptance_criterion_key": "AC-2",
+		"statement": "Published homework SHALL NOT be visible to other users.", "subject_artifact_id": "CAP-1",
 	})
+	decisionEvidenceArtifact, decisionEvidenceRevision, err := recorder.RecordEvidence(engineering.EvidenceInput{
+		ArtifactID: "EV-DEC-1",
+		RevisionID: "EV-DEC-1-REV-1",
+		Locator:    "https://evidence.example/EV-DEC-1",
+		RecordedAt: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("constructing decision evidence: %v", err)
+	}
+	if err := uow.Do(context.Background(), func(repos application.Repositories) error {
+		if err := repos.Artifacts.Put(context.Background(), decisionEvidenceArtifact); err != nil {
+			return err
+		}
+		return repos.Revisions.Put(context.Background(), decisionEvidenceRevision)
+	}); err != nil {
+		t.Fatalf("seeding decision evidence: %v", err)
+	}
 	post(t, api, "/api/v1/decisions", map[string]any{
 		"decision_id": "DEC-1", "subject_artifact_id": "CAP-1", "subject_revision_id": "CAP-1-REV-1",
 		"question":             "Should homework support an audio attachment?",
@@ -171,9 +198,12 @@ func capabilityContentJSON(problemStatement, userOutcome string) map[string]any 
 		"schema_version": 1, "title": "Homework", "problem_statement": problemStatement, "user_outcome": userOutcome,
 		"functional_behaviours": []string{"A teacher can publish homework."},
 		"constraints":           []string{"Homework is visible only to its own student."},
-		"acceptance_criteria":   []map[string]any{{"key": "AC-1", "text": "Published homework is visible to the intended student."}},
-		"dependencies":          []string{},
-		"open_questions":        []string{},
+		"acceptance_criteria": []map[string]any{
+			{"key": "AC-1", "text": "Published homework is visible to the intended student."},
+			{"key": "AC-2", "text": "Homework is not visible to unrelated users."},
+		},
+		"dependencies":   []string{},
+		"open_questions": []string{},
 	}
 }
 

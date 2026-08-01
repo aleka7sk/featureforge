@@ -52,6 +52,7 @@ func establishPlan(t *testing.T, f commandFixture, artifactID, revisionID string
 		if _, err := (application.EstablishRequirementCommand{
 			ArtifactID: "REQ-1", RevisionID: "REQ-1-REV-1",
 			Statement: "The system SHALL do X.", SubjectArtifactID: "CAP-1",
+			SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
 			AcceptanceRecordID: memberID("MEM-REQ-1"),
 		}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 			t.Fatal(err)
@@ -138,7 +139,7 @@ func TestDiscoverDecisionIDs(t *testing.T) {
 	}
 
 	got := doDiscovery(t, f.uow, func(r application.Repositories) ([]string, error) {
-		return application.DiscoverDecisionIDs(ctx, r, "CAP-1")
+		return application.DiscoverDecisionIDs(ctx, r, f.rec, "CAP-1")
 	})
 	assertStringsEqual(t, got, []string{"DEC-1", "DEC-2"})
 
@@ -155,7 +156,7 @@ func TestDiscoverDecisionIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	gotAfterRevision := doDiscovery(t, f.uow, func(r application.Repositories) ([]string, error) {
-		return application.DiscoverDecisionIDs(ctx, r, "CAP-1")
+		return application.DiscoverDecisionIDs(ctx, r, f.rec, "CAP-1")
 	})
 	assertStringsEqual(t, gotAfterRevision, []string{"DEC-1", "DEC-2"})
 }
@@ -190,7 +191,7 @@ func TestDiscoverExecutionAndClaimIDs(t *testing.T) {
 	var gotExecutions, gotClaims []string
 	err := f.uow.Do(ctx, func(r application.Repositories) error {
 		var err error
-		gotExecutions, gotClaims, err = application.DiscoverExecutionAndClaimIDs(ctx, r, "CAP-1", "CAP-1-REV-1")
+		gotExecutions, gotClaims, err = application.DiscoverExecutionAndClaimIDs(ctx, r, f.rec, "CAP-1", "CAP-1-REV-1")
 		return err
 	})
 	if err != nil {
@@ -198,6 +199,64 @@ func TestDiscoverExecutionAndClaimIDs(t *testing.T) {
 	}
 	assertStringsEqual(t, gotExecutions, []string{"ER-1"})
 	assertStringsEqual(t, gotClaims, []string{"CLM-1"})
+}
+
+func TestAuthoritativeDiscoveryRejectsInverseProjectionOmission(t *testing.T) {
+	t.Run("revision payload hidden under another family projection", func(t *testing.T) {
+		f := newCommandFixture()
+		seedCapability(t, f)
+		artifact, revision, err := f.rec.RecordRequirement(engineering.RequirementInput{
+			ArtifactID: "REQ-HIDDEN", RevisionID: "REQ-HIDDEN-REV-1",
+			Statement:         "The system SHALL reject inverse family projection drift.",
+			SubjectArtifactID: "CAP-1", RecordedAt: f.clock.Now(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		revision.RevisionFamily = engineering.RevisionFamilyValidationPlan
+		if err := f.uow.Do(context.Background(), func(repos application.Repositories) error {
+			if err := repos.Artifacts.Put(context.Background(), artifact); err != nil {
+				return err
+			}
+			return repos.Revisions.Put(context.Background(), revision)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		err = f.uow.Do(context.Background(), func(repos application.Repositories) error {
+			_, err := application.DiscoverRequirementArtifactIDs(context.Background(), repos, f.rec, "CAP-1")
+			return err
+		})
+		if !errors.Is(err, application.ErrStoredStateIntegrity) {
+			t.Fatalf("err = %v, want ErrStoredStateIntegrity", err)
+		}
+	})
+
+	t.Run("decision payload hidden under claim kind projection", func(t *testing.T) {
+		f := newCommandFixture()
+		seedCapability(t, f)
+		decision, err := f.rec.RecordDecision(engineering.DecisionInput{
+			DecisionID: "DEC-HIDDEN", SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1",
+			Question: "Can kind projection drift be ignored?", OutcomeStatement: "No, discovery validates every record envelope.",
+			EvidenceArtifactID: "EV-HIDDEN", EvidenceRevisionID: "EV-HIDDEN-REV-1", RecordedAt: f.clock.Now(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		decision.Key = engineering.RecordKey{Kind: engineering.RecordKindClaim, ID: decision.Key.ID}
+		decision.Kind = engineering.RecordKindClaim
+		if err := f.uow.Do(context.Background(), func(repos application.Repositories) error {
+			return repos.Records.Put(context.Background(), decision)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		err = f.uow.Do(context.Background(), func(repos application.Repositories) error {
+			_, err := application.DiscoverDecisionIDs(context.Background(), repos, f.rec, "CAP-1")
+			return err
+		})
+		if !errors.Is(err, application.ErrStoredStateIntegrity) {
+			t.Fatalf("err = %v, want ErrStoredStateIntegrity", err)
+		}
+	})
 }
 
 // TestDiscoverEvidenceArtifactIDs proves evidence is recovered from
@@ -229,7 +288,7 @@ func TestDiscoverEvidenceArtifactIDs(t *testing.T) {
 	}
 
 	got := doDiscovery(t, f.uow, func(r application.Repositories) ([]string, error) {
-		return application.DiscoverEvidenceArtifactIDs(ctx, r, []string{"ER-1"}, []string{"CLM-1"})
+		return application.DiscoverEvidenceArtifactIDs(ctx, r, f.rec, []string{"ER-1"}, []string{"CLM-1"})
 	})
 	// EV-1 is cited by both the execution and the claim; deduplicated to one.
 	assertStringsEqual(t, got, []string{"EV-1"})
@@ -247,6 +306,7 @@ func TestDiscoverRequirementArtifactIDsIsIndependentOfClaims(t *testing.T) {
 	for _, id := range []string{"REQ-1", "REQ-2"} {
 		if _, err := (application.EstablishRequirementCommand{
 			ArtifactID: id, RevisionID: id + "-REV-1", Statement: "Statement.", SubjectArtifactID: "CAP-1",
+			SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
 			AcceptanceRecordID: memberID("MEM-" + id),
 		}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 			t.Fatal(err)

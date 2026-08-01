@@ -33,7 +33,7 @@ recorded in the M.3 report.
 | `TestNewFeatureCardRejectsMissingProject` | Empty project ID | `ErrFeatureProjectRequired` | A card cannot be orphaned |
 | `TestNewFeatureCardRejectsBlankTitle` | `"   "` | `ErrInvalidFeatureTitle` | Whitespace is not a title |
 | `TestFeatureCardHasNoDerivedState` | Reflect over the struct | No field named/typed for current revision, readiness, lifecycle state, or any collection of requirements, decisions, or claims | AD-001 and the FF-002 prohibition |
-| `TestDomainHasNoSetters` | Reflect over exported methods | No `Set*`; no pointer-receiver mutator | Operational entities are created once |
+| `TestDomainHasNoSetters` | Reflect over exported methods | No `Set*`; no pointer-receiver mutator | Copy-return encapsulation and AD-031's bounded establishment surface |
 
 ## 2. Vocabulary tests — `internal/engineering/peos`
 
@@ -128,7 +128,7 @@ lifts it, this test fails and tells us AD-014 can be revisited.
 | Test | Expected | Proves |
 |---|---|---|
 | `TestEnvelopeValidation` | Empty key, empty payload, non-JSON payload, digest mismatch, unknown kind each rejected | Construction validation |
-| `TestEnvelopeEqualityIsKeyPlusPayload` | Equal keys and bytes are equal; differing projections on identical payloads are still equal | Equality has one definition |
+| `TestEnvelopeEquality` | Artifact and Record envelopes compare key plus payload; Revision envelopes also compare `SubjectKey` as required by AD-026 | Equality has one governed definition per envelope kind |
 | `TestEnvelopeDigestMatchesPayload` | `PayloadDigest` = SHA-256 of `Payload` | Digest integrity |
 | `TestRecordKeyDistinguishesKinds` | Same ID string under two kinds does not collide | Composite key correctness |
 | `TestEngineeringPackageCompilesWithoutPEOS` | The package's own test binary links with no PEOS package in its import graph | AD-005 is structurally real |
@@ -243,10 +243,10 @@ Run against hand-built envelopes; no PEOS involved.
 | Test | Expected |
 |---|---|
 | `TestNoAssignmentsReturnsNone` | `None` + rationale |
-| `TestLatestEffectiveAtWins` | Greatest `EffectiveAt` selected |
-| `TestEqualTimestampSameStateTieBreaks` | Lowest record ID; duplicate noted |
-| `TestEqualTimestampDifferentStatesFails` | `ErrAmbiguousLifecycleState` naming both |
-| `TestUnknownDefinitionVersionRejected` | `ErrUnknownDefinitionVersion` |
+| `TestLinearHistoryResolvesUniqueHead` | The unique predecessor-graph head is selected with Definition/Version and establishing revision |
+| `TestIllegalNewTransitionRejected` | `ErrLifecycleTransitionInvalid` and zero writes |
+| `TestStaleHeadRejected` | `ErrLifecycleHeadConflict` and zero writes |
+| `TestInvalidStoredLifecycleGraphFailsIntegrity` | Branch/cycle/disconnected/wrong-version history returns `ErrStoredStateIntegrity` |
 | `TestEntryAssignmentResolves` | `SA-1` established by the content-free entry revision resolves normally | AD-014 works end to end |
 | `TestAssessedAndNotReadyCoexist` | Lifecycle `assessed`, readiness `not-ready` | **AD-018 — lifecycle does not duplicate readiness** |
 | `TestLifecycleStateNotDerivedFromClaims` | Change claims only | Lifecycle state unchanged | Independence |

@@ -118,9 +118,11 @@ func seedForeignRequirementOccupancy(t *testing.T, f commandFixture, artifactID,
 	t.Helper()
 	setupProjectAndFeature(t, f)
 	establishCapability(t, f)
+	acceptCapability(t, f, "ACC-FOREIGN-REQ-SOURCE", "CAP-1", "CAP-1-REV-1")
 	cmd := application.EstablishRequirementCommand{
 		ArtifactID: artifactID, RevisionID: revisionID,
 		Statement: "The system SHALL retain coherent foreign occupancy.", SubjectArtifactID: "CAP-1",
+		SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
 		AcceptanceRecordID: memberID("MEM-" + artifactID),
 	}
 	if _, err := cmd.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {

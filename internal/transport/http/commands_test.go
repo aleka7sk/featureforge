@@ -29,11 +29,16 @@ import (
 // instance), so an idempotent-replay test needs the same instant on both
 // calls, which only a controlled clock can guarantee.
 func newTestDeps() transporthttp.Dependencies {
+	uow := memory.NewUnitOfWork(memory.NewStore())
+	recorder := peos.NewRecorder()
+	if err := application.EnsureLifecycleConfiguration(context.Background(), uow, recorder, recorder); err != nil {
+		panic(err)
+	}
 	return transporthttp.Dependencies{
-		UOW:       memory.NewUnitOfWork(memory.NewStore()),
-		Recorder:  peos.NewRecorder(),
-		Inspector: peos.NewRecorder(),
-		Projector: peos.NewRecorder(),
+		UOW:       uow,
+		Recorder:  recorder,
+		Inspector: recorder,
+		Projector: recorder,
 		Clock:     application.NewFixedClock(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)),
 	}
 }
@@ -141,7 +146,8 @@ func TestCommandEndpointsCanonicalOrder(t *testing.T) {
 	// C4 ReviseCapabilitySpecification
 	content2 := map[string]any{
 		"schema_version": 1, "title": "Homework after a lesson", "problem_statement": "No follow-up today.",
-		"user_outcome": "A student can see homework, including audio.",
+		"user_outcome":        "A student can see homework, including audio.",
+		"acceptance_criteria": []map[string]any{{"key": "AC-1", "text": "Published homework is visible."}},
 	}
 	var reviseEnvelope struct {
 		Data struct {
@@ -192,8 +198,9 @@ func TestCommandEndpointsCanonicalOrder(t *testing.T) {
 	}
 	rr = postJSON(t, handler, "/api/v1/requirements", map[string]any{
 		"artifact_id": "REQ-1", "revision_id": "REQ-1-REV-1",
-		"acceptance_record_id": "ACC-REQ-1",
-		"statement":            "Published homework SHALL be visible to the student.", "subject_artifact_id": "CAP-1",
+		"acceptance_record_id":          "ACC-REQ-1",
+		"source_capability_revision_id": "CAP-1-REV-2", "source_acceptance_criterion_key": "AC-1",
+		"statement": "Published homework SHALL be visible to the student.", "subject_artifact_id": "CAP-1",
 	}, &requirementEnvelope)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("C7: status = %d, want 201; body = %s", rr.Code, rr.Body.String())
@@ -387,13 +394,18 @@ func TestC7AndC9AcceptanceRecordIDJSONPresenceAndGrammar(t *testing.T) {
 	})
 	mustPost(t, handler, "/api/v1/capabilities", map[string]any{
 		"feature_card_id": "FC-ID-MATRIX", "artifact_id": "CAP-ID-MATRIX", "revision_id": "CAP-ID-MATRIX-REV-1",
-		"content": map[string]any{"schema_version": 1, "title": "Identity matrix", "problem_statement": "Member identity must be explicit."},
+		"content": map[string]any{"schema_version": 1, "title": "Identity matrix", "problem_statement": "Member identity must be explicit.",
+			"acceptance_criteria": []map[string]any{{"key": "AC-1", "text": "Caller identity is explicit."}}},
+	})
+	mustPost(t, handler, "/api/v1/capabilities/CAP-ID-MATRIX/acceptances", map[string]any{
+		"record_id": "ACC-CAP-ID-MATRIX", "revision_id": "CAP-ID-MATRIX-REV-1", "state": "accepted",
 	})
 
 	requirementBody := func(artifactID string) map[string]any {
 		return map[string]any{
 			"artifact_id": artifactID, "revision_id": artifactID + "-REV-1",
 			"statement": "The system SHALL preserve caller-owned member identity.", "subject_artifact_id": "CAP-ID-MATRIX",
+			"source_capability_revision_id": "CAP-ID-MATRIX-REV-1", "source_acceptance_criterion_key": "AC-1",
 		}
 	}
 	for _, tc := range []struct {
@@ -517,8 +529,9 @@ func TestCorruptPersistedActMapsTo500AndAttemptsZeroWrites(t *testing.T) {
 	gate.RejectWrites()
 	rr := postJSON(t, handler, "/api/v1/requirements", map[string]any{
 		"artifact_id": "REQ-CORRUPT-HTTP", "revision_id": "REQ-CORRUPT-HTTP-REV-1",
-		"acceptance_record_id": "MEM-REQ-CORRUPT-HTTP",
-		"statement":            "The system SHALL reject a corrupt stored act.", "subject_artifact_id": "CAP-CORRUPT-HTTP",
+		"acceptance_record_id":          "MEM-REQ-CORRUPT-HTTP",
+		"source_capability_revision_id": "CAP-CORRUPT-HTTP-REV-1", "source_acceptance_criterion_key": "AC-1",
+		"statement": "The system SHALL reject a corrupt stored act.", "subject_artifact_id": "CAP-CORRUPT-HTTP",
 	}, nil)
 	if rr.Code != http.StatusInternalServerError || errorCode(t, rr) != "internal_error" {
 		t.Fatalf("status/code = %d/%s, want 500/internal_error; body=%s", rr.Code, errorCode(t, rr), rr.Body.String())
@@ -558,8 +571,13 @@ func TestCorruptPersistedActMapsTo500AndAttemptsZeroWrites(t *testing.T) {
 // Payload alone, which is what AD-026 corrected.
 func TestAssignLifecycleReplayHonorsAD026SubjectKeyEquality(t *testing.T) {
 	clock := application.NewFixedClock(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC))
+	uow := memory.NewUnitOfWork(memory.NewStore())
+	recorder := peos.NewRecorder()
+	if err := application.EnsureLifecycleConfiguration(context.Background(), uow, recorder, recorder); err != nil {
+		t.Fatal(err)
+	}
 	deps := transporthttp.Dependencies{
-		UOW: memory.NewUnitOfWork(memory.NewStore()), Recorder: peos.NewRecorder(), Inspector: peos.NewRecorder(), Clock: clock,
+		UOW: uow, Recorder: recorder, Inspector: recorder, Clock: clock,
 	}
 	handler := transporthttp.NewHandler(deps)
 

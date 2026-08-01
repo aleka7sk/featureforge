@@ -10,9 +10,10 @@ The timeline is a **FeatureForge product read model**. It is not a PEOS type, it
 is not stored as engineering state, and it is never written back into a PEOS
 value.
 
-It is **computed** from the immutable records plus the two FeatureForge-owned
-records ([FF-002 §3](002-domain-boundaries.md#3-product-owned-records-that-are-not-operational-entities)), on
-every request. It can be deleted and recomputed with identical output. Recorded
+It is **computed** from immutable records plus the FeatureForge-owned
+engineering metadata enumerated in
+[FF-002 §3](002-domain-boundaries.md#3-product-owned-records-that-are-not-operational-entities),
+on every request. It can be deleted and recomputed with identical output. Recorded
 as **AD-007**.
 
 Its purpose is a person: someone who has never seen this feature should be able
@@ -31,9 +32,16 @@ event_id = <source_kind> ":" <source_identity>
 reference, a Decision ID, an Execution Record ID, a Claim ID, a State Assignment
 ID, or a FeatureForge record key.
 
-This makes event identity **stable** (the same record always produces the same
-event ID), **derivable** (no event table, nothing to keep in sync), and **unique**
-(each record produces exactly one event).
+This makes event identity **stable** (the same included source record always
+produces the same event ID), **derivable** (no event table, nothing to keep in
+sync), and **unique** (each included source record produces exactly one event).
+
+The timeline does not project every persisted value as a separate event. In
+particular, the semantic acceptance members created atomically by C7 and C9 are
+validated as part of the Requirement or Plan aggregate but are not emitted as
+additional acceptance events: the same engineering act is represented by its
+`requirement.revised` or `plan.revised` event. Capability acceptance is a
+separate C5 act and therefore remains a distinct journal-derived event.
 
 An event is never invented for something with no record behind it. If it is not
 recorded, it is not on the timeline.
@@ -55,11 +63,18 @@ recorded, it is not on the timeline.
 | `evidence.recorded` | Evidence `core.ArtifactRevision` | Evidence recorded |
 | `claim.recorded` | `validation.Claim` | Claim recorded — *outcome* |
 | `claim.corrected` | `validation.Claim` carrying a correction reference | Claim recorded — *outcome* — correcting *C-x* |
-| `lifecycle.transitioned` | `lifecycle.StateAssignment` + its transition record revision | Lifecycle state → *state* |
+| `lifecycle.transitioned` | validated `lifecycle.StateAssignment` + its transition record revision + persisted Definition Version | Lifecycle state → *state* |
 
 `claim.corrected` is a display specialization of `claim.recorded`, not a second
 event: one claim, one event. The correcting claim's event carries the link; the
 corrected claim's event is unchanged and stays exactly where it was.
+
+**Forward correction (AD-032/FF-023).** Before emitting any lifecycle event,
+Q5 validates the complete persisted policy and whole predecessor graph. Each
+event references its exact establishing Transition Record Revision and
+`LCD-1/LCDV-1`; a partial, branched, cyclic, wrong-version or unreadable history
+fails the entire timeline with opaque stored-state integrity rather than
+returning a partial list.
 
 ## 4. Event fields
 
@@ -123,39 +138,41 @@ The canonical scenario ([FF-005](005-validation-scenario.md)) produces:
 | 3 | Capability specification created | local-user | `featureforge:product-capability` |
 | 4 | Capability revision 1 recorded | local-user | sequence 1 |
 | 5 | Capability revision 1 accepted | local-user | draft → accepted |
-| 6 | Lifecycle state → specified | local-user | established by TRR-1 |
-| 7 | Requirement R-1 recorded | local-user | student visibility |
-| 8 | Requirement R-2 recorded | local-user | non-student exclusion |
-| 9 | Evidence recorded | local-user | pilot-teacher interview notes |
-| 10 | Decision recorded | local-user | audio attachment by URL; 5-second latency |
-| 11 | Capability revision 2 recorded | local-user | sequence 2 |
-| 12 | Capability revision 2 accepted | local-user | draft → accepted |
-| 13 | Requirement R-3 recorded | local-user | resolvable attachment representation |
-| 14 | Validation plan revision recorded | local-user | activities A-1, A-2, A-3 |
-| 15 | Lifecycle state → validating | local-user | established by TRR-2 |
-| 16 | Validation activity A-1 executed | local-user | completed |
-| 17 | Evidence recorded | local-user | reviewer note V-1 |
-| 18 | Claim recorded — satisfied | local-user | C-1, criteria R-1 |
-| 19 | Validation activity A-2 executed | local-user | completed |
-| 20 | Evidence recorded | local-user | reviewer note V-2 |
-| 21 | Claim recorded — satisfied | local-user | C-2, criteria R-2 |
-| 22 | Validation activity A-3 executed | local-user | completed |
-| 23 | Evidence recorded | local-user | inspection note V-3 |
-| 24 | Claim recorded — satisfied | local-user | C-3, criteria R-3 |
-| 25 | Validation activity A-2 re-executed | local-user | completed |
-| 26 | Evidence recorded | local-user | reviewer note V-4 |
-| 27 | **Claim recorded — not satisfied — correcting C-2** | local-user | C-4, criteria R-2 |
+| 6 | Lifecycle state → drafting | local-user | SA-1, entry TR-1/TR-1-REV-0 |
+| 7 | Evidence recorded | local-user | pilot-teacher interview notes |
+| 8 | Decision recorded | local-user | audio attachment by URL; 5-second latency |
+| 9 | Capability revision 2 recorded | local-user | sequence 2 |
+| 10 | Capability revision 2 accepted | local-user | draft → accepted |
+| 11 | Requirement R-1 recorded | local-user | exact trace CAP-1-REV-2#AC-1 |
+| 12 | Requirement R-2 recorded | local-user | exact trace CAP-1-REV-2#AC-2 |
+| 13 | Requirement R-3 recorded | local-user | exact trace CAP-1-REV-2#AC-3 |
+| 14 | Requirement R-4 recorded | local-user | exact trace CAP-1-REV-2#AC-4; no claim follows |
+| 15 | Lifecycle state → specified | local-user | SA-2, `specify` from SA-1 |
+| 16 | Validation plan revision recorded | local-user | activities A-1, A-2, A-3 |
+| 17 | Validation activity A-1 executed | local-user | completed |
+| 18 | Evidence recorded | local-user | reviewer note V-1 |
+| 19 | Lifecycle state → under-validation | local-user | SA-3, `begin-validation` from SA-2 after a plan activity completed |
+| 20 | Claim recorded — satisfied | local-user | C-1, criteria R-1 |
+| 21 | Validation activity A-2 executed | local-user | completed |
+| 22 | Evidence recorded | local-user | reviewer note V-2 |
+| 23 | Claim recorded — satisfied | local-user | C-2, criteria R-2 |
+| 24 | Validation activity A-3 executed | local-user | completed |
+| 25 | Evidence recorded | local-user | inspection note V-3 |
+| 26 | Claim recorded — satisfied | local-user | C-3, criteria R-3 |
+| 27 | Validation activity A-2 re-executed | local-user | completed |
+| 28 | Evidence recorded | local-user | reviewer note V-4 |
+| 29 | **Claim recorded — not satisfied — correcting C-2** | local-user | C-4, criteria R-2 |
 
-Row 27 is the row that matters. Row 21 is still there, still says `satisfied`,
+Row 29 is the row that matters. Row 23 is still there, still says `satisfied`,
 and is still readable. That is the whole point of the exercise.
 
 ## 8. Scope of the timeline
 
 | Question | Answer |
 |---|---|
-| Does it show operational scenario activity? | No. There is none. |
-| Does it show mutable field edits on a FeatureCard? | No. Renaming a card is operational bookkeeping with no engineering meaning. |
-| Does it show acceptance transitions? | Yes — those are journalled, and they change which revision is authoritative. |
+| Does it show operational scenario activity? | It shows stable Project and FeatureCard establishment as human context. This POC has no operational edit activity. |
+| Does it show mutable field edits on a FeatureCard? | No. AD-031 exposes no rename/edit command in this POC. A future operational edit in another product would need its own audit and replay policy and would not automatically become a PEOS engineering event. |
+| Does it show acceptance transitions? | It shows capability C5 acceptance/withdrawal transitions because those are separate acts that change the authoritative capability revision. The atomically created C7/C9 semantic acceptance members are validated with their aggregates but are not projected as duplicate timeline events. |
 | Does it merge events across feature cards? | No. The timeline is scoped to one FeatureCard's capability. |
 | Is it paginated? | Not in the POC. The scenario produces under 30 events. |
 | Can it be filtered by kind? | Yes, client-side, in M.5. Filtering never changes ordering. |

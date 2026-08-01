@@ -172,7 +172,9 @@ func handleEstablishRequirement(deps Dependencies) http.HandlerFunc {
 		result, err := (application.EstablishRequirementCommand{
 			ArtifactID: req.ArtifactID, RevisionID: req.RevisionID,
 			Statement: req.Statement, SubjectArtifactID: req.SubjectArtifactID,
-			AcceptanceRecordID: optionalStringPointer(req.AcceptanceRecordID),
+			SourceCapabilityRevisionID:   req.SourceCapabilityRevisionID,
+			SourceAcceptanceCriterionKey: req.SourceAcceptanceCriterionKey,
+			AcceptanceRecordID:           optionalStringPointer(req.AcceptanceRecordID),
 		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Inspector, deps.Clock)
 		if err != nil {
 			writeAppError(w, r, deps, err)

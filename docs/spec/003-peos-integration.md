@@ -33,6 +33,7 @@ if so, as what.
 | Capability specification | `core.Artifact`, Artifact Type `featureforge:product-capability` | A plain PEOS Artifact with a FeatureForge-owned type. It is **not** a `requirement.Requirement`; that type demands the PEOS Requirement Artifact Type. |
 | Capability revision | `core.ArtifactRevision` + FeatureForge Specification Content | §5 |
 | Requirement | `requirement.Requirement` + `requirement.Revision` | PEOS-owned Artifact Type. |
+| Requirement criterion trace | `engineering.RequirementCriterionTrace` | FeatureForge-owned insert-only metadata binding a Requirement revision to an exact capability revision and criterion key. It is deliberately separate from the PEOS Requirement payload and is neither a `relation.Relation` nor a PEOS `Extension`. |
 | Decision | `decision.Decision` | Carries its own `core.DecisionID`, subjects, question, outcome, and provenance. |
 | Decision basis | `decision.Basis` on the Decision | Cites evidence as `core.EvidenceArtifactRevisionRef`; may carry assumptions, constraints, uncertainties. |
 | Validation plan | `validation.Plan` + `validation.PlanRevision` + `PlanContent` + `PlannedActivity` | Activities are Revision-owned values with plan-local keys. |
@@ -90,8 +91,10 @@ because a State Assignment requires a Transition Record Revision to establish it
 
 Scope is held down as follows:
 
-- **One** Lifecycle Definition, with **one** Definition Version, fixed in code as
-  FeatureForge configuration and recorded once at project setup.
+- **One** Lifecycle Definition, with **one** Definition Version, fixed by
+  FeatureForge and persisted through dedicated opaque-payload repositories by
+  AD-032's explicit startup initialization. C6 and queries read and validate
+  that stored policy; they never silently synthesize it.
 - Four states: `featureforge:drafting`, `featureforge:specified`,
   `featureforge:under-validation`, `featureforge:assessed`.
 
@@ -229,10 +232,10 @@ is a computed query with a rationale, defined in
 | `featureforge:manual-inspection` | Validation Method | A human inspection activity |
 | `featureforge:capability` | Scope kind | Scope of a Plan, a Claim, and a Lifecycle Definition Version |
 | `featureforge:capability-lifecycle` | Lifecycle subject type | Declared on the Definition Version |
-| `featureforge:drafting` | Lifecycle State | Initial state |
-| `featureforge:specified` | Lifecycle State | Revision accepted, requirements recorded |
-| `featureforge:under-validation` | Lifecycle State | Plan exists, execution under way |
-| `featureforge:assessed` | Lifecycle State | Validation was executed and assessed (outcome-independent) |
+| `featureforge:drafting` | Lifecycle State | Initial recorded entry milestone |
+| `featureforge:specified` | Lifecycle State | Entry milestone: the current capability revision is accepted and at least one effective Requirement is traced to one of its exact criteria |
+| `featureforge:under-validation` | Lifecycle State | Entry milestone: one current accepted Plan exists and at least one of its exact activities completed against that same current capability revision |
+| `featureforge:assessed` | Lifecycle State | Entry milestone: every effective Requirement has an applicable current Claim backed by valid execution/evidence; outcome remains independent of the lifecycle state |
 | `featureforge:local-user` | Actor identifier | The single configured actor, in namespace `featureforge` |
 
 Every value above is declared in one place — a single constants file in
@@ -278,9 +281,12 @@ design tables.
 7. **Derived read models are rebuildable.** Any projection or cache can be
    dropped and recomputed from the immutable records. Nothing is only in a
    derived model.
-8. **References must be resolvable.** Every reference written must name a record
-   that exists. This is checked at write time by the application layer — PEOS
-   constructors validate structure, not existence.
+8. **Mandatory internal references must be resolvable.** They are checked at
+   write time by the application layer — PEOS constructors validate structure,
+   not existence. AD-030/FF-022 define one narrow exception: C8 may persist a
+   structurally valid exact Decision-basis evidence citation whose Evidence
+   pair is not yet locally present. Execution, claim, correction, trace,
+   lifecycle, and every other aggregate reference remain resolvable.
 9. **A transaction boundary is one engineering act.** Recording a capability
    revision writes the PEOS revision, the specification content, and the
    sequence assignment in one atomic transaction, or writes none of them.
@@ -292,12 +298,13 @@ Conceptual operations only; signatures are M.2's job.
 | Family | Operations |
 |---|---|
 | Projects | create, get, list |
-| Feature cards | create, get, list by project, update mutable fields |
+| Feature cards | create, get, list by project, one-time capability link (AD-031) |
 | Artifacts | put artifact, get artifact |
 | Artifact revisions | put revision, get revision by exact reference, list revisions of artifact |
 | Specification content | put content for exact revision reference, get by exact revision reference |
 | Revision sequence | assign next sequence transactionally, get sequence, set acceptance, list ordered |
 | Requirements | put requirement, put requirement revision, get, list by capability |
+| Requirement criterion traces | put, get by exact Requirement revision reference |
 | Decisions | put decision, get, list by subject |
 | Validation plans | put plan, put plan revision, get, list |
 | Execution records | put, get, list by plan revision, list by activity key |

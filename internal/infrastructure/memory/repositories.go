@@ -17,14 +17,16 @@ import (
 // adapter does not need it.
 func reposFor(ctx context.Context, txn *transaction) application.Repositories {
 	return application.Repositories{
-		Projects:           projectRepo{ctx: ctx, txn: txn},
-		FeatureCards:       featureCardRepo{ctx: ctx, txn: txn},
-		Artifacts:          artifactRepo{ctx: ctx, txn: txn},
-		Revisions:          revisionRepo{ctx: ctx, txn: txn},
-		StructuredContent:  contentRepo{ctx: ctx, txn: txn},
-		Records:            recordRepo{ctx: ctx, txn: txn},
-		RevisionOrder:      orderRepo{ctx: ctx, txn: txn},
-		RevisionAcceptance: acceptanceRepo{ctx: ctx, txn: txn},
+		Projects:             projectRepo{ctx: ctx, txn: txn},
+		FeatureCards:         featureCardRepo{ctx: ctx, txn: txn},
+		Artifacts:            artifactRepo{ctx: ctx, txn: txn},
+		Revisions:            revisionRepo{ctx: ctx, txn: txn},
+		StructuredContent:    contentRepo{ctx: ctx, txn: txn},
+		Records:              recordRepo{ctx: ctx, txn: txn},
+		RevisionOrder:        orderRepo{ctx: ctx, txn: txn},
+		RevisionAcceptance:   acceptanceRepo{ctx: ctx, txn: txn},
+		RequirementTraces:    requirementTraceRepo{ctx: ctx, txn: txn},
+		LifecycleDefinitions: lifecycleDefinitionRepo{ctx: ctx, txn: txn},
 	}
 }
 
@@ -99,14 +101,15 @@ func (r featureCardRepo) Put(_ context.Context, c domain.FeatureCard) error {
 	if _, ok := lookup(r.txn.overlay.projects, r.txn.store.committed.projects, c.ProjectID()); !ok {
 		return fmt.Errorf("%w: feature card %s names project %s, which does not exist", application.ErrReferencedValueMissing, c.ID(), c.ProjectID())
 	}
-	return putCreateOnly(r.txn.overlay.featureCards, r.txn.store.committed.featureCards, c.ID(), c,
-		func(a, b domain.FeatureCard) bool {
-			aLink, aOK := a.CapabilityArtifactID()
-			bLink, bOK := b.CapabilityArtifactID()
-			return a.ID() == b.ID() && a.ProjectID() == b.ProjectID() && a.Title() == b.Title() &&
-				a.Description() == b.Description() && a.CreatedAt().Equal(b.CreatedAt()) &&
-				aOK == bOK && aLink == bLink
-		})
+	// LinkCapability is the sole persistence path for the monotonic link. A
+	// materialized FeatureCard may be passed back to Put, so strip that read
+	// projection before storing the base establishment value.
+	base, err := domain.NewFeatureCard(c.ID(), c.ProjectID(), c.Title(), c.Description(), c.CreatedAt())
+	if err != nil {
+		return err
+	}
+	return putCreateOnly(r.txn.overlay.featureCards, r.txn.store.committed.featureCards, base.ID(), base,
+		func(a, b domain.FeatureCard) bool { return a.SameEstablishment(b) })
 }
 
 func (r featureCardRepo) Get(_ context.Context, id domain.FeatureCardID) (domain.FeatureCard, bool, error) {
@@ -150,14 +153,14 @@ func (r featureCardRepo) LinkCapability(_ context.Context, id domain.FeatureCard
 	if _, found := lookup(r.txn.overlay.featureCards, r.txn.store.committed.featureCards, id); !found {
 		return fmt.Errorf("%w: feature card %s", application.ErrReferencedValueMissing, id)
 	}
-	if err := r.txn.store.countWrite("capabilitylink"); err != nil {
-		return err
-	}
 	if existing, ok := lookup(r.txn.overlay.capabilityLinks, r.txn.store.committed.capabilityLinks, id); ok {
 		if existing == artifactID {
 			return nil
 		}
 		return fmt.Errorf("%w: feature card %s already linked to %s", application.ErrCapabilityAlreadyLinked, id, existing)
+	}
+	if err := r.txn.store.countWrite("capabilitylink"); err != nil {
+		return err
 	}
 	r.txn.overlay.capabilityLinks[id] = artifactID
 	return nil
@@ -170,17 +173,36 @@ type artifactRepo struct {
 	txn *transaction
 }
 
+func cloneArtifactEnvelope(env engineering.ArtifactEnvelope) engineering.ArtifactEnvelope {
+	env.Payload = append([]byte(nil), env.Payload...)
+	return env
+}
+
+func cloneRevisionEnvelope(env engineering.RevisionEnvelope) engineering.RevisionEnvelope {
+	env.Payload = append([]byte(nil), env.Payload...)
+	return env
+}
+
+func cloneRecordEnvelope(env engineering.RecordEnvelope) engineering.RecordEnvelope {
+	env.Payload = append([]byte(nil), env.Payload...)
+	env.CriterionKeys = append([]string(nil), env.CriterionKeys...)
+	env.EvidenceKeys = append([]string(nil), env.EvidenceKeys...)
+	env.ExecutionKeys = append([]string(nil), env.ExecutionKeys...)
+	return env
+}
+
 func (r artifactRepo) Put(_ context.Context, env engineering.ArtifactEnvelope) error {
 	if err := r.txn.store.countWrite("artifact"); err != nil {
 		return err
 	}
+	env = cloneArtifactEnvelope(env)
 	return putCreateOnly(r.txn.overlay.artifacts, r.txn.store.committed.artifacts, env.Key, env,
 		func(a, b engineering.ArtifactEnvelope) bool { return a.Equal(b) })
 }
 
 func (r artifactRepo) Get(_ context.Context, key engineering.ArtifactKey) (engineering.ArtifactEnvelope, bool, error) {
 	v, ok := lookup(r.txn.overlay.artifacts, r.txn.store.committed.artifacts, key)
-	return v, ok, nil
+	return cloneArtifactEnvelope(v), ok, nil
 }
 
 // --- Revision envelopes ---
@@ -197,13 +219,30 @@ func (r revisionRepo) Put(_ context.Context, env engineering.RevisionEnvelope) e
 	if _, ok := lookup(r.txn.overlay.artifacts, r.txn.store.committed.artifacts, mustArtifactKey(env.Key)); !ok {
 		return fmt.Errorf("%w: revision %s names artifact %s, which does not exist", application.ErrReferencedValueMissing, env.Key, env.Key.ArtifactID)
 	}
+	env = cloneRevisionEnvelope(env)
 	return putCreateOnly(r.txn.overlay.revisions, r.txn.store.committed.revisions, env.Key, env,
 		func(a, b engineering.RevisionEnvelope) bool { return a.Equal(b) })
 }
 
 func (r revisionRepo) Get(_ context.Context, key engineering.RevisionKey) (engineering.RevisionEnvelope, bool, error) {
 	v, ok := lookup(r.txn.overlay.revisions, r.txn.store.committed.revisions, key)
-	return v, ok, nil
+	return cloneRevisionEnvelope(v), ok, nil
+}
+
+func (r revisionRepo) ListAll(_ context.Context) ([]engineering.RevisionEnvelope, error) {
+	seen := map[engineering.RevisionKey]engineering.RevisionEnvelope{}
+	for key, env := range r.txn.store.committed.revisions {
+		seen[key] = env
+	}
+	for key, env := range r.txn.overlay.revisions {
+		seen[key] = env
+	}
+	out := make([]engineering.RevisionEnvelope, 0, len(seen))
+	for _, env := range seen {
+		out = append(out, cloneRevisionEnvelope(env))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key.String() < out[j].Key.String() })
+	return out, nil
 }
 
 func (r revisionRepo) ListByArtifact(_ context.Context, artifactID string) ([]engineering.RevisionEnvelope, error) {
@@ -220,16 +259,14 @@ func (r revisionRepo) ListByArtifact(_ context.Context, artifactID string) ([]en
 	}
 	out := make([]engineering.RevisionEnvelope, 0, len(seen))
 	for _, v := range seen {
-		out = append(out, v)
+		out = append(out, cloneRevisionEnvelope(v))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key.String() < out[j].Key.String() })
 	return out, nil
 }
 
-// ListByFamilyAndSubject scans committed and overlay revisions directly,
-// rather than delegating to ListByArtifact or any per-family listing, because
-// no ListByFamily exists and none is added speculatively (AD-025, FF-016
-// §13 step 3). An empty subjectKey matches nothing, matching the interface
+// ListByFamilyAndSubject scans committed and overlay revisions directly.
+// An empty subjectKey matches nothing, matching the interface
 // contract that empty means "no subject queried" rather than "list every
 // subject-less revision".
 func (r revisionRepo) ListByFamilyAndSubject(_ context.Context, family engineering.RevisionFamily, subjectKey string) ([]engineering.RevisionEnvelope, error) {
@@ -249,7 +286,7 @@ func (r revisionRepo) ListByFamilyAndSubject(_ context.Context, family engineeri
 	}
 	out := make([]engineering.RevisionEnvelope, 0, len(seen))
 	for _, v := range seen {
-		out = append(out, v)
+		out = append(out, cloneRevisionEnvelope(v))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key.String() < out[j].Key.String() })
 	return out, nil
@@ -296,6 +333,7 @@ func (r recordRepo) Put(_ context.Context, env engineering.RecordEnvelope) error
 	if err := r.verifySubject(env); err != nil {
 		return err
 	}
+	env = cloneRecordEnvelope(env)
 	return putCreateOnly(r.txn.overlay.records, r.txn.store.committed.records, env.Key, env,
 		func(a, b engineering.RecordEnvelope) bool { return a.Equal(b) })
 }
@@ -333,7 +371,23 @@ func (r recordRepo) verifySubject(env engineering.RecordEnvelope) error {
 
 func (r recordRepo) Get(_ context.Context, key engineering.RecordKey) (engineering.RecordEnvelope, bool, error) {
 	v, ok := lookup(r.txn.overlay.records, r.txn.store.committed.records, key)
-	return v, ok, nil
+	return cloneRecordEnvelope(v), ok, nil
+}
+
+func (r recordRepo) ListAll(_ context.Context) ([]engineering.RecordEnvelope, error) {
+	seen := map[engineering.RecordKey]engineering.RecordEnvelope{}
+	for key, env := range r.txn.store.committed.records {
+		seen[key] = env
+	}
+	for key, env := range r.txn.overlay.records {
+		seen[key] = env
+	}
+	out := make([]engineering.RecordEnvelope, 0, len(seen))
+	for _, env := range seen {
+		out = append(out, cloneRecordEnvelope(env))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key.String() < out[j].Key.String() })
+	return out, nil
 }
 
 func (r recordRepo) ListByKind(_ context.Context, kind engineering.RecordKind) ([]engineering.RecordEnvelope, error) {
@@ -350,7 +404,7 @@ func (r recordRepo) ListByKind(_ context.Context, kind engineering.RecordKind) (
 	}
 	out := make([]engineering.RecordEnvelope, 0, len(seen))
 	for _, v := range seen {
-		out = append(out, v)
+		out = append(out, cloneRecordEnvelope(v))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key.String() < out[j].Key.String() })
 	return out, nil
@@ -427,6 +481,114 @@ func (r orderRepo) ListByArtifact(_ context.Context, artifactID string) ([]engin
 		out = append(out, v)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Sequence < out[j].Sequence })
+	return out, nil
+}
+
+// --- Requirement-to-criterion traces ---
+
+type requirementTraceRepo struct {
+	ctx context.Context
+	txn *transaction
+}
+
+func (r requirementTraceRepo) Put(_ context.Context, trace engineering.RequirementCriterionTrace) error {
+	if err := r.txn.store.countWrite("requirement-trace"); err != nil {
+		return err
+	}
+	if _, ok := lookup(r.txn.overlay.revisions, r.txn.store.committed.revisions, trace.RequirementRevision); !ok {
+		return fmt.Errorf("%w: requirement trace references missing requirement revision %s", application.ErrReferencedValueMissing, trace.RequirementRevision)
+	}
+	if _, ok := lookup(r.txn.overlay.revisions, r.txn.store.committed.revisions, trace.CapabilityRevision); !ok {
+		return fmt.Errorf("%w: requirement trace references missing capability revision %s", application.ErrReferencedValueMissing, trace.CapabilityRevision)
+	}
+	return putCreateOnly(r.txn.overlay.traces, r.txn.store.committed.traces, trace.RequirementRevision, trace,
+		func(a, b engineering.RequirementCriterionTrace) bool { return a.Equal(b) })
+}
+
+func (r requirementTraceRepo) Get(_ context.Context, key engineering.RevisionKey) (engineering.RequirementCriterionTrace, bool, error) {
+	v, ok := lookup(r.txn.overlay.traces, r.txn.store.committed.traces, key)
+	return v, ok, nil
+}
+
+// --- Lifecycle Definition and Definition Version configuration ---
+
+type lifecycleDefinitionRepo struct {
+	ctx context.Context
+	txn *transaction
+}
+
+func cloneLifecycleDefinition(env engineering.LifecycleDefinitionEnvelope) engineering.LifecycleDefinitionEnvelope {
+	env.Payload = append([]byte(nil), env.Payload...)
+	return env
+}
+
+func cloneLifecycleVersion(env engineering.LifecycleDefinitionVersionEnvelope) engineering.LifecycleDefinitionVersionEnvelope {
+	env.Payload = append([]byte(nil), env.Payload...)
+	return env
+}
+
+func (r lifecycleDefinitionRepo) PutDefinition(_ context.Context, env engineering.LifecycleDefinitionEnvelope) error {
+	if err := r.txn.store.countWrite("lifecycle-definition"); err != nil {
+		return err
+	}
+	env = cloneLifecycleDefinition(env)
+	return putCreateOnly(r.txn.overlay.lifecycleDefinitions, r.txn.store.committed.lifecycleDefinitions, env.DefinitionID, env,
+		func(a, b engineering.LifecycleDefinitionEnvelope) bool { return a.Equal(b) })
+}
+
+func (r lifecycleDefinitionRepo) GetDefinition(_ context.Context, definitionID string) (engineering.LifecycleDefinitionEnvelope, bool, error) {
+	env, found := lookup(r.txn.overlay.lifecycleDefinitions, r.txn.store.committed.lifecycleDefinitions, definitionID)
+	return cloneLifecycleDefinition(env), found, nil
+}
+
+func (r lifecycleDefinitionRepo) ListDefinitions(_ context.Context) ([]engineering.LifecycleDefinitionEnvelope, error) {
+	seen := make(map[string]engineering.LifecycleDefinitionEnvelope)
+	maps.Copy(seen, r.txn.store.committed.lifecycleDefinitions)
+	maps.Copy(seen, r.txn.overlay.lifecycleDefinitions)
+	out := make([]engineering.LifecycleDefinitionEnvelope, 0, len(seen))
+	for _, env := range seen {
+		out = append(out, cloneLifecycleDefinition(env))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].DefinitionID < out[j].DefinitionID })
+	return out, nil
+}
+
+func (r lifecycleDefinitionRepo) PutVersion(_ context.Context, env engineering.LifecycleDefinitionVersionEnvelope) error {
+	if err := r.txn.store.countWrite("lifecycle-definition-version"); err != nil {
+		return err
+	}
+	if _, found := lookup(r.txn.overlay.lifecycleDefinitions, r.txn.store.committed.lifecycleDefinitions, env.Key.DefinitionID); !found {
+		return fmt.Errorf("%w: lifecycle definition version %s names definition %s, which does not exist", application.ErrReferencedValueMissing, env.Key, env.Key.DefinitionID)
+	}
+	env = cloneLifecycleVersion(env)
+	return putCreateOnly(r.txn.overlay.lifecycleVersions, r.txn.store.committed.lifecycleVersions, env.Key, env,
+		func(a, b engineering.LifecycleDefinitionVersionEnvelope) bool {
+			return a.Equal(b) && a.RecordedAt.Equal(b.RecordedAt)
+		})
+}
+
+func (r lifecycleDefinitionRepo) GetVersion(_ context.Context, key engineering.LifecycleDefinitionVersionKey) (engineering.LifecycleDefinitionVersionEnvelope, bool, error) {
+	env, found := lookup(r.txn.overlay.lifecycleVersions, r.txn.store.committed.lifecycleVersions, key)
+	return cloneLifecycleVersion(env), found, nil
+}
+
+func (r lifecycleDefinitionRepo) ListVersions(_ context.Context, definitionID string) ([]engineering.LifecycleDefinitionVersionEnvelope, error) {
+	seen := make(map[engineering.LifecycleDefinitionVersionKey]engineering.LifecycleDefinitionVersionEnvelope)
+	for key, env := range r.txn.store.committed.lifecycleVersions {
+		if key.DefinitionID == definitionID {
+			seen[key] = env
+		}
+	}
+	for key, env := range r.txn.overlay.lifecycleVersions {
+		if key.DefinitionID == definitionID {
+			seen[key] = env
+		}
+	}
+	out := make([]engineering.LifecycleDefinitionVersionEnvelope, 0, len(seen))
+	for _, env := range seen {
+		out = append(out, cloneLifecycleVersion(env))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key.String() < out[j].Key.String() })
 	return out, nil
 }
 

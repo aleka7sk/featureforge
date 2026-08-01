@@ -15,6 +15,15 @@ const (
 	testScope      = "featureforge:capability|CAP-1"
 )
 
+// recordPassInspector keeps the correction/readiness algorithm tests focused
+// on graph and verdict semantics. Dedicated integrity suites exercise the
+// production PEOS inspector against complete stored envelopes.
+type recordPassInspector struct {
+	application.EngineeringReplayInspector
+}
+
+func (recordPassInspector) ValidateRecord(engineering.RecordEnvelope) error { return nil }
+
 func mustClaimEnv(t *testing.T, claimID, outcome string, correction *engineering.RecordEnvelope, correctionKind string) engineering.RecordEnvelope {
 	t.Helper()
 	key, err := engineering.NewRecordKey(engineering.RecordKindClaim, claimID)
@@ -54,7 +63,7 @@ func resolveClaim(t *testing.T, uow application.UnitOfWork) (application.Current
 	var result application.CurrentClaimResult
 	err := uow.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		result, err = application.ResolveCurrentClaim(context.Background(), r, testSubjectKey, testScope, []string{"requirement-revision:REQ-1/REQ-1-REV-1"})
+		result, err = application.ResolveCurrentClaim(context.Background(), r, recordPassInspector{}, testSubjectKey, testScope, []string{"requirement-revision:REQ-1/REQ-1-REV-1"})
 		return err
 	})
 	return result, err

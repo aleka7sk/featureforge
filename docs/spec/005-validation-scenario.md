@@ -67,14 +67,16 @@ readable side by side in the Revisions screen.
 
 ## 4. Requirements
 
-Three Requirement Artifacts, each with one revision. Each cites the acceptance
-criterion it derives from, in its own statement text.
+Four Requirement Artifacts, each with one revision. AD-033 makes the source a
+structured `RequirementCriterionTrace` to exact capability Revision 2 and its
+revision-local criterion key; statement text is not used as the link.
 
 | Requirement | Statement | From |
 |---|---|---|
 | **R-1** | Published homework SHALL be visible to the student of the lesson it belongs to. | AC-1 |
 | **R-2** | Published homework SHALL NOT be visible to any user who is not the student of that lesson. | AC-2 |
 | **R-3** | Where homework has an audio attachment, that attachment SHALL have a representation the student can resolve. | AC-3 |
+| **R-4** | Published homework SHALL become observable to the student within 5 seconds of publication. | AC-4 |
 
 Each Requirement's subject is the capability Artifact, converted through
 `core.EngineeringSubjectRefFromArtifact`. The requirement package never sees a
@@ -82,11 +84,10 @@ FeatureForge type, and the validation package never sees a requirement type —
 the crossing happens in FeatureForge's integration layer, which is the one place
 permitted to import both.
 
-**AC-4** (the 5-second latency criterion) is deliberately **not** promoted to a
-requirement in this scenario. It is the criterion that stays uncovered, so that
-release readiness has something real to report as `incomplete`, and so that the
-"every approved requirement is covered by evidence" check has a genuine negative
-case to distinguish from a positive one.
+**Forward correction (AD-033).** AC-4 is promoted to R-4, matching FF-011 and
+the executable scenario. It remains uncovered because R-4 has no applicable
+current Claim. This preserves the genuine negative case while making the
+criterion-to-Requirement relation exact and queryable.
 
 ## 5. The decision
 
@@ -156,7 +157,8 @@ exact Revision level.
 
 ### Claims
 
-Three satisfaction claims, one per requirement. Each has:
+Three initial satisfaction claims, one for each planned Requirement R-1 through
+R-3. R-4 deliberately has no Claim. Each recorded Claim has:
 
 - subject: Capability Revision 2;
 - criteria: that requirement's current revision;
@@ -221,7 +223,9 @@ claim was answering the right question and got it wrong.
 - after correction, C-2 is still retrievable and still reads `satisfied`;
 - E-2 and V-2 are byte-identical before and after;
 - the current-claim query for R-2 returns C-4 and reports the chain;
-- release readiness flips from `ready` to `not-ready` with R-2 named;
+- release readiness changes from `incomplete` (R-4 has no claim while R-2's
+  original claim still stands) to `not-ready` with R-2 named; R-4 remains
+  reported as uncovered;
 - a correction naming a non-existent claim is rejected;
 - a correction cycle is rejected;
 - a second uncorrected claim for the same subject, scope, and criteria produces
@@ -236,8 +240,8 @@ The checks the scenario was asked to model, and their honest disposition:
 | Published homework is visible to the intended student | R-1 → A-1 → E-1 → V-1 → C-1 (`satisfied`) |
 | Student access does not expose homework to unrelated users | R-2 → A-2 → E-2 → V-2 → C-2 (`satisfied`, **wrong**) → corrected by C-4 (`not-satisfied`) |
 | Optional audio attachment has a resolvable representation | R-3 → A-3 → E-3 → V-3 → C-3 (`satisfied`) |
-| Publication result available within the time constraint | AC-4 only — deliberately no requirement, no plan activity, no claim. Surfaces as an uncovered acceptance criterion. |
-| Every approved requirement is covered by evidence | Not a claim. This is the release-readiness query ([FF-004 §3.6](004-current-state-resolution.md#36-release-readiness)), computed over the three requirements. |
+| Publication result available within the time constraint | R-4 traced to AC-4; deliberately no plan activity or claim. Surfaces as an uncovered acceptance criterion. |
+| Every approved requirement is covered by evidence | Not a claim. This is the release-readiness query ([FF-004 §3.6](004-current-state-resolution.md#36-release-readiness)), computed over the four requirements. |
 
 The last row is the one most likely to be got wrong by an implementation:
 "every requirement is covered" is a **derived view**, and recording it as a Claim
@@ -250,11 +254,11 @@ After the full scenario:
 | Question | Answer |
 |---|---|
 | Current capability revision | Revision 2 (sequence 2, accepted) |
-| Effective requirements | R-1, R-2, R-3 |
+| Effective requirements | R-1, R-2, R-3, R-4 |
 | Applicable decision | The audio-attachment and latency decision, with basis |
 | Current claims | C-1 `satisfied`, C-4 `not-satisfied` (correcting C-2), C-3 `satisfied` |
-| Release readiness | `not-ready` — R-2 is not satisfied |
-| Lifecycle state | `featureforge:under-validation` (renamed by [AD-018](../decisions/README.md#ad-018--the-lifecycle-state-validated-is-renamed-assessed-and-redefined)) |
+| Release readiness | `not-ready` — R-2 is not satisfied; R-4 is also uncovered |
+| Lifecycle state | `featureforge:under-validation`, unique head SA-3 established by the legal `drafting -> specified -> under-validation` chain |
 | Timeline | Every act above, in order, with actors, timestamps, and the correction link |
 | History integrity | Revision 1 and claim C-2 both fully inspectable; nothing updated, nothing deleted |
 

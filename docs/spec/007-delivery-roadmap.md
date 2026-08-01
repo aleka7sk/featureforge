@@ -21,6 +21,13 @@ B.0  Belcanto Product Architecture and PEOS Integration Boundary
 The roadmap is accepted as given. One adjustment was made and is stated
 explicitly under M.4.
 
+**Pre-M.6 conformance gate (2026-08-01).** M.5 evidence exposed bounded command
+replay, operational-establishment, lifecycle-policy, and Requirement-to-
+criterion traceability drift. AD-030/FF-022 closed replay; AD-031, AD-032,
+AD-033 and FF-023 close the remaining domain/lifecycle/trace contract. This is
+not a new product phase and does not insert application work between M.5 and
+M.6. M.6 begins only after FF-023 is implemented and audited.
+
 ---
 
 ## M.1 — Product Definition and Acceptance Contract

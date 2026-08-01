@@ -17,6 +17,15 @@ const (
 
 var acceptanceCriterionKeyPattern = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
 
+// ValidateAcceptanceCriterionKey applies the one grammar shared by
+// CapabilitySpecificationContent and RequirementCriterionTrace.
+func ValidateAcceptanceCriterionKey(key string) error {
+	if !acceptanceCriterionKeyPattern.MatchString(key) {
+		return fmt.Errorf("%w: acceptance criterion key %q must match [A-Za-z0-9-]+", ErrInvalidContent, key)
+	}
+	return nil
+}
+
 // AcceptanceCriterion is one keyed acceptance criterion within a capability
 // specification's content (FF-009 §4.1).
 type AcceptanceCriterion struct {
@@ -26,8 +35,8 @@ type AcceptanceCriterion struct {
 
 // NewAcceptanceCriterion validates and returns an AcceptanceCriterion.
 func NewAcceptanceCriterion(key, text string) (AcceptanceCriterion, error) {
-	if !acceptanceCriterionKeyPattern.MatchString(key) {
-		return AcceptanceCriterion{}, fmt.Errorf("%w: acceptance criterion key %q must match [A-Za-z0-9-]+", ErrInvalidContent, key)
+	if err := ValidateAcceptanceCriterionKey(key); err != nil {
+		return AcceptanceCriterion{}, err
 	}
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {

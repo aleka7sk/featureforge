@@ -46,11 +46,19 @@ replace it without touching a caller.
 
 ## 3. Schema
 
-One migration, `migrations/0001_initial_schema.sql`. Ten tables: `projects`,
+The original M.4 baseline used one migration,
+`migrations/0001_initial_schema.sql`, and ten tables: `projects`,
 `feature_cards`, `feature_card_capability_links`, `artifact_envelopes`,
 `revision_envelopes`, `structured_content`, `record_envelopes`,
 `revision_order`, `revision_acceptance`, plus the runner's own
-`schema_migrations`.
+`schema_migrations`. Later additive migrations remain governed by the same
+runner. AD-032/AD-033/FF-023 add `lifecycle_definitions`,
+`lifecycle_definition_versions`, and `requirement_criterion_traces` in
+`0003_domain_and_lifecycle_conformance.sql`. The PEOS Definition and
+DefinitionVersion therefore really persist and reload, while the product-owned
+trace makes an exact Requirement-to-capability-criterion edge queryable. The
+lifecycle tables store opaque canonical `bytea` payloads plus digests; the
+version row also stores its recorded-at projection. No adapter decodes PEOS.
 
 Three decisions shape it.
 

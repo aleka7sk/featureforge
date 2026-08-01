@@ -267,7 +267,11 @@ func loadRequirementsPageData(ctx context.Context, deps Dependencies, featureCar
 	if problem != nil {
 		return requirementsPageData{}, problem
 	}
-	return mapRequirementsPageData(featureCardID, capabilityIDFromState(state), state.EffectiveRequirements, state.Readiness.PerRequirement), nil
+	data := mapRequirementsPageData(featureCardID, capabilityIDFromState(state), state.EffectiveRequirements, state.Readiness.PerRequirement)
+	if state.CurrentRevision.Found && state.CurrentRevision.Revision != nil {
+		data.SourceCapabilityRevisionID = state.CurrentRevision.Revision.RevisionID
+	}
+	return data, nil
 }
 
 // handleDecisions renders screen 5 (FF-001 §3.5) from Q4 alone.

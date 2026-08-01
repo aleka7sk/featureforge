@@ -43,6 +43,7 @@ func seedRequirementForReplay(t *testing.T, f commandFixture) {
 	cmd := application.EstablishRequirementCommand{
 		ArtifactID: "REQ-REPLAY", RevisionID: "REQ-REPLAY-REV-1",
 		Statement: "The system SHALL replay validation acts.", SubjectArtifactID: "CAP-1",
+		SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
 		AcceptanceRecordID: memberID("REQ-MEMBER-SEED"),
 	}
 	if _, err := cmd.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
@@ -102,7 +103,7 @@ func TestC12CompetingCorrectionsRemainWritableAndReplayable(t *testing.T) {
 
 	err := f.uow.Do(ctx, func(r application.Repositories) error {
 		_, err := application.ResolveCurrentClaim(
-			ctx, r, "artifact-revision:CAP-1/CAP-1-REV-1", "featureforge:capability|CAP-1",
+			ctx, r, f.rec, "artifact-revision:CAP-1/CAP-1-REV-1", "featureforge:capability|CAP-1",
 			[]string{"requirement-revision:REQ-REPLAY/REQ-REPLAY-REV-1"},
 		)
 		return err
@@ -227,7 +228,8 @@ func TestC1ThroughC12ReplayAfterClockAdvance(t *testing.T) {
 		seedCapability(t, f)
 		cmd := application.EstablishRequirementCommand{
 			ArtifactID: "REQ-C7", RevisionID: "REQ-C7-REV-1", Statement: "The system SHALL replay C7.",
-			SubjectArtifactID: "CAP-1", AcceptanceRecordID: memberID("REQ-MEMBER-REPLAY"),
+			SubjectArtifactID: "CAP-1", SourceCapabilityRevisionID: "CAP-1-REV-1",
+			SourceAcceptanceCriterionKey: "AC-1", AcceptanceRecordID: memberID("REQ-MEMBER-REPLAY"),
 		}
 		assertAdvancingClockReplay(t, f, func() (application.EstablishRequirementResult, error) {
 			return cmd.Execute(ctx, f.uow, f.rec, f.rec, f.clock)
@@ -340,6 +342,10 @@ func TestExplicitCallerTimesReplayAndConflict(t *testing.T) {
 	t.Run("C6 effective attempted and completed times", func(t *testing.T) {
 		f := newCommandFixture()
 		seedCapability(t, f)
+		seedRequirementForReplay(t, f)
+		// Caller-owned lifecycle times may be historical, but each genuinely
+		// new act must be recorded no earlier than its resulting effective time.
+		f.clock = application.NewFixedClock(explicit)
 		entry := application.AssignLifecycleStateCommand{
 			AssignmentID: "SA-TIME-ENTRY", SubjectArtifactID: "CAP-1", State: "drafting", IsEntry: true,
 			TransitionRecordArtifactID: "TR-TIME", TransitionRecordRevisionID: "TR-TIME-REV-0",
@@ -348,13 +354,14 @@ func TestExplicitCallerTimesReplayAndConflict(t *testing.T) {
 		if _, err := entry.Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 			t.Fatal(err)
 		}
+		f.clock = application.NewFixedClock(explicit.Add(10 * time.Minute))
 		cmd := application.AssignLifecycleStateCommand{
-			AssignmentID: "SA-TIME-TRANSITION", SubjectArtifactID: "CAP-1", State: "under-validation",
+			AssignmentID: "SA-TIME-TRANSITION", SubjectArtifactID: "CAP-1", State: "specified",
 			TransitionRecordArtifactID: "TR-TIME", TransitionRecordRevisionID: "TR-TIME-REV-1",
-			TransitionKey: "begin-validation", FromAssignmentID: "SA-TIME-ENTRY",
-			EffectiveAt: explicit.Add(time.Minute), HasEffectiveAt: true,
-			AttemptedAt: explicit.Add(2 * time.Minute), HasAttemptedAt: true,
-			CompletedAt: explicit.Add(3 * time.Minute), HasCompletedAt: true,
+			TransitionKey: "specify", FromAssignmentID: "SA-TIME-ENTRY",
+			EffectiveAt: explicit.Add(3 * time.Minute), HasEffectiveAt: true,
+			AttemptedAt: explicit.Add(time.Minute), HasAttemptedAt: true,
+			CompletedAt: explicit.Add(2 * time.Minute), HasCompletedAt: true,
 		}
 		assertAdvancingClockReplay(t, f, func() (application.AssignLifecycleStateResult, error) {
 			return cmd.Execute(ctx, f.uow, f.rec, f.rec, f.clock)
@@ -438,6 +445,7 @@ func TestC7CallerMemberIdentityAndReplayOnlyOmission(t *testing.T) {
 	base := application.EstablishRequirementCommand{
 		ArtifactID: "REQ-IDENTITY", RevisionID: "REQ-IDENTITY-REV-1",
 		Statement: "The system SHALL preserve caller identity.", SubjectArtifactID: "CAP-1",
+		SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
 	}
 
 	releaseWriteGuard := forbidPersistenceWrites(f)
@@ -683,10 +691,26 @@ func (r appendedRecordRepository) ListByKind(ctx context.Context, kind engineeri
 	return append(stored, r.extra), nil
 }
 
+func (r appendedRecordRepository) ListAll(ctx context.Context) ([]engineering.RecordEnvelope, error) {
+	stored, err := r.RecordEnvelopeRepository.ListAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return append(stored, r.extra), nil
+}
+
 func (r appendedStateAssignmentRepository) ListByKind(ctx context.Context, kind engineering.RecordKind) ([]engineering.RecordEnvelope, error) {
 	stored, err := r.RecordEnvelopeRepository.ListByKind(ctx, kind)
 	if err != nil || kind != engineering.RecordKindStateAssignment {
 		return stored, err
+	}
+	return append(stored, r.extra), nil
+}
+
+func (r appendedStateAssignmentRepository) ListAll(ctx context.Context) ([]engineering.RecordEnvelope, error) {
+	stored, err := r.RecordEnvelopeRepository.ListAll(ctx)
+	if err != nil {
+		return nil, err
 	}
 	return append(stored, r.extra), nil
 }
@@ -946,6 +970,7 @@ func TestC9RequiresCompleteActivityRevisionActs(t *testing.T) {
 		if _, err := (application.EstablishRequirementCommand{
 			ArtifactID: "REQ-ORPHAN", RevisionID: "REQ-ORPHAN-REV-1",
 			Statement: "The system SHALL reject orphan criteria.", SubjectArtifactID: "CAP-1",
+			SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
 			AcceptanceRecordID: memberID("MEM-REQ-ORPHAN"),
 		}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 			t.Fatalf("seed requirement: %v", err)

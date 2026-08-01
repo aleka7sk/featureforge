@@ -109,3 +109,56 @@ func TestFeatureCardWithCapabilityArtifactID(t *testing.T) {
 		t.Error("WithCapabilityArtifactID must not mutate the receiver")
 	}
 }
+
+func TestFeatureCardSameEstablishmentExcludesCapabilityLink(t *testing.T) {
+	pid, _ := NewProjectID("PRJ-1")
+	fid, _ := NewFeatureCardID("FC-1")
+	base, err := NewFeatureCard(fid, pid, "Title", "Description", fixedTime())
+	if err != nil {
+		t.Fatal(err)
+	}
+	linked, err := base.WithCapabilityArtifactID("CAP-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherLink, err := base.WithCapabilityArtifactID("CAP-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, candidate := range map[string]FeatureCard{
+		"same base":      base,
+		"linked":         linked,
+		"different link": otherLink,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !base.SameEstablishment(candidate) || !candidate.SameEstablishment(base) {
+				t.Error("capability link changed establishment equality")
+			}
+		})
+	}
+
+	otherPID, _ := NewProjectID("PRJ-2")
+	otherFID, _ := NewFeatureCardID("FC-2")
+	mustCard := func(id FeatureCardID, projectID ProjectID, title, description string, createdAt time.Time) FeatureCard {
+		t.Helper()
+		card, err := NewFeatureCard(id, projectID, title, description, createdAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return card
+	}
+	for name, candidate := range map[string]FeatureCard{
+		"id":          mustCard(otherFID, pid, "Title", "Description", fixedTime()),
+		"project":     mustCard(fid, otherPID, "Title", "Description", fixedTime()),
+		"title":       mustCard(fid, pid, "Different", "Description", fixedTime()),
+		"description": mustCard(fid, pid, "Title", "Different", fixedTime()),
+		"created at":  mustCard(fid, pid, "Title", "Description", fixedTime().Add(time.Second)),
+	} {
+		t.Run("different "+name, func(t *testing.T) {
+			if base.SameEstablishment(candidate) {
+				t.Errorf("different %s must not have the same establishment", name)
+			}
+		})
+	}
+}

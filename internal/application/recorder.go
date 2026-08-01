@@ -12,6 +12,7 @@ import (
 // implemented by internal/engineering/peos.Recorder -- structurally, via Go's
 // implicit interface satisfaction, so neither package imports the other.
 type EngineeringRecorder interface {
+	RecordLifecycleConfiguration() (engineering.LifecycleDefinitionEnvelope, engineering.LifecycleDefinitionVersionEnvelope, error)
 	RecordCapabilityArtifact(artifactID string, recordedAt time.Time) (engineering.ArtifactEnvelope, error)
 	RecordCapabilityRevision(in engineering.CapabilityRevisionInput) (engineering.RevisionEnvelope, error)
 	RecordEvidence(in engineering.EvidenceInput) (engineering.ArtifactEnvelope, engineering.RevisionEnvelope, error)

@@ -65,6 +65,9 @@ func RunPermuted(ctx context.Context, uow application.UnitOfWork, recorder appli
 
 func run(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, inspector application.EngineeringReplayInspector, clock *application.FixedClock, ord order) (Result, error) {
 	tick := func() { clock.Advance(time.Hour) }
+	if err := application.EnsureLifecycleConfiguration(ctx, uow, recorder, inspector); err != nil {
+		return Result{}, fmt.Errorf("initialize lifecycle configuration: %w", err)
+	}
 
 	// 1. Project.
 	if _, err := (application.CreateProjectCommand{ProjectID: ProjectID, Name: "Belcanto Pilot"}).
@@ -110,21 +113,7 @@ func run(ctx context.Context, uow application.UnitOfWork, recorder application.E
 	}
 	tick()
 
-	// 6. Requirements REQ-1, REQ-2 (permutable), then REQ-3, REQ-4.
-	for _, artifactID := range ord.requirements {
-		if err := establishRequirement(ctx, uow, recorder, inspector, clock, artifactID); err != nil {
-			return Result{}, err
-		}
-		tick()
-	}
-	for _, artifactID := range []string{"REQ-3", "REQ-4"} {
-		if err := establishRequirement(ctx, uow, recorder, inspector, clock, artifactID); err != nil {
-			return Result{}, err
-		}
-		tick()
-	}
-
-	// 7. Decision evidence (pilot-teacher interview notes), then the
+	// 6. Decision evidence (pilot-teacher interview notes), then the
 	// decision itself, resolving Revision 1's open questions. Recording
 	// evidence has no execution to pair it with here -- unlike A-1..A-3's
 	// evidence, which RecordValidationRunCommand bundles with an execution
@@ -155,7 +144,7 @@ func run(ctx context.Context, uow application.UnitOfWork, recorder application.E
 	}
 	tick()
 
-	// 8. Capability Revision 2, then accept it.
+	// 7. Capability Revision 2, then accept it.
 	rev2Content, err := capabilityRevision2Content()
 	if err != nil {
 		return Result{}, err
@@ -173,7 +162,35 @@ func run(ctx context.Context, uow application.UnitOfWork, recorder application.E
 	}
 	tick()
 
-	// 9. Validation plan: activities A-1, A-2, A-3 (REQ-4 has none).
+	// 8. Requirements REQ-1, REQ-2 (permutable), then REQ-3, REQ-4.
+	// AD-033 makes their exact source CAP-1-REV-2 / AC-1..AC-4 part of
+	// persisted C7 state, so they are established only after that revision
+	// has become the accepted current capability revision.
+	for _, artifactID := range ord.requirements {
+		if err := establishRequirement(ctx, uow, recorder, inspector, clock, artifactID); err != nil {
+			return Result{}, err
+		}
+		tick()
+	}
+	for _, artifactID := range []string{"REQ-3", "REQ-4"} {
+		if err := establishRequirement(ctx, uow, recorder, inspector, clock, artifactID); err != nil {
+			return Result{}, err
+		}
+		tick()
+	}
+
+	// 9. Enter the specified milestone after the accepted current capability
+	// revision and its traced effective Requirements exist.
+	if _, err := (application.AssignLifecycleStateCommand{
+		AssignmentID: SpecifiedAssignmentID, SubjectArtifactID: CapabilityArtifactID, State: "specified",
+		TransitionRecordArtifactID: TransitionRecordArtifactID, TransitionRecordRevisionID: SpecifyTransitionRevisionID,
+		TransitionKey: "specify", FromAssignmentID: EntryAssignmentID,
+	}).Execute(ctx, uow, recorder, inspector, clock); err != nil {
+		return Result{}, fmt.Errorf("assign specified lifecycle state: %w", err)
+	}
+	tick()
+
+	// 10. Validation plan: activities A-1, A-2, A-3 (REQ-4 has none).
 	if _, err := (application.EstablishValidationPlanCommand{
 		ArtifactID: PlanArtifactID, RevisionID: PlanRevisionID, ScopeArtifactID: CapabilityArtifactID,
 		AcceptanceRecordID: stringPointer("ACC-VP-1"),
@@ -187,21 +204,37 @@ func run(ctx context.Context, uow application.UnitOfWork, recorder application.E
 	}
 	tick()
 
-	// 10. Lifecycle: begin validation.
-	if _, err := (application.AssignLifecycleStateCommand{
-		AssignmentID: FirstAssignmentID, SubjectArtifactID: CapabilityArtifactID, State: "under-validation",
-		TransitionRecordArtifactID: TransitionRecordArtifactID, TransitionRecordRevisionID: FirstTransitionRevisionID,
-		TransitionKey: "begin-validation", FromAssignmentID: EntryAssignmentID,
-	}).Execute(ctx, uow, recorder, inspector, clock); err != nil {
-		return Result{}, fmt.Errorf("assign under-validation lifecycle state: %w", err)
-	}
-	tick()
-
-	// 11. Execute activities A-1..A-3 (permutable order), each producing
-	// evidence and a satisfied claim, then re-run A-2 and correct CLM-2.
+	// 11. Execute the first permuted activity and record its evidence. That
+	// completed execution is the begin-validation milestone's support; the
+	// claim is deliberately recorded only after the lifecycle transition.
 	claimByRequirement := map[string]string{"A-1": ClaimForR1, "A-3": ClaimForR3}
+	firstActivity := true
 	for _, group := range ord.activities {
 		for _, key := range group {
+			claimID := claimByRequirement[key]
+			if key == "A-2" {
+				claimID = ClaimIncorrect
+			}
+			if firstActivity {
+				if err := recordActivityRun(ctx, uow, recorder, inspector, clock, key); err != nil {
+					return Result{}, err
+				}
+				tick()
+				if _, err := (application.AssignLifecycleStateCommand{
+					AssignmentID: UnderValidationAssignmentID, SubjectArtifactID: CapabilityArtifactID, State: "under-validation",
+					TransitionRecordArtifactID: TransitionRecordArtifactID, TransitionRecordRevisionID: BeginValidationTransitionRevisionID,
+					TransitionKey: "begin-validation", FromAssignmentID: SpecifiedAssignmentID,
+				}).Execute(ctx, uow, recorder, inspector, clock); err != nil {
+					return Result{}, fmt.Errorf("assign under-validation lifecycle state: %w", err)
+				}
+				tick()
+				if err := recordActivityClaim(ctx, uow, recorder, inspector, clock, key, claimID, "satisfied"); err != nil {
+					return Result{}, err
+				}
+				tick()
+				firstActivity = false
+				continue
+			}
 			if key == "A-2" {
 				if err := runActivity(ctx, uow, recorder, inspector, clock, key, ClaimIncorrect, "satisfied"); err != nil {
 					return Result{}, err
@@ -332,6 +365,7 @@ func establishRequirement(ctx context.Context, uow application.UnitOfWork, recor
 	_, err := (application.EstablishRequirementCommand{
 		ArtifactID: artifactID, RevisionID: requirementRevisionID(artifactID),
 		Statement: requirementStatements[artifactID], SubjectArtifactID: CapabilityArtifactID,
+		SourceCapabilityRevisionID: CapabilityRevision2, SourceAcceptanceCriterionKey: requirementCriterionKeys[artifactID],
 		AcceptanceRecordID: stringPointer("ACC-" + artifactID),
 	}).Execute(ctx, uow, recorder, inspector, clock)
 	if err != nil {
@@ -350,7 +384,18 @@ func planActivity(key, requirementArtifactID, method, interpretation, expectedEv
 }
 
 func runActivity(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, inspector application.EngineeringReplayInspector, clock *application.FixedClock, activityKey, claimID, outcome string) error {
-	requirementID := activityRequirement(activityKey)
+	if err := recordActivityRun(ctx, uow, recorder, inspector, clock, activityKey); err != nil {
+		return err
+	}
+	clock.Advance(time.Hour)
+	if err := recordActivityClaim(ctx, uow, recorder, inspector, clock, activityKey, claimID, outcome); err != nil {
+		return err
+	}
+	clock.Advance(time.Hour)
+	return nil
+}
+
+func recordActivityRun(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, inspector application.EngineeringReplayInspector, clock *application.FixedClock, activityKey string) error {
 	method := activityMethod(activityKey)
 	executionID := ExecutionIDs[activityKey]
 	evidenceID := EvidenceIDs[activityKey]
@@ -364,8 +409,14 @@ func runActivity(ctx context.Context, uow application.UnitOfWork, recorder appli
 	}).Execute(ctx, uow, recorder, inspector, clock); err != nil {
 		return fmt.Errorf("record validation run %s: %w", activityKey, err)
 	}
-	clock.Advance(time.Hour)
+	return nil
+}
 
+func recordActivityClaim(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, inspector application.EngineeringReplayInspector, clock *application.FixedClock, activityKey, claimID, outcome string) error {
+	requirementID := activityRequirement(activityKey)
+	method := activityMethod(activityKey)
+	executionID := ExecutionIDs[activityKey]
+	evidenceID := EvidenceIDs[activityKey]
 	if _, err := (application.RecordValidationClaimCommand{
 		ClaimID: claimID, ScopeArtifactID: CapabilityArtifactID,
 		SubjectArtifactID: CapabilityArtifactID, SubjectRevisionID: CapabilityRevision2,
@@ -376,7 +427,6 @@ func runActivity(ctx context.Context, uow application.UnitOfWork, recorder appli
 	}).Execute(ctx, uow, recorder, inspector, clock); err != nil {
 		return fmt.Errorf("record claim for %s: %w", activityKey, err)
 	}
-	clock.Advance(time.Hour)
 	return nil
 }
 

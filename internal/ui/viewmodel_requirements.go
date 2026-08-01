@@ -4,20 +4,24 @@ package ui
 // (revision + statement) with its readiness row (current claim, outcome,
 // criterion key) by artifact ID (FF-001 §3.4).
 type requirementRow struct {
-	ArtifactID string
-	RevisionID string
-	Statement  string
-	Readiness  readinessRow
+	ArtifactID                   string
+	RevisionID                   string
+	Statement                    string
+	SourceCapabilityArtifactID   string
+	SourceCapabilityRevisionID   string
+	SourceAcceptanceCriterionKey string
+	Readiness                    readinessRow
 }
 
 // requirementsPageData is templates/requirements.html's shape.
 type requirementsPageData struct {
-	PageTitle     string
-	FeatureCardID string
-	CapabilityID  string
-	Requirements  []requirementRow
-	FormError     string
-	FormValues    map[string]string
+	PageTitle                  string
+	FeatureCardID              string
+	CapabilityID               string
+	SourceCapabilityRevisionID string
+	Requirements               []requirementRow
+	FormError                  string
+	FormValues                 map[string]string
 }
 
 func mapRequirementsPageData(featureCardID, capabilityID string, effective []apiEffectiveRequirementDTO, per []apiPerRequirementReadinessDTO) requirementsPageData {
@@ -30,7 +34,10 @@ func mapRequirementsPageData(featureCardID, capabilityID string, effective []api
 	for _, req := range effective {
 		rows = append(rows, requirementRow{
 			ArtifactID: req.ArtifactID, RevisionID: req.RevisionID, Statement: req.Statement,
-			Readiness: readinessByID[req.ArtifactID],
+			SourceCapabilityArtifactID:   req.SourceCapabilityArtifactID,
+			SourceCapabilityRevisionID:   req.SourceCapabilityRevisionID,
+			SourceAcceptanceCriterionKey: req.SourceAcceptanceCriterionKey,
+			Readiness:                    readinessByID[req.ArtifactID],
 		})
 	}
 

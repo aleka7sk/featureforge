@@ -18,14 +18,16 @@ import (
 // context, which Do's callback signature gives it no way to reach.
 func reposFor(tx pgx.Tx) application.Repositories {
 	return application.Repositories{
-		Projects:           projectRepo{tx: tx},
-		FeatureCards:       featureCardRepo{tx: tx},
-		Artifacts:          artifactRepo{tx: tx},
-		Revisions:          revisionRepo{tx: tx},
-		StructuredContent:  contentRepo{tx: tx},
-		Records:            recordRepo{tx: tx},
-		RevisionOrder:      orderRepo{tx: tx},
-		RevisionAcceptance: acceptanceRepo{tx: tx},
+		Projects:             projectRepo{tx: tx},
+		FeatureCards:         featureCardRepo{tx: tx},
+		Artifacts:            artifactRepo{tx: tx},
+		Revisions:            revisionRepo{tx: tx},
+		StructuredContent:    contentRepo{tx: tx},
+		Records:              recordRepo{tx: tx},
+		RevisionOrder:        orderRepo{tx: tx},
+		RevisionAcceptance:   acceptanceRepo{tx: tx},
+		RequirementTraces:    requirementTraceRepo{tx: tx},
+		LifecycleDefinitions: lifecycleDefinitionRepo{tx: tx},
 	}
 }
 
@@ -191,18 +193,10 @@ func (r featureCardRepo) Put(ctx context.Context, c domain.FeatureCard) error {
 	if err != nil {
 		return err
 	}
-	if found && sameCard(existing, c) {
+	if found && existing.SameEstablishment(c) {
 		return nil
 	}
 	return fmt.Errorf("%w: feature card %s", application.ErrImmutableValueConflict, c.ID())
-}
-
-func sameCard(a, b domain.FeatureCard) bool {
-	aLink, aOK := a.CapabilityArtifactID()
-	bLink, bOK := b.CapabilityArtifactID()
-	return a.ID() == b.ID() && a.ProjectID() == b.ProjectID() && a.Title() == b.Title() &&
-		a.Description() == b.Description() && a.CreatedAt().Equal(b.CreatedAt()) &&
-		aOK == bOK && aLink == bLink
 }
 
 func (r featureCardRepo) Get(ctx context.Context, id domain.FeatureCardID) (domain.FeatureCard, bool, error) {
@@ -276,10 +270,18 @@ func (r featureCardRepo) ListByProject(ctx context.Context, projectID domain.Pro
 }
 
 func (r featureCardRepo) LinkCapability(ctx context.Context, id domain.FeatureCardID, artifactID string) error {
-	if _, found, err := r.Get(ctx, id); err != nil {
+	card, found, err := r.Get(ctx, id)
+	if err != nil {
 		return err
-	} else if !found {
+	}
+	if !found {
 		return fmt.Errorf("%w: feature card %s", application.ErrReferencedValueMissing, id)
+	}
+	if existing, linked := card.CapabilityArtifactID(); linked {
+		if existing == artifactID {
+			return nil
+		}
+		return fmt.Errorf("%w: feature card %s already linked to %s", application.ErrCapabilityAlreadyLinked, id, existing)
 	}
 	tag, err := r.tx.Exec(ctx, `
         INSERT INTO feature_card_capability_links (feature_card_id, artifact_id) VALUES ($1, $2)
@@ -418,6 +420,23 @@ func (r revisionRepo) Get(ctx context.Context, key engineering.RevisionKey) (eng
 		return engineering.RevisionEnvelope{}, false, err
 	}
 	return env, true, rows.Err()
+}
+
+func (r revisionRepo) ListAll(ctx context.Context) ([]engineering.RevisionEnvelope, error) {
+	rows, err := r.tx.Query(ctx, revisionSelect+` ORDER BY artifact_id, revision_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []engineering.RevisionEnvelope{}
+	for rows.Next() {
+		env, err := scanRevision(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, env)
+	}
+	return out, rows.Err()
 }
 
 func (r revisionRepo) ListByArtifact(ctx context.Context, artifactID string) ([]engineering.RevisionEnvelope, error) {
@@ -668,6 +687,14 @@ func (r recordRepo) Get(ctx context.Context, key engineering.RecordKey) (enginee
 	return env, true, rows.Err()
 }
 
+func (r recordRepo) ListAll(ctx context.Context) ([]engineering.RecordEnvelope, error) {
+	rows, err := r.tx.Query(ctx, recordSelect+` ORDER BY kind, id`)
+	if err != nil {
+		return nil, err
+	}
+	return collectRecords(rows)
+}
+
 func (r recordRepo) ListByKind(ctx context.Context, kind engineering.RecordKind) ([]engineering.RecordEnvelope, error) {
 	rows, err := r.tx.Query(ctx, recordSelect+` WHERE kind = $1 ORDER BY kind, id`, string(kind))
 	if err != nil {
@@ -823,6 +850,228 @@ func (r orderRepo) ListByArtifact(ctx context.Context, artifactID string) ([]eng
 			return nil, storedRowIntegrity("revision order metadata", err)
 		}
 		out = append(out, order)
+	}
+	return out, rows.Err()
+}
+
+// --- Requirement-to-criterion traces ---
+
+type requirementTraceRepo struct{ tx pgx.Tx }
+
+func (r requirementTraceRepo) Put(ctx context.Context, trace engineering.RequirementCriterionTrace) error {
+	tag, err := r.tx.Exec(ctx, `
+        INSERT INTO requirement_criterion_traces (
+            requirement_artifact_id, requirement_revision_id,
+            capability_artifact_id, capability_revision_id,
+            acceptance_criterion_key, recorded_at)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (requirement_artifact_id, requirement_revision_id) DO NOTHING`,
+		trace.RequirementRevision.ArtifactID, trace.RequirementRevision.RevisionID,
+		trace.CapabilityRevision.ArtifactID, trace.CapabilityRevision.RevisionID,
+		trace.AcceptanceCriterionKey, trace.RecordedAt.UTC())
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 1 {
+		return nil
+	}
+	existing, found, err := r.Get(ctx, trace.RequirementRevision)
+	if err != nil {
+		return err
+	}
+	if found && existing.Equal(trace) {
+		return nil
+	}
+	return fmt.Errorf("%w: requirement criterion trace for revision %s", application.ErrImmutableValueConflict, trace.RequirementRevision)
+}
+
+func (r requirementTraceRepo) Get(ctx context.Context, key engineering.RevisionKey) (engineering.RequirementCriterionTrace, bool, error) {
+	var capabilityArtifactID, capabilityRevisionID, criterionKey string
+	var recordedAt time.Time
+	err := r.tx.QueryRow(ctx, `
+        SELECT capability_artifact_id, capability_revision_id,
+               acceptance_criterion_key, recorded_at
+        FROM requirement_criterion_traces
+        WHERE requirement_artifact_id = $1 AND requirement_revision_id = $2`,
+		key.ArtifactID, key.RevisionID).Scan(
+		&capabilityArtifactID, &capabilityRevisionID, &criterionKey, &recordedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return engineering.RequirementCriterionTrace{}, false, nil
+	}
+	if err != nil {
+		return engineering.RequirementCriterionTrace{}, false, err
+	}
+	capabilityKey, err := engineering.NewRevisionKey(capabilityArtifactID, capabilityRevisionID)
+	if err != nil {
+		return engineering.RequirementCriterionTrace{}, false, storedRowIntegrity("requirement criterion trace", err)
+	}
+	trace, err := engineering.NewRequirementCriterionTrace(key, capabilityKey, criterionKey, recordedAt.UTC())
+	if err != nil {
+		return engineering.RequirementCriterionTrace{}, false, storedRowIntegrity("requirement criterion trace", err)
+	}
+	return trace, true, nil
+}
+
+// --- Lifecycle Definition and Definition Version configuration ---
+
+type lifecycleDefinitionRepo struct{ tx pgx.Tx }
+
+func (r lifecycleDefinitionRepo) PutDefinition(ctx context.Context, env engineering.LifecycleDefinitionEnvelope) error {
+	tag, err := r.tx.Exec(ctx, `
+        INSERT INTO lifecycle_definitions (definition_id, payload, payload_digest)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (definition_id) DO NOTHING`,
+		env.DefinitionID, env.Payload, env.PayloadDigest.String())
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 1 {
+		return nil
+	}
+	existing, found, err := r.GetDefinition(ctx, env.DefinitionID)
+	if err != nil {
+		return err
+	}
+	if found && existing.Equal(env) {
+		return nil
+	}
+	return fmt.Errorf("%w: lifecycle definition %s", application.ErrImmutableValueConflict, env.DefinitionID)
+}
+
+func (r lifecycleDefinitionRepo) GetDefinition(ctx context.Context, definitionID string) (engineering.LifecycleDefinitionEnvelope, bool, error) {
+	var payload []byte
+	var digestText string
+	err := r.tx.QueryRow(ctx, `
+        SELECT payload, payload_digest
+        FROM lifecycle_definitions
+        WHERE definition_id = $1`, definitionID).Scan(&payload, &digestText)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return engineering.LifecycleDefinitionEnvelope{}, false, nil
+	}
+	if err != nil {
+		return engineering.LifecycleDefinitionEnvelope{}, false, err
+	}
+	digest, err := parseDigest(digestText)
+	if err != nil {
+		return engineering.LifecycleDefinitionEnvelope{}, false, storedRowIntegrity("lifecycle definition", err)
+	}
+	env, err := engineering.NewLifecycleDefinitionEnvelope(definitionID, payload, digest)
+	if err != nil {
+		return engineering.LifecycleDefinitionEnvelope{}, false, storedRowIntegrity("lifecycle definition", err)
+	}
+	return env, true, nil
+}
+
+func (r lifecycleDefinitionRepo) ListDefinitions(ctx context.Context) ([]engineering.LifecycleDefinitionEnvelope, error) {
+	rows, err := r.tx.Query(ctx, `
+        SELECT definition_id, payload, payload_digest
+        FROM lifecycle_definitions
+        ORDER BY definition_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []engineering.LifecycleDefinitionEnvelope{}
+	for rows.Next() {
+		var definitionID, digestText string
+		var payload []byte
+		if err := rows.Scan(&definitionID, &payload, &digestText); err != nil {
+			return nil, err
+		}
+		digest, err := parseDigest(digestText)
+		if err != nil {
+			return nil, storedRowIntegrity("lifecycle definition", err)
+		}
+		env, err := engineering.NewLifecycleDefinitionEnvelope(definitionID, payload, digest)
+		if err != nil {
+			return nil, storedRowIntegrity("lifecycle definition", err)
+		}
+		out = append(out, env)
+	}
+	return out, rows.Err()
+}
+
+func (r lifecycleDefinitionRepo) PutVersion(ctx context.Context, env engineering.LifecycleDefinitionVersionEnvelope) error {
+	tag, err := r.tx.Exec(ctx, `
+        INSERT INTO lifecycle_definition_versions (
+            definition_id, version_id, payload, payload_digest, recorded_at)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (definition_id, version_id) DO NOTHING`,
+		env.Key.DefinitionID, env.Key.VersionID, env.Payload,
+		env.PayloadDigest.String(), env.RecordedAt.UTC())
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 1 {
+		return nil
+	}
+	existing, found, err := r.GetVersion(ctx, env.Key)
+	if err != nil {
+		return err
+	}
+	if found && existing.Equal(env) && existing.RecordedAt.Equal(env.RecordedAt) {
+		return nil
+	}
+	return fmt.Errorf("%w: lifecycle definition version %s", application.ErrImmutableValueConflict, env.Key)
+}
+
+func (r lifecycleDefinitionRepo) GetVersion(ctx context.Context, key engineering.LifecycleDefinitionVersionKey) (engineering.LifecycleDefinitionVersionEnvelope, bool, error) {
+	var payload []byte
+	var digestText string
+	var recordedAt time.Time
+	err := r.tx.QueryRow(ctx, `
+        SELECT payload, payload_digest, recorded_at
+        FROM lifecycle_definition_versions
+        WHERE definition_id = $1 AND version_id = $2`, key.DefinitionID, key.VersionID).
+		Scan(&payload, &digestText, &recordedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return engineering.LifecycleDefinitionVersionEnvelope{}, false, nil
+	}
+	if err != nil {
+		return engineering.LifecycleDefinitionVersionEnvelope{}, false, err
+	}
+	digest, err := parseDigest(digestText)
+	if err != nil {
+		return engineering.LifecycleDefinitionVersionEnvelope{}, false, storedRowIntegrity("lifecycle definition version", err)
+	}
+	env, err := engineering.NewLifecycleDefinitionVersionEnvelope(key, payload, digest, recordedAt.UTC())
+	if err != nil {
+		return engineering.LifecycleDefinitionVersionEnvelope{}, false, storedRowIntegrity("lifecycle definition version", err)
+	}
+	return env, true, nil
+}
+
+func (r lifecycleDefinitionRepo) ListVersions(ctx context.Context, definitionID string) ([]engineering.LifecycleDefinitionVersionEnvelope, error) {
+	rows, err := r.tx.Query(ctx, `
+        SELECT version_id, payload, payload_digest, recorded_at
+        FROM lifecycle_definition_versions
+        WHERE definition_id = $1
+        ORDER BY version_id`, definitionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []engineering.LifecycleDefinitionVersionEnvelope{}
+	for rows.Next() {
+		var versionID, digestText string
+		var payload []byte
+		var recordedAt time.Time
+		if err := rows.Scan(&versionID, &payload, &digestText, &recordedAt); err != nil {
+			return nil, err
+		}
+		key, err := engineering.NewLifecycleDefinitionVersionKey(definitionID, versionID)
+		if err != nil {
+			return nil, storedRowIntegrity("lifecycle definition version", err)
+		}
+		digest, err := parseDigest(digestText)
+		if err != nil {
+			return nil, storedRowIntegrity("lifecycle definition version", err)
+		}
+		env, err := engineering.NewLifecycleDefinitionVersionEnvelope(key, payload, digest, recordedAt.UTC())
+		if err != nil {
+			return nil, storedRowIntegrity("lifecycle definition version", err)
+		}
+		out = append(out, env)
 	}
 	return out, rows.Err()
 }

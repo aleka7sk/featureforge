@@ -7,6 +7,7 @@ import (
 
 	"github.com/aleka7sk/featureforge/internal/application"
 	"github.com/aleka7sk/featureforge/internal/engineering"
+	peos "github.com/aleka7sk/featureforge/internal/engineering/peos"
 )
 
 // seedReadinessScenario writes a capability CAP-1 with an accepted revision
@@ -102,7 +103,7 @@ func resolveReadiness(t *testing.T, uow application.UnitOfWork, current engineer
 	var result application.ReadinessResult
 	err := uow.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		result, err = application.ResolveReadiness(context.Background(), r, current, reqs)
+		result, err = application.ResolveReadiness(context.Background(), r, recordPassInspector{}, current, reqs)
 		return err
 	})
 	if err != nil {
@@ -246,13 +247,15 @@ func TestReadinessIsDeterministic(t *testing.T) {
 func TestStructuralFailureIsError(t *testing.T) {
 	uow := newStoreAndUOW()
 	err := uow.Do(context.Background(), func(r application.Repositories) error {
-		_, err := application.ResolveEffectiveRequirements(context.Background(), r, []string{"REQ-MISSING"})
+		_, err := application.ResolveEffectiveRequirements(context.Background(), r, peos.NewRecorder(), []string{"REQ-MISSING"})
 		return err
 	})
 	if err == nil {
 		t.Fatal("expected an error resolving a requirement with no revisions at all")
 	}
-	if !errors.Is(err, application.ErrRevisionOrderMissing) && !errors.Is(err, application.ErrEngineeringStateIndeterminate) {
+	if !errors.Is(err, application.ErrRevisionOrderMissing) &&
+		!errors.Is(err, application.ErrEngineeringStateIndeterminate) &&
+		!errors.Is(err, application.ErrStoredStateIntegrity) {
 		t.Errorf("err = %v, want a structural resolution error", err)
 	}
 }

@@ -195,9 +195,11 @@ func recordEvidenceDirectly(t *testing.T, ctx context.Context, uow application.U
 	}
 }
 
-// runActivityViaHTTP POSTs a validation run and its claim, mirroring
-// internal/scenario.Run's runActivity.
-func runActivityViaHTTP(t *testing.T, handler http.Handler, tick func(), activityKey, requirementID, method, executionID, evidenceID, claimID, reasoning string) {
+// recordActivityRunViaHTTP POSTs the execution-and-evidence half of one
+// validation activity. Keeping it separate from the claim lets the canonical
+// scenario establish begin-validation from completed execution evidence before
+// any claim is recorded (AD-032).
+func recordActivityRunViaHTTP(t *testing.T, handler http.Handler, tick func(), activityKey, method, executionID, evidenceID string) {
 	t.Helper()
 	mustPost(t, handler, "/api/v1/validation/runs", map[string]any{
 		"execution_id": executionID, "plan_artifact_id": scenario.PlanArtifactID, "plan_revision_id": scenario.PlanRevisionID,
@@ -206,6 +208,10 @@ func runActivityViaHTTP(t *testing.T, handler http.Handler, tick func(), activit
 		"evidence_artifact_id": evidenceID, "evidence_revision_id": evidenceID + "-REV-1", "evidence_locator": "https://evidence.example/" + evidenceID,
 	})
 	tick()
+}
+
+func recordActivityClaimViaHTTP(t *testing.T, handler http.Handler, tick func(), activityKey, requirementID, method, executionID, evidenceID, claimID, reasoning string) {
+	t.Helper()
 	mustPost(t, handler, "/api/v1/validation/claims", map[string]any{
 		"claim_id": claimID, "scope_artifact_id": scenario.CapabilityArtifactID,
 		"subject_artifact_id": scenario.CapabilityArtifactID, "subject_revision_id": scenario.CapabilityRevision2,
@@ -215,6 +221,14 @@ func runActivityViaHTTP(t *testing.T, handler http.Handler, tick func(), activit
 		"reasoning": reasoning,
 	})
 	tick()
+}
+
+// runActivityViaHTTP POSTs a validation run and its claim, mirroring
+// internal/scenario.Run's runActivity for every activity after the first.
+func runActivityViaHTTP(t *testing.T, handler http.Handler, tick func(), activityKey, requirementID, method, executionID, evidenceID, claimID, reasoning string) {
+	t.Helper()
+	recordActivityRunViaHTTP(t, handler, tick, activityKey, method, executionID, evidenceID)
+	recordActivityClaimViaHTTP(t, handler, tick, activityKey, requirementID, method, executionID, evidenceID, claimID, reasoning)
 }
 
 // runScenarioThroughHTTP drives the FF-011 canonical "Homework after a
@@ -280,29 +294,12 @@ func runScenarioThroughHTTP(t *testing.T, ctx context.Context, uow application.U
 	})
 	tick()
 
-	// 6. Requirements REQ-1..REQ-4 (FF-011 §5). REQ-4 deliberately gets no
-	// validation activity and no claim.
-	requirementStatements := map[string]string{
-		"REQ-1": "Published homework SHALL be visible to the student of the lesson it belongs to.",
-		"REQ-2": "Published homework SHALL NOT be visible to any user who is not the student of that lesson.",
-		"REQ-3": "Where homework has an audio attachment, that attachment SHALL have a representation the student can resolve.",
-		"REQ-4": "Published homework SHALL become observable to the student within 5 seconds of publication.",
-	}
-	for _, artifactID := range scenario.RequirementArtifactIDs {
-		mustPost(t, handler, "/api/v1/requirements", map[string]any{
-			"artifact_id": artifactID, "revision_id": artifactID + "-REV-1",
-			"acceptance_record_id": "ACC-" + artifactID,
-			"statement":            requirementStatements[artifactID], "subject_artifact_id": scenario.CapabilityArtifactID,
-		})
-		tick()
-	}
-
-	// 7. Decision evidence -- no HTTP command exists for this act; see
+	// 6. Decision evidence -- no HTTP command exists for this act; see
 	// recordEvidenceDirectly's doc comment.
 	recordEvidenceDirectly(t, ctx, uow, rec, clock.Now(), scenario.DecisionEvidenceID, "https://evidence.example/"+scenario.DecisionEvidenceID)
 	tick()
 
-	// 8. The decision, resolving Revision 1's open questions.
+	// 7. The decision, resolving Revision 1's open questions.
 	mustPost(t, handler, "/api/v1/decisions", map[string]any{
 		"decision_id": scenario.DecisionID, "subject_artifact_id": scenario.CapabilityArtifactID,
 		"subject_revision_id": scenario.CapabilityRevision1,
@@ -321,7 +318,7 @@ func runScenarioThroughHTTP(t *testing.T, ctx context.Context, uow application.U
 	})
 	tick()
 
-	// 9. Capability Revision 2, then accept it.
+	// 8. Capability Revision 2, then accept it.
 	mustPost(t, handler, "/api/v1/capabilities/"+scenario.CapabilityArtifactID+"/revisions", map[string]any{
 		"revision_id": scenario.CapabilityRevision2, "content": capabilityRevision2ContentJSON(),
 	})
@@ -331,7 +328,38 @@ func runScenarioThroughHTTP(t *testing.T, ctx context.Context, uow application.U
 	})
 	tick()
 
-	// 10. Validation plan: A-1 (REQ-1), A-2 (REQ-2), A-3 (REQ-3); REQ-4 has none.
+	// 9. Requirements REQ-1..REQ-4 trace exact criteria on the accepted
+	// current CAP-1-REV-2. REQ-4 deliberately gets no validation activity
+	// and no claim.
+	requirementStatements := map[string]string{
+		"REQ-1": "Published homework SHALL be visible to the student of the lesson it belongs to.",
+		"REQ-2": "Published homework SHALL NOT be visible to any user who is not the student of that lesson.",
+		"REQ-3": "Where homework has an audio attachment, that attachment SHALL have a representation the student can resolve.",
+		"REQ-4": "Published homework SHALL become observable to the student within 5 seconds of publication.",
+	}
+	requirementCriteria := map[string]string{"REQ-1": "AC-1", "REQ-2": "AC-2", "REQ-3": "AC-3", "REQ-4": "AC-4"}
+	for _, artifactID := range scenario.RequirementArtifactIDs {
+		mustPost(t, handler, "/api/v1/requirements", map[string]any{
+			"artifact_id": artifactID, "revision_id": artifactID + "-REV-1",
+			"acceptance_record_id":            "ACC-" + artifactID,
+			"source_capability_revision_id":   scenario.CapabilityRevision2,
+			"source_acceptance_criterion_key": requirementCriteria[artifactID],
+			"statement":                       requirementStatements[artifactID], "subject_artifact_id": scenario.CapabilityArtifactID,
+		})
+		tick()
+	}
+
+	// 10. Enter specified only after the accepted current capability revision
+	// and all four traced Requirements exist.
+	mustPost(t, handler, "/api/v1/capabilities/"+scenario.CapabilityArtifactID+"/lifecycle", map[string]any{
+		"assignment_id": scenario.SpecifiedAssignmentID, "state": "specified",
+		"transition_record_artifact_id": scenario.TransitionRecordArtifactID,
+		"transition_record_revision_id": scenario.SpecifyTransitionRevisionID,
+		"transition_key":                "specify", "from_assignment_id": scenario.EntryAssignmentID,
+	})
+	tick()
+
+	// 11. Validation plan: A-1 (REQ-1), A-2 (REQ-2), A-3 (REQ-3); REQ-4 has none.
 	mustPost(t, handler, "/api/v1/validation/plans", map[string]any{
 		"artifact_id": scenario.PlanArtifactID, "revision_id": scenario.PlanRevisionID,
 		"scope_artifact_id":    scenario.CapabilityArtifactID,
@@ -359,22 +387,25 @@ func runScenarioThroughHTTP(t *testing.T, ctx context.Context, uow application.U
 	})
 	tick()
 
-	// 11. Lifecycle: begin validation.
+	// 12. The first execution and its evidence are the product support for
+	// begin-validation. The first claim is deliberately recorded afterwards.
+	recordActivityRunViaHTTP(t, handler, tick, "A-1", "manual-review", "ER-1", "EV-1")
+
 	mustPost(t, handler, "/api/v1/capabilities/"+scenario.CapabilityArtifactID+"/lifecycle", map[string]any{
-		"assignment_id": scenario.FirstAssignmentID, "state": "under-validation",
+		"assignment_id": scenario.UnderValidationAssignmentID, "state": "under-validation",
 		"transition_record_artifact_id": scenario.TransitionRecordArtifactID,
-		"transition_record_revision_id": scenario.FirstTransitionRevisionID,
-		"transition_key":                "begin-validation", "from_assignment_id": scenario.EntryAssignmentID,
+		"transition_record_revision_id": scenario.BeginValidationTransitionRevisionID,
+		"transition_key":                "begin-validation", "from_assignment_id": scenario.SpecifiedAssignmentID,
 	})
 	tick()
 
-	// 12. Execute activities A-1, A-2, A-3, each producing evidence and a
-	// satisfied claim.
-	runActivityViaHTTP(t, handler, tick, "A-1", "REQ-1", "manual-review", "ER-1", "EV-1", scenario.ClaimForR1, "The specification states student visibility explicitly.")
+	recordActivityClaimViaHTTP(t, handler, tick, "A-1", "REQ-1", "manual-review", "ER-1", "EV-1", scenario.ClaimForR1, "The specification states student visibility explicitly.")
+
+	// 13. Execute the remaining activities and record their claims.
 	runActivityViaHTTP(t, handler, tick, "A-2", "REQ-2", "manual-review", "ER-2", "EV-2", scenario.ClaimIncorrect, "The specification states who may view homework.")
 	runActivityViaHTTP(t, handler, tick, "A-3", "REQ-3", "manual-inspection", "ER-3", "EV-3", scenario.ClaimForR3, "The specification names a resolvable representation for the attachment.")
 
-	// 13. Re-run A-2 and correct CLM-2.
+	// 14. Re-run A-2 and correct CLM-2.
 	mustPost(t, handler, "/api/v1/validation/runs", map[string]any{
 		"execution_id": "ER-4", "plan_artifact_id": scenario.PlanArtifactID, "plan_revision_id": scenario.PlanRevisionID,
 		"activity_key": "A-2", "subject_artifact_id": scenario.CapabilityArtifactID, "subject_revision_id": scenario.CapabilityRevision2,
@@ -408,6 +439,9 @@ func TestCanonicalScenarioThroughHTTP(t *testing.T) {
 
 func assertCanonicalScenarioHTTPReplay(t *testing.T, ctx context.Context, gate *replaygate.Gate, rec peos.Recorder, clock *application.FixedClock) {
 	t.Helper()
+	if err := application.EnsureLifecycleConfiguration(ctx, gate, rec, rec); err != nil {
+		t.Fatalf("initializing lifecycle configuration: %v", err)
+	}
 	var first []capturedHTTPResponse
 	handler := runScenarioThroughHTTP(t, ctx, gate, rec, clock, &first)
 	assertCanonicalEndStateThroughHTTP(t, ctx, handler, gate, rec)
@@ -431,8 +465,8 @@ func assertCanonicalScenarioHTTPReplay(t *testing.T, ctx context.Context, gate *
 		}
 		t.Fatalf("HTTP replay response count = %d, want %d", len(replay), len(first))
 	}
-	if len(first) < 12 {
-		t.Fatalf("canonical HTTP trace contains only %d POST responses", len(first))
+	if len(first) != 23 {
+		t.Fatalf("canonical HTTP trace contains %d POST responses, want 23", len(first))
 	}
 	for i, response := range replay {
 		if response.Status != http.StatusCreated {
@@ -677,10 +711,16 @@ func assertCanonicalEndStateThroughHTTP(t *testing.T, ctx context.Context, handl
 				Kind      string `json:"kind"`
 				Corrected string `json:"corrected"`
 			} `json:"dated"`
+			Undated []struct {
+				Kind string `json:"kind"`
+			} `json:"undated"`
 		} `json:"data"`
 	}
 	if rr := getJSON(t, handler, "/api/v1/features/"+scenario.FeatureCardID+"/timeline", &timeline); rr.Code != http.StatusOK {
 		t.Fatalf("Q5: status = %d, want 200", rr.Code)
+	}
+	if len(timeline.Data.Dated) != 29 || len(timeline.Data.Undated) != 0 {
+		t.Errorf("Q5: timeline event counts = %d dated/%d undated, want 29 dated/0 undated", len(timeline.Data.Dated), len(timeline.Data.Undated))
 	}
 	sawCorrection := false
 	for _, ev := range timeline.Data.Dated {
@@ -826,16 +866,17 @@ func assertCanonicalEndStateThroughHTTP(t *testing.T, ctx context.Context, handl
 			clm4.HasCorrection(), clm4.CorrectionTargetID, clm4.CorrectionKind, scenario.ClaimIncorrect, engineering.CorrectionKindCorrect)
 	}
 
-	// 14. Transition-record subject discovery (AD-026): both lifecycle
-	// acts recorded through HTTP -- the entry assignment and the first
-	// transition -- are revisions of RevisionFamilyTransitionRecord
+	// 15. Transition-record subject discovery (AD-026): all three lifecycle
+	// acts recorded through HTTP -- entry, specify, and begin-validation --
+	// are revisions of RevisionFamilyTransitionRecord
 	// projecting CAP-1 as their subject.
 	transitionRecords := queryRepo(t, uow, func(r application.Repositories) ([]engineering.RevisionEnvelope, error) {
 		return r.Revisions.ListByFamilyAndSubject(ctx, engineering.RevisionFamilyTransitionRecord, engineering.ArtifactSubjectKey(scenario.CapabilityArtifactID))
 	})
 	wantTransitionKeys := []string{
 		scenario.TransitionRecordArtifactID + "/" + scenario.EntryTransitionRevisionID,
-		scenario.TransitionRecordArtifactID + "/" + scenario.FirstTransitionRevisionID,
+		scenario.TransitionRecordArtifactID + "/" + scenario.SpecifyTransitionRevisionID,
+		scenario.TransitionRecordArtifactID + "/" + scenario.BeginValidationTransitionRevisionID,
 	}
 	if len(transitionRecords) != len(wantTransitionKeys) {
 		t.Fatalf("transition-record revisions = %v, want exactly %v", transitionRecords, wantTransitionKeys)

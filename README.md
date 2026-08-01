@@ -13,13 +13,18 @@ corrections, and history. It does not implement the capability itself.
 
 ## Status
 
-Phase **M.5 — HTTP API and Minimal UI** and its pre-domain correctness closure
-are implemented. [AD-030](docs/decisions/ad-030-command-idempotency-and-replay-conformance.md)
+Phase **M.5 — HTTP API and Minimal UI** and its command-replay correctness
+closure are implemented. [AD-030](docs/decisions/ad-030-command-idempotency-and-replay-conformance.md)
 records the command-replay and aggregate-integrity correction;
 [FF-022](docs/spec/022-command-replay-and-aggregate-integrity.md) records its
 advancing-clock, zero-write, memory/PostgreSQL and independent-audit evidence.
-The pre-domain block is closed; subsequent work proceeds under its own
-governing scope.
+The final pre-M.6 domain/lifecycle conformance scope is accepted in
+[AD-031](docs/decisions/ad-031-bounded-operational-establishment.md),
+[AD-032](docs/decisions/ad-032-persisted-lifecycle-policy-and-linear-history.md),
+[AD-033](docs/decisions/ad-033-requirement-criterion-trace-is-structured-state.md),
+and [FF-023](docs/spec/023-domain-and-lifecycle-conformance.md). Its
+implementation is in progress; M.6 does not begin until FF-023 records its
+completion evidence.
 
 The M.4 canonical scenario continues to run end to end against a real PEOS
 v1.0.0 SDK on both an in-memory store and PostgreSQL. Historical milestone
@@ -64,6 +69,7 @@ Start with the [product overview](docs/spec/000-product-overview.md).
 | [FF-020 Read-Surface Extension](docs/spec/020-read-surface-extension.md) | How is authoritative engineering content projected for readers? |
 | [FF-021 Phase B Minimal UI](docs/spec/021-ui-phase-b-implementation.md) | How does the no-JavaScript UI reuse the API handler? |
 | [FF-022 Command Replay and Aggregate Integrity](docs/spec/022-command-replay-and-aggregate-integrity.md) | How will all C1–C12 retries and C7/C9 aggregate integrity be proven before domain analysis? |
+| [FF-023 Domain and Lifecycle Conformance](docs/spec/023-domain-and-lifecycle-conformance.md) | How are bounded operational establishment, persisted lifecycle policy, and legal linear history closed before M.6? |
 | [Decision log](docs/decisions/README.md) | What was decided, and why? |
 | [Glossary](docs/glossary.md) | What does this word mean here? |
 

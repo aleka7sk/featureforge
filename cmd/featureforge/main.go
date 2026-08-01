@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -44,6 +45,9 @@ func run(logger *slog.Logger) error {
 	defer closeAdapter()
 
 	recorder := peos.NewRecorder()
+	if err := application.EnsureLifecycleConfiguration(ctx, uow, recorder, recorder); err != nil {
+		return fmt.Errorf("initialize lifecycle configuration: %w", err)
+	}
 	deps := transporthttp.Dependencies{
 		UOW:       uow,
 		Recorder:  recorder,

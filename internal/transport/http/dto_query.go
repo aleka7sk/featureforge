@@ -204,10 +204,13 @@ func mapResolutionRationaleDTO(r application.ResolutionRationale) resolutionRati
 // Statement is decoded from the requirement revision's stored payload
 // (FF-020 §5, FF-001 §3.4).
 type effectiveRequirementDTO struct {
-	ArtifactID string `json:"artifact_id"`
-	RevisionID string `json:"revision_id"`
-	Sequence   int    `json:"sequence"`
-	Statement  string `json:"statement"`
+	ArtifactID                   string `json:"artifact_id"`
+	RevisionID                   string `json:"revision_id"`
+	Sequence                     int    `json:"sequence"`
+	Statement                    string `json:"statement"`
+	SourceCapabilityArtifactID   string `json:"source_capability_artifact_id"`
+	SourceCapabilityRevisionID   string `json:"source_capability_revision_id"`
+	SourceAcceptanceCriterionKey string `json:"source_acceptance_criterion_key"`
 }
 
 // decisionBasisDTO mirrors a decision's full basis (FF-020 §5, FF-001
@@ -341,11 +344,15 @@ type lifecycleRationaleDTO struct {
 // lifecycleStateDTO mirrors application.LifecycleStateResult, projecting
 // the cited engineering.RecordEnvelope's fields directly.
 type lifecycleStateDTO struct {
-	Found        bool       `json:"found"`
-	StateID      string     `json:"state_id,omitempty"`
-	AssignmentID string     `json:"assignment_id,omitempty"`
-	SubjectKey   string     `json:"subject_key,omitempty"`
-	OccurredAt   *time.Time `json:"occurred_at,omitempty"`
+	Found                 bool       `json:"found"`
+	StateID               string     `json:"state_id,omitempty"`
+	AssignmentID          string     `json:"assignment_id,omitempty"`
+	SubjectKey            string     `json:"subject_key,omitempty"`
+	DefinitionID          string     `json:"definition_id,omitempty"`
+	DefinitionVersionID   string     `json:"definition_version_id,omitempty"`
+	EstablishedByArtifact string     `json:"established_by_artifact_id,omitempty"`
+	EstablishedByRevision string     `json:"established_by_revision_id,omitempty"`
+	OccurredAt            *time.Time `json:"occurred_at,omitempty"`
 }
 
 func mapLifecycleStateDTO(l application.LifecycleStateResult) lifecycleStateDTO {
@@ -354,6 +361,8 @@ func mapLifecycleStateDTO(l application.LifecycleStateResult) lifecycleStateDTO 
 	}
 	dto := lifecycleStateDTO{
 		Found: true, StateID: l.Assignment.StateID, AssignmentID: l.Assignment.Key.ID, SubjectKey: l.Assignment.SubjectKey,
+		DefinitionID: l.DefinitionID, DefinitionVersionID: l.DefinitionVersionID,
+		EstablishedByArtifact: l.EstablishedBy.ArtifactID, EstablishedByRevision: l.EstablishedBy.RevisionID,
 	}
 	if l.Assignment.HasOccurredAt {
 		t := l.Assignment.OccurredAt
@@ -436,6 +445,9 @@ func mapEngineeringStateDTO(s application.EngineeringStateResult) (engineeringSt
 	for _, req := range s.EffectiveRequirements {
 		data.EffectiveRequirements = append(data.EffectiveRequirements, effectiveRequirementDTO{
 			ArtifactID: req.ArtifactID, RevisionID: req.RevisionKey.RevisionID, Sequence: req.Sequence, Statement: req.Statement,
+			SourceCapabilityArtifactID:   req.SourceCapabilityRevision.ArtifactID,
+			SourceCapabilityRevisionID:   req.SourceCapabilityRevision.RevisionID,
+			SourceAcceptanceCriterionKey: req.SourceAcceptanceCriterion,
 		})
 	}
 	for _, dec := range s.ApplicableDecisions {

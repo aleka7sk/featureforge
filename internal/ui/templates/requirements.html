@@ -15,7 +15,7 @@
       {{if .Readiness.HasClaim}}{{template "status-badge" .Readiness.Outcome}}{{else}}{{template "status-badge" "no-claim"}}{{end}}
     </h2>
     <p>{{.Statement}}</p>
-    <p class="hint">Revision {{.RevisionID}}{{if .Readiness.CriterionKeys}} · criterion {{index .Readiness.CriterionKeys 0}}{{end}}</p>
+    <p class="hint">Revision {{.RevisionID}} · source {{.SourceCapabilityArtifactID}}/{{.SourceCapabilityRevisionID}}#{{.SourceAcceptanceCriterionKey}}{{if .Readiness.CriterionKeys}} · claim criterion {{index .Readiness.CriterionKeys 0}}{{end}}</p>
     {{if .Readiness.HasClaim}}
       <p><strong>Current claim:</strong> {{.Readiness.ClaimID}}</p>
       {{template "rationale" .Readiness.VerdictReason}}
@@ -43,6 +43,14 @@
       <div class="field">
         <label for="acceptance_record_id">Acceptance record ID</label>
         <input type="text" id="acceptance_record_id" name="acceptance_record_id" value="{{index .FormValues "acceptance_record_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="source_capability_revision_id">Source capability revision ID</label>
+        <input type="text" id="source_capability_revision_id" name="source_capability_revision_id" value="{{if index .FormValues "source_capability_revision_id"}}{{index .FormValues "source_capability_revision_id"}}{{else}}{{.SourceCapabilityRevisionID}}{{end}}" readonly required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="source_acceptance_criterion_key">Source acceptance criterion key</label>
+        <input type="text" id="source_acceptance_criterion_key" name="source_acceptance_criterion_key" value="{{index .FormValues "source_acceptance_criterion_key"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
       </div>
       <div class="field">
         <label for="statement">Statement</label>

@@ -23,6 +23,7 @@ func seedReadSurfaceFixture(t *testing.T, f commandFixture) {
 	if _, err := (application.EstablishRequirementCommand{
 		ArtifactID: "REQ-1", RevisionID: "REQ-1-REV-1",
 		Statement: "Published homework SHALL be visible to the student.", SubjectArtifactID: "CAP-1",
+		SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
 		AcceptanceRecordID: memberID("MEM-REQ-1"),
 	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatalf("EstablishRequirement: %v", err)
@@ -259,8 +260,8 @@ func TestGetFeatureEngineeringStateForCard_UndecodablePayload(t *testing.T) {
 	}
 
 	_, err := application.GetFeatureEngineeringStateForCard(context.Background(), f.uow, f.rec, f.rec, mustFeatureCardID(t, "FC-1"))
-	if !errors.Is(err, application.ErrStoredPayloadUnreadable) {
-		t.Fatalf("err = %v, want errors.Is(err, ErrStoredPayloadUnreadable)", err)
+	if !errors.Is(err, application.ErrStoredStateIntegrity) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrStoredStateIntegrity)", err)
 	}
 }
 

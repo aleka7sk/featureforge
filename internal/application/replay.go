@@ -217,6 +217,20 @@ func validateManagedHistory(ctx context.Context, r Repositories, inspector Engin
 				return 0, integrityError("non-capability revision has unexpected structured content", nil)
 			}
 		}
+		trace, traceFound, err := r.RequirementTraces.Get(ctx, revision.Key)
+		if err != nil {
+			return 0, err
+		}
+		if family == engineering.RevisionFamilyRequirement {
+			if !traceFound {
+				return 0, integrityError("requirement revision has no criterion trace", nil)
+			}
+			if err := validateRequirementCriterionTrace(ctx, r, inspector, revision, order, trace); err != nil {
+				return 0, err
+			}
+		} else if traceFound || !trace.IsZero() {
+			return 0, integrityError("non-requirement revision has unexpected criterion trace", nil)
+		}
 		journal, err := r.RevisionAcceptance.ListByRevision(ctx, revision.Key)
 		if err != nil {
 			return 0, err
@@ -257,6 +271,72 @@ func validateManagedHistory(ctx context.Context, r Repositories, inspector Engin
 		return 0, err
 	}
 	return len(revisions), nil
+}
+
+// validateRequirementCriterionTrace proves the product-owned trace member of
+// one persisted C7 act. It deliberately validates an exact historical source,
+// not whether that source remains current after later capability revisions.
+func validateRequirementCriterionTrace(ctx context.Context, r Repositories, inspector EngineeringReplayInspector, revision engineering.RevisionEnvelope, order engineering.RevisionOrderMetadata, trace engineering.RequirementCriterionTrace) error {
+	if trace.RequirementRevision != revision.Key {
+		return integrityError("requirement criterion trace identity disagrees with its revision", nil)
+	}
+	if !canonicalTimeEqual(trace.RecordedAt, revision.RecordedAt) || !canonicalTimeEqual(trace.RecordedAt, order.RecordedAt) {
+		return integrityError("requirement criterion trace disagrees on recorded time", nil)
+	}
+	kind, subjectArtifactID, _, err := engineering.ParseSubjectKey(revision.SubjectKey)
+	if err != nil || kind != engineering.SubjectKindArtifact {
+		return integrityError("requirement criterion trace has an invalid requirement subject", err)
+	}
+	if trace.CapabilityRevision.ArtifactID != subjectArtifactID {
+		return integrityError("requirement criterion trace names a capability outside the requirement subject", nil)
+	}
+	source, found, err := r.Revisions.Get(ctx, trace.CapabilityRevision)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return integrityError("requirement criterion trace source revision is dangling", nil)
+	}
+	if err := inspectRevision(inspector, source); err != nil {
+		return err
+	}
+	if source.RevisionFamily != engineering.RevisionFamilyCapability {
+		return integrityError("requirement criterion trace source names another revision family", nil)
+	}
+	if _, err := validateManagedHistory(ctx, r, inspector, source.Key.ArtifactID, engineering.RevisionFamilyCapability, false); err != nil {
+		return err
+	}
+	content, found, err := r.StructuredContent.Get(ctx, source.Key)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return integrityError("requirement criterion trace source has no structured content", nil)
+	}
+	if err := inspector.ValidateCapabilityContent(source, content); err != nil {
+		return integrityError("requirement criterion trace source content is invalid", err)
+	}
+	if !capabilityContentHasCriterion(content, trace.AcceptanceCriterionKey) {
+		return integrityError("requirement criterion trace names a missing acceptance criterion", nil)
+	}
+	journal, err := r.RevisionAcceptance.ListByRevision(ctx, source.Key)
+	if err != nil {
+		return err
+	}
+	if _, err := semanticAcceptanceMember(source.Key, journal); err != nil {
+		return integrityError("requirement criterion trace source was never an accepted capability revision", err)
+	}
+	return nil
+}
+
+func capabilityContentHasCriterion(content engineering.CapabilitySpecificationContent, key string) bool {
+	count := 0
+	for _, criterion := range content.AcceptanceCriteria() {
+		if criterion.Key() == key {
+			count++
+		}
+	}
+	return count == 1
 }
 
 // validateRequestedManagedSubject is called only after validateManagedHistory
@@ -440,7 +520,7 @@ func validateStateAssignmentActFrom(ctx context.Context, r Repositories, inspect
 	if parent.SubjectKey != assignment.SubjectKey {
 		return integrityError("transition revision and assignment name different lifecycle subjects", nil)
 	}
-	assignments, err := r.Records.ListByKind(ctx, engineering.RecordKindStateAssignment)
+	assignments, err := listValidatedRecordsByKind(ctx, r, inspector, engineering.RecordKindStateAssignment)
 	if err != nil {
 		return err
 	}
@@ -602,7 +682,7 @@ func validateForeignArtifactOccupancy(ctx context.Context, r Repositories, inspe
 		if len(revisions) == 0 {
 			return integrityError("foreign transition artifact has no revisions", nil)
 		}
-		assignments, lookupErr := r.Records.ListByKind(ctx, engineering.RecordKindStateAssignment)
+		assignments, lookupErr := listValidatedRecordsByKind(ctx, r, inspector, engineering.RecordKindStateAssignment)
 		if lookupErr != nil {
 			return lookupErr
 		}
@@ -686,6 +766,11 @@ func validateUnmanagedRevisionMetadata(ctx context.Context, r Repositories, key 
 	if len(journal) != 0 {
 		return integrityError("unmanaged revision has an unexpected acceptance journal", nil)
 	}
+	if trace, found, err := r.RequirementTraces.Get(ctx, key); err != nil {
+		return err
+	} else if found || !trace.IsZero() {
+		return integrityError("unmanaged revision has an unexpected requirement criterion trace", nil)
+	}
 	return nil
 }
 
@@ -734,7 +819,7 @@ func validateNoExecutionEvidenceOwners(ctx context.Context, r Repositories, insp
 }
 
 func stateAssignmentParentOwnersByArtifact(ctx context.Context, r Repositories, inspector EngineeringReplayInspector, artifactID string) ([]engineering.RecordEnvelope, error) {
-	assignments, err := r.Records.ListByKind(ctx, engineering.RecordKindStateAssignment)
+	assignments, err := listValidatedRecordsByKind(ctx, r, inspector, engineering.RecordKindStateAssignment)
 	if err != nil {
 		return nil, err
 	}
@@ -1119,7 +1204,7 @@ func validateClaimChainIntegrity(ctx context.Context, r Repositories, inspector 
 	// correction whose payload belongs to this chain but whose SubjectKey was
 	// shifted would otherwise be omitted and could let another correction be
 	// written beside an invalid authoritative chain.
-	claims, err := r.Records.ListByKind(ctx, engineering.RecordKindClaim)
+	claims, err := listValidatedRecordsByKind(ctx, r, inspector, engineering.RecordKindClaim)
 	if err != nil {
 		return err
 	}
@@ -1134,7 +1219,7 @@ func validateClaimChainIntegrity(ctx context.Context, r Repositories, inspector 
 			return err
 		}
 	}
-	if _, err := ResolveCurrentClaim(ctx, r, claim.SubjectKey, claim.Scope, claim.CriterionKeys); err != nil && !errors.Is(err, ErrCorrectionAmbiguous) {
+	if _, err := ResolveCurrentClaim(ctx, r, inspector, claim.SubjectKey, claim.Scope, claim.CriterionKeys); err != nil && !errors.Is(err, ErrCorrectionAmbiguous) {
 		return integrityError("claim correction chain is invalid", err)
 	}
 	return nil

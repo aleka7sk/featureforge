@@ -13,18 +13,21 @@ import (
 	"github.com/aleka7sk/featureforge/internal/engineering"
 )
 
-// state holds every collection the store persists. Eight collections, each
-// keyed by its typed key (FF-009 §7).
+// state holds every collection the store persists, keyed by its typed key
+// (FF-009 §7).
 type state struct {
 	projects        map[domain.ProjectID]domain.Project
 	featureCards    map[domain.FeatureCardID]domain.FeatureCard
 	capabilityLinks map[domain.FeatureCardID]string
 
-	artifacts map[engineering.ArtifactKey]engineering.ArtifactEnvelope
-	revisions map[engineering.RevisionKey]engineering.RevisionEnvelope
-	content   map[engineering.RevisionKey]engineering.CapabilitySpecificationContent
-	records   map[engineering.RecordKey]engineering.RecordEnvelope
-	order     map[engineering.RevisionKey]engineering.RevisionOrderMetadata
+	artifacts            map[engineering.ArtifactKey]engineering.ArtifactEnvelope
+	revisions            map[engineering.RevisionKey]engineering.RevisionEnvelope
+	content              map[engineering.RevisionKey]engineering.CapabilitySpecificationContent
+	records              map[engineering.RecordKey]engineering.RecordEnvelope
+	order                map[engineering.RevisionKey]engineering.RevisionOrderMetadata
+	traces               map[engineering.RevisionKey]engineering.RequirementCriterionTrace
+	lifecycleDefinitions map[string]engineering.LifecycleDefinitionEnvelope
+	lifecycleVersions    map[engineering.LifecycleDefinitionVersionKey]engineering.LifecycleDefinitionVersionEnvelope
 	// acceptance is append-only per revision; order within a slice is
 	// insertion order, which callers must not rely on -- ListByRevision
 	// and ListByArtifact sort by (EffectiveAt, RecordID) explicitly.
@@ -33,15 +36,18 @@ type state struct {
 
 func newState() *state {
 	return &state{
-		projects:        make(map[domain.ProjectID]domain.Project),
-		featureCards:    make(map[domain.FeatureCardID]domain.FeatureCard),
-		capabilityLinks: make(map[domain.FeatureCardID]string),
-		artifacts:       make(map[engineering.ArtifactKey]engineering.ArtifactEnvelope),
-		revisions:       make(map[engineering.RevisionKey]engineering.RevisionEnvelope),
-		content:         make(map[engineering.RevisionKey]engineering.CapabilitySpecificationContent),
-		records:         make(map[engineering.RecordKey]engineering.RecordEnvelope),
-		order:           make(map[engineering.RevisionKey]engineering.RevisionOrderMetadata),
-		acceptance:      make(map[engineering.RevisionKey][]engineering.RevisionAcceptanceRecord),
+		projects:             make(map[domain.ProjectID]domain.Project),
+		featureCards:         make(map[domain.FeatureCardID]domain.FeatureCard),
+		capabilityLinks:      make(map[domain.FeatureCardID]string),
+		artifacts:            make(map[engineering.ArtifactKey]engineering.ArtifactEnvelope),
+		revisions:            make(map[engineering.RevisionKey]engineering.RevisionEnvelope),
+		content:              make(map[engineering.RevisionKey]engineering.CapabilitySpecificationContent),
+		records:              make(map[engineering.RecordKey]engineering.RecordEnvelope),
+		order:                make(map[engineering.RevisionKey]engineering.RevisionOrderMetadata),
+		traces:               make(map[engineering.RevisionKey]engineering.RequirementCriterionTrace),
+		lifecycleDefinitions: make(map[string]engineering.LifecycleDefinitionEnvelope),
+		lifecycleVersions:    make(map[engineering.LifecycleDefinitionVersionKey]engineering.LifecycleDefinitionVersionEnvelope),
+		acceptance:           make(map[engineering.RevisionKey][]engineering.RevisionAcceptanceRecord),
 	}
 }
 

@@ -67,9 +67,12 @@ type apiResolutionRationaleDTO struct {
 }
 
 type apiEffectiveRequirementDTO struct {
-	ArtifactID string `json:"artifact_id"`
-	RevisionID string `json:"revision_id"`
-	Statement  string `json:"statement"`
+	ArtifactID                   string `json:"artifact_id"`
+	RevisionID                   string `json:"revision_id"`
+	Statement                    string `json:"statement"`
+	SourceCapabilityArtifactID   string `json:"source_capability_artifact_id"`
+	SourceCapabilityRevisionID   string `json:"source_capability_revision_id"`
+	SourceAcceptanceCriterionKey string `json:"source_acceptance_criterion_key"`
 }
 
 type apiDecisionBasisDTO struct {
@@ -122,9 +125,13 @@ type apiLifecycleRationaleDTO struct {
 }
 
 type apiLifecycleStateDTO struct {
-	Found      bool       `json:"found"`
-	StateID    string     `json:"state_id"`
-	OccurredAt *time.Time `json:"occurred_at"`
+	Found                 bool       `json:"found"`
+	StateID               string     `json:"state_id"`
+	DefinitionID          string     `json:"definition_id"`
+	DefinitionVersionID   string     `json:"definition_version_id"`
+	EstablishedByArtifact string     `json:"established_by_artifact_id"`
+	EstablishedByRevision string     `json:"established_by_revision_id"`
+	OccurredAt            *time.Time `json:"occurred_at"`
 }
 
 type apiPlanActivityDetailDTO struct {

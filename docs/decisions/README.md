@@ -756,7 +756,8 @@ Phase: M.5 (Phase A)
 **Context.** FF-010 §3 decomposed the application layer into commands named
 for engineering acts, with no `Update*`, no `Delete*`, and no generic
 `RecordEngineeringAct`. A resource-CRUD HTTP surface would have to invent
-`PUT`/`DELETE` semantics for values that are immutable by construction, and
+`PUT`/`DELETE` semantics for immutable engineering values and for the bounded
+stable-establishment surface later made explicit by AD-031, and
 would flatten twelve distinct engineering acts into four verbs.
 
 **Decision.** The public HTTP surface is intent-oriented: one endpoint per
@@ -1395,6 +1396,67 @@ history fails integrity. Subject projection only enumerates Q3/Q4/Q5 candidates;
 the application inspector validates each complete history before use.
 Implementation and completion evidence are governed by
 [FF-022](../spec/022-command-replay-and-aggregate-integrity.md).
+
+---
+
+## AD-031 — Operational establishment is stable only within the bounded POC
+
+Status: Accepted
+Date: 2026-08-01
+Phase: post-M.5 domain closure before M.6
+
+Recorded in
+[ad-031-bounded-operational-establishment.md](ad-031-bounded-operational-establishment.md).
+
+Project and FeatureCard remain operational rather than PEOS engineering
+records, but FeatureForge deliberately exposes no generic edit command. Their
+establishment fields are stable for this POC; the only operational change is
+the one-time, monotonic FeatureCard-to-capability link. That link is not part of
+base FeatureCard `Put` equality, and both adapters must behave identically
+before and after it is established. Belcanto must make its own mutability,
+concurrency, audit, and replay decision instead of inheriting this POC
+narrowing.
+
+---
+
+## AD-032 — Lifecycle policy is persisted and current state is the unique linear head
+
+Status: Accepted
+Date: 2026-08-01
+Phase: post-M.5 lifecycle closure before M.6
+
+Recorded in
+[ad-032-persisted-lifecycle-policy-and-linear-history.md](ad-032-persisted-lifecycle-policy-and-linear-history.md).
+
+FeatureForge now persists its fixed PEOS Lifecycle Definition and Definition
+Version through dedicated PEOS-free carriers initialized before serving. C6,
+Q4 and Q5 validate one complete linear assignment/transition history against
+that stored policy. Current state is the unique graph head; a new transition
+must depart from it and follow the configured source/target edge. Invalid new
+transitions are `422`, stale-head concurrency is `409`, and invalid stored
+policy or history is opaque `500`. The canonical scenario gains the missing
+`specified` state before `under-validation`. Integrity-sensitive discovery
+enumerates every Revision and Record envelope, validates it, and only then
+filters by family, kind or subject, so a contradictory projection cannot hide a
+corrupt lifecycle or Q3/Q4/Q5 member.
+
+---
+
+## AD-033 — Requirement-to-criterion trace is structured product-owned state
+
+Status: Accepted
+Date: 2026-08-01
+Phase: pre-M.6 traceability closure
+
+Recorded in
+[ad-033-requirement-criterion-trace-is-structured-state.md](ad-033-requirement-criterion-trace-is-structured-state.md).
+
+Every Requirement Revision gains an immutable FeatureForge-owned trace to one
+exact capability Revision and revision-local acceptance-criterion key. It is a
+required C7 aggregate member, not a parsed Origin note or a misused PEOS
+Requirement Derivation. This makes Requirements UI traceability and M.6's
+uncovered-criterion computation honest. The canonical four Requirements map to
+Revision 2's AC-1..AC-4; AC-4 is uncovered because REQ-4 has no current Claim.
 
 ---
 

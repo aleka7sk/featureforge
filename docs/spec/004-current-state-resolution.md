@@ -100,8 +100,9 @@ lifecycle inside an ad-hoc boolean.
 | `accepted` | Authoritative if it has the greatest sequence among accepted revisions |
 | `withdrawn` | Recorded, inspectable, permanently not authoritative |
 
-Acceptance is the single permitted product-owned mutable transition in the
-system. It is constrained:
+Acceptance is the single permitted product-owned revision-acceptance
+engineering-state transition. AD-031's one-time FeatureCard capability link is
+a separate operational transition. Acceptance is constrained:
 
 - permitted transitions are `draft → accepted`, `draft → withdrawn`, and
   `accepted → withdrawn`;
@@ -194,11 +195,11 @@ as an Extension payload, not as a new revision.
 
 | | |
 |---|---|
-| Source | `requirement.Requirement` and `requirement.Revision` values linked to the capability |
-| Policy | For each Requirement Artifact, its current revision by the same ordering contract; a Requirement whose current revision is withdrawn is excluded |
-| Ambiguity | Any requirement failing resolution fails the whole query, naming it — a partial requirement set would silently understate what must be satisfied |
-| Output | Ordered list of requirement revision references and statements, ordered by requirement artifact ID |
-| Rationale | Per requirement: which revision was chosen and why; plus the list excluded as withdrawn |
+| Source | `requirement.Requirement`, `requirement.Revision`, and the required FeatureForge `RequirementCriterionTrace` for each Requirement revision linked to the capability |
+| Policy | For each Requirement Artifact, select its current revision by the same ordering contract and validate that revision's exact stored capability-revision/criterion trace. A later capability revision or later withdrawal of the traced source does not by itself invalidate a complete historical C7 act. A Requirement whose own current revision is withdrawn is excluded. Trace-to-exact-current matching is a separate coverage/lifecycle-precondition question, not an effective-set filter. |
+| Ambiguity | Any requirement failing resolution, or any missing, unreadable, contradictory, or dangling trace/source, fails the whole query. Persisted trace integrity is an opaque `500`; a partial requirement set would silently understate what must be satisfied. |
+| Output | Ordered list of requirement revision references, statements, and exact source capability revision/criterion keys, ordered by requirement artifact ID |
+| Rationale | Per requirement: which revision was chosen, why, and its exact criterion source; plus the list excluded as withdrawn |
 
 ### 3.3 Applicable decision
 
@@ -251,13 +252,15 @@ the answer is `inconclusive` — not "not yet satisfied".
 | | |
 |---|---|
 | Source | `lifecycle.StateAssignment` values whose subject is the capability Artifact |
-| Policy | The assignment with the greatest `EffectiveAt`; ties broken by State Assignment ID, which is total |
-| Ambiguity | Two assignments with equal `EffectiveAt` and different states → error `ErrAmbiguousLifecycleState`, naming both. The ID tie-break applies only where the state is identical, which is a harmless duplicate. |
-| Output | State ID, effective-at, definition version reference, establishing transition record revision |
-| Rationale | "3 assignments; selected the one effective 2026-03-04, established by transition record revision TRR-2." |
+| Policy | AD-032's full-history resolver validates the persisted Definition/Version and one linear predecessor graph; current state is its unique head |
+| Ambiguity | A branch, cycle, second entry, disconnected node, illegal stored edge, wrong definition version, or dangling reference is stored-state integrity failure; no tie-break guesses |
+| Output | State and assignment IDs, effective-at, exact Definition/Version IDs, and establishing transition record revision |
+| Rationale | "3 assignments form one validated chain; selected unique head SA-3, established by TR-1/TR-1-REV-2 under LCD-1/LCDV-1." |
 
-Assignments from a different Definition Version than the configured one are an
-error, not silently accepted — the POC has exactly one Definition Version.
+Assignments from a different Definition Version than the persisted configured
+one are an opaque integrity error, not silently accepted — the POC has exactly
+one Definition Version. The former greatest-`EffectiveAt`/same-state-tie rule is
+superseded by AD-032; exact replay cannot create a second assignment node.
 
 ### 3.6 Release readiness
 
@@ -311,9 +314,9 @@ Defined in [FF-006](006-timeline-read-model.md).
 | Query | Source | Materialized? | Fails explicitly on |
 |---|---|---|---|
 | Current capability revision | Sequence + revisions | No | Duplicate sequence, missing content, digest mismatch |
-| Effective requirements | Requirement revisions | No | Any unresolvable requirement |
+| Effective requirements | Requirement revisions + required exact Requirement Criterion Traces and their source capability revisions/criteria | No | Any unresolvable requirement or missing, dangling, unreadable, or contradictory trace/source |
 | Applicable decision | Decisions | No | — (unordered decisions are flagged, not fatal) |
 | Latest non-corrected claim | Claims + corrections | No | Two uncorrected claims, dangling correction, cycle |
-| Current lifecycle state | State assignments | No | Equal-timestamp conflict, unknown definition version |
+| Current lifecycle state | Persisted lifecycle policy + complete assignment/transition predecessor graph | No | Missing/corrupt configuration, illegal edge, branch, cycle, or dangling reference |
 | Release readiness | Composition of the above | No | Inherits every failure above |
 | Timeline | All records | No | Unresolvable reference |

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/aleka7sk/featureforge/internal/application"
 	"github.com/aleka7sk/featureforge/internal/engineering"
@@ -67,43 +68,54 @@ func staticCorrectionCommand() application.CorrectValidationClaimCommand {
 	}
 }
 
-func TestC6StaticValidationRejectsInvalidStateAndTransition(t *testing.T) {
+func TestC6ConfiguredPolicyRejectsInvalidStateAndTransitionWithoutWrites(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("invalid state vocabulary", func(t *testing.T) {
+	t.Run("unknown entry state", func(t *testing.T) {
 		f := newCommandFixture()
+		seedCapability(t, f)
 		cmd := application.AssignLifecycleStateCommand{
 			AssignmentID: "SA-STATIC", SubjectArtifactID: "CAP-STATIC", State: "unknown-state", IsEntry: true,
 			TransitionRecordArtifactID: "TR-STATIC", TransitionRecordRevisionID: "TR-STATIC-REV-0",
 		}
-		assertInvalidCommandWithoutWrites(t, f, func() (application.AssignLifecycleStateResult, error) {
-			return cmd.Execute(ctx, f.uow, f.rec, f.rec, f.clock)
-		})
+		cmd.SubjectArtifactID = "CAP-1"
+		release := forbidPersistenceWrites(f)
+		defer release()
+		if _, err := cmd.Execute(ctx, f.uow, f.rec, f.rec, f.clock); !errors.Is(err, application.ErrLifecycleTransitionInvalid) {
+			t.Fatalf("err = %v, want config-driven ErrLifecycleTransitionInvalid", err)
+		}
 	})
 
-	t.Run("invalid transition vocabulary", func(t *testing.T) {
-		f := newCommandFixture()
-		cmd := application.AssignLifecycleStateCommand{
-			AssignmentID: "SA-STATIC", SubjectArtifactID: "CAP-STATIC", State: "specified",
-			TransitionRecordArtifactID: "TR-STATIC", TransitionRecordRevisionID: "TR-STATIC-REV-1",
-			TransitionKey: "unknown-transition", FromAssignmentID: "SA-STATIC-PREVIOUS",
-		}
-		assertInvalidCommandWithoutWrites(t, f, func() (application.AssignLifecycleStateResult, error) {
-			return cmd.Execute(ctx, f.uow, f.rec, f.rec, f.clock)
+	for name, tc := range map[string]struct {
+		transitionKey string
+		state         string
+	}{
+		"unknown transition": {transitionKey: "unknown-transition", state: "specified"},
+		"target mismatch":    {transitionKey: "specify", state: "under-validation"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newCommandFixture()
+			seedCapability(t, f)
+			entry := application.AssignLifecycleStateCommand{
+				AssignmentID: "SA-STATIC-PREVIOUS", SubjectArtifactID: "CAP-1", State: "drafting", IsEntry: true,
+				TransitionRecordArtifactID: "TR-STATIC", TransitionRecordRevisionID: "TR-STATIC-REV-0",
+			}
+			if _, err := entry.Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
+				t.Fatal(err)
+			}
+			f.clock.Advance(time.Hour)
+			cmd := application.AssignLifecycleStateCommand{
+				AssignmentID: "SA-STATIC", SubjectArtifactID: "CAP-1", State: tc.state,
+				TransitionRecordArtifactID: "TR-STATIC", TransitionRecordRevisionID: "TR-STATIC-REV-1",
+				TransitionKey: tc.transitionKey, FromAssignmentID: entry.AssignmentID,
+			}
+			release := forbidPersistenceWrites(f)
+			defer release()
+			if _, err := cmd.Execute(ctx, f.uow, f.rec, f.rec, f.clock); !errors.Is(err, application.ErrLifecycleTransitionInvalid) {
+				t.Fatalf("err = %v, want config-driven ErrLifecycleTransitionInvalid", err)
+			}
 		})
-	})
-
-	t.Run("transition target mismatch", func(t *testing.T) {
-		f := newCommandFixture()
-		cmd := application.AssignLifecycleStateCommand{
-			AssignmentID: "SA-STATIC", SubjectArtifactID: "CAP-STATIC", State: "under-validation",
-			TransitionRecordArtifactID: "TR-STATIC", TransitionRecordRevisionID: "TR-STATIC-REV-1",
-			TransitionKey: "specify", FromAssignmentID: "SA-STATIC-PREVIOUS",
-		}
-		assertInvalidCommandWithoutWrites(t, f, func() (application.AssignLifecycleStateResult, error) {
-			return cmd.Execute(ctx, f.uow, f.rec, f.rec, f.clock)
-		})
-	})
+	}
 }
 
 func TestOptionalWhitespaceIsRejectedBeforeStoredStateInspection(t *testing.T) {

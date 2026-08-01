@@ -52,7 +52,11 @@ that candidate, allocating sequence, rebuilding a payload, or re-validating a
 journal transition as new. The idempotency and conflict tests above use an
 advancing clock and assert zero writes over the complete store. New C7 and C9
 acts also carry caller-owned `acceptance_record_id`; C7 alone permits omission
-when it recovers a complete existing act and creates nothing.
+when it recovers a complete existing act and creates nothing. AD-033 further
+requires new C7 acts to carry `source_capability_revision_id` and
+`source_acceptance_criterion_key`; exact trace mismatch is replay conflict,
+while a missing/stale source or absent criterion on a genuinely new act is
+`ErrReferencedValueMissing`.
 
 ## 2. Time strategy
 
@@ -93,7 +97,7 @@ algorithm. No algorithm resolves a tie by "whichever we saw first".
 
 ## 3. Commands
 
-Ten commands and two queries. Names follow the intent-oriented form; where they
+Twelve commands and two queries. Names follow the intent-oriented form; where they
 differ from M.1's use-case list the rename is noted.
 
 | Command | M.1 name | Engineering act |
@@ -103,7 +107,7 @@ differ from M.1's use-case list the rename is noted.
 | `EstablishCapabilitySpecification` | `CreateCapabilitySpecification` | Artifact + founding revision + content + order metadata + card link |
 | `ReviseCapabilitySpecification` | `CreateCapabilityRevision` | Revision + content + order metadata |
 | `AcceptCapabilityRevision` | `AcceptCapabilityRevision` | Acceptance journal entry |
-| `EstablishRequirement` | `AddRequirement` | Requirement artifact + revision + order metadata + acceptance entry (AD-019) |
+| `EstablishRequirement` | `AddRequirement` | Requirement artifact + revision + order metadata + acceptance entry (AD-019) + exact RequirementCriterionTrace (AD-033) |
 | `RecordArchitectureDecision` | `RecordDecision` | Decision + basis |
 | `EstablishValidationPlan` | `CreateValidationPlan` | Plan artifact + plan revision + order metadata + immediate accepted caller-owned member |
 | `RecordValidationRun` | `RecordValidationExecution` | Evidence artifact + revision, then execution record |
@@ -111,8 +115,9 @@ differ from M.1's use-case list the rename is noted.
 | `CorrectValidationClaim` | `CorrectClaim` | Claim carrying a correction reference |
 | `AssignLifecycleState` | `AssignLifecycleState` | Transition record revision + state assignment |
 
-**AD-030 act-table correction.** C7's complete act includes its
-caller-identified semantic acceptance member. C9's newly selected complete act
+**AD-030/AD-033 act-table correction.** C7's complete act includes its
+caller-identified semantic acceptance member and an exact caller-named source
+capability Revision/criterion trace. C9's newly selected complete act
 is Plan Artifact + Plan Revision + order metadata + immediate accepted,
 caller-identified member. C10's identity set includes both `execution_id` and
 the Evidence Artifact/revision pair it creates. The full C1–C12 occupancy and
@@ -130,8 +135,10 @@ resolution, and M.1 requires lifecycle state resolution and a lifecycle timeline
 event. Without them, objectives 15 and 19 of the M.3 objective list are
 unreachable.
 
-**Not created:** no command per repository method, no `Update*`, no `Delete*`, no
-generic `RecordEngineeringAct`.
+**Not created:** no command per repository method, no generic
+`RecordEngineeringAct`, and no `Update*`/`Delete*` surface. The last constraint
+is AD-031's bounded POC choice for stable Project/FeatureCard establishment,
+not a universal rule for operational domains that Belcanto should inherit.
 
 ### Common command shape
 
@@ -373,28 +380,31 @@ every rejected or superseded claim with a reason, and the verdict reason.
 
 Four states, in the `featureforge` namespace:
 
-| State | Meaning |
+| State | Entry milestone proved when its transition completed |
 |---|---|
 | `drafting` | The capability exists; specification work is under way |
-| `specified` | An accepted revision and at least one requirement exist |
-| `under-validation` | A validation plan exists and execution has begun |
-| `assessed` | Validation has been executed and assessed |
+| `specified` | The then-current capability revision was accepted and at least one effective Requirement was traced to that exact revision |
+| `under-validation` | A current accepted plan and at least one completed execution of its exact activity against the same capability revision were proven |
+| `assessed` | Every effective Requirement then in scope had an applicable current Claim; outcomes could remain negative or inconclusive |
 
 **`assessed` replaces M.1's `validated`.** M.1 defined `validated` as "a satisfied
 claim stands", which is release readiness wearing a lifecycle costume — the exact
 duplication this phase was told to prevent. `assessed` means the assessment
 happened; it says nothing about the outcome.
 
-**A capability can be `assessed` and still `not-ready`.** That is precisely the
-end state of the canonical scenario, and a test asserts the pair. Recorded as
-**AD-018**.
+**A capability can be `assessed` and still `not-ready`.** Negative assessment
+outcomes are permitted. The canonical scenario deliberately stops earlier at
+`under-validation` because R-4 has no Claim; focused tests assert the separate
+`assessed` + `not-ready` case. Recorded as **AD-018**, clarified by AD-032.
 
 ### Structure
 
-One `lifecycle.Definition`, one `DefinitionVersion`, fixed as configuration and
-recorded once. Subject: the capability **Artifact**. No Guard, Effect, or Trigger
-expressions — PEOS defers the expression language and FeatureForge does not
-invent one. This is what keeps a workflow engine out of the project.
+One `lifecycle.Definition`, one `DefinitionVersion`, fixed as persisted
+configuration and recorded once. Subject: the capability **Artifact**. No
+generic Guard, Effect, or Trigger expression language is invented. AD-032
+instead defines three deterministic product preconditions over existing
+FeatureForge queries, checked atomically before a genuinely new transition
+completes. They are entry milestones, not reconstructed historical snapshots.
 
 ### The entry-transition problem, and its resolution
 
@@ -426,19 +436,19 @@ M.7. **No PEOS change is made or required.**
 ### Resolution algorithm
 
 ```
-1  assignments ← RecordEnvelopeRepository.ListByKindAndSubject(state-assignment, capabilityArtifactKey)
-2  reject any whose definition version ≠ the configured one → ErrUnknownDefinitionVersion
-3  if empty → return None with rationale
-4  top ← max OccurredAt (EffectiveAt)
-5  candidates ← assignments at top
-6  if |candidates| > 1 and they name different StateIDs → ErrAmbiguousLifecycleState(candidates)
-7  if |candidates| > 1 and they name the same StateID → select lowest RecordID, note the duplicate
-8  return the assignment + rationale
+1  load and decode the persisted LCD-1/LCDV-1 policy
+2  enumerate and decode all assignments for the capability and their establishing transition revisions
+3  if both assignment and transition/root occupancy are empty → return None with rationale
+4  verify payload/digest/projection, definition version, subject, root, ownership, predecessor, result, target and times
+5  validate entry and every source/target edge against the persisted policy
+6  build the predecessor graph; require one entry, full reachability, no branch/cycle/disconnected node, and one head
+7  return the unique head + definition/version/establishing-revision rationale
 ```
 
-The tie-break at step 7 applies only where the state is identical, which is a
-harmless duplicate. Differing states at the same instant is a real conflict and
-fails.
+This AD-032 algorithm supersedes maximum-timestamp selection. Invalid stored
+history is `ErrStoredStateIntegrity`; an illegal new edge is
+`ErrLifecycleTransitionInvalid`, and a valid predecessor that ceased to be the
+head is `ErrLifecycleHeadConflict`.
 
 ## 9. Timeline read model
 
@@ -478,7 +488,7 @@ event: one claim produces exactly one event.
 | `FeatureCard` | `feature.created` |
 | `ArtifactEnvelope`, type `featureforge:product-capability` | `capability.created` |
 | `RevisionEnvelope`, family `capability` | `capability.revised` |
-| `RevisionAcceptanceRecord`, state `accepted` / `withdrawn` | `capability.accepted` / `capability.withdrawn` |
+| `RevisionAcceptanceRecord` for a capability revision, state `accepted` / `withdrawn` | `capability.accepted` / `capability.withdrawn` |
 | `RevisionEnvelope`, family `requirement` | `requirement.revised` |
 | `RecordEnvelope`, kind `decision` | `decision.recorded` |
 | `RevisionEnvelope`, family `validation-plan` | `plan.revised` |
@@ -491,6 +501,10 @@ event: one claim produces exactly one event.
 `ArtifactEnvelope`s for requirement, plan, and evidence artifacts produce **no**
 event: their revisions carry the meaning, and an artifact-creation event
 alongside its founding revision would double every entry.
+
+The atomically-created C7/C9 semantic acceptance members are validated as part
+of their complete Requirement/Plan aggregates and produce no second timeline
+event; the corresponding revision event represents that engineering act.
 
 ### 9.3 Ordering
 

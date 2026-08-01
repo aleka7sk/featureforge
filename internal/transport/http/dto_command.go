@@ -160,11 +160,13 @@ type assignLifecycleResponse struct {
 // --- C7 EstablishRequirement ---
 
 type establishRequirementRequest struct {
-	ArtifactID         string         `json:"artifact_id"`
-	RevisionID         string         `json:"revision_id"`
-	Statement          string         `json:"statement"`
-	SubjectArtifactID  string         `json:"subject_artifact_id"`
-	AcceptanceRecordID optionalString `json:"acceptance_record_id"`
+	ArtifactID                   string         `json:"artifact_id"`
+	RevisionID                   string         `json:"revision_id"`
+	Statement                    string         `json:"statement"`
+	SubjectArtifactID            string         `json:"subject_artifact_id"`
+	SourceCapabilityRevisionID   string         `json:"source_capability_revision_id"`
+	SourceAcceptanceCriterionKey string         `json:"source_acceptance_criterion_key"`
+	AcceptanceRecordID           optionalString `json:"acceptance_record_id"`
 }
 
 type establishRequirementResponse struct {

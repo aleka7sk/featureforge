@@ -67,7 +67,8 @@ func (r missingRevisionOrderRepository) Get(ctx context.Context, key engineering
 func requirementForIntegrity(artifactID, revisionID, statement, member string) application.EstablishRequirementCommand {
 	return application.EstablishRequirementCommand{
 		ArtifactID: artifactID, RevisionID: revisionID, Statement: statement,
-		SubjectArtifactID: "CAP-1", AcceptanceRecordID: memberID(member),
+		SubjectArtifactID: "CAP-1", SourceCapabilityRevisionID: "CAP-1-REV-1",
+		SourceAcceptanceCriterionKey: "AC-1", AcceptanceRecordID: memberID(member),
 	}
 }
 
@@ -271,6 +272,7 @@ func TestC7AndC9KeepOneStableSubjectAcrossArtifactHistory(t *testing.T) {
 		}
 		later := requirementForIntegrity("REQ-STABLE-SUBJECT", "REQ-STABLE-SUBJECT-REV-2", "The system SHALL not move to CAP-2.", "MEM-REQ-STABLE-2")
 		later.SubjectArtifactID = "CAP-2"
+		later.SourceCapabilityRevisionID = "CAP-2-REV-1"
 		assertImmutableConflictWithoutWrites(t, f, func() (application.EstablishRequirementResult, error) {
 			return later.Execute(ctx, f.uow, f.rec, f.rec, f.clock)
 		})
@@ -283,6 +285,7 @@ func TestC7AndC9KeepOneStableSubjectAcrossArtifactHistory(t *testing.T) {
 		seedRequirementForC7C9(t, f, "REQ-STABLE-PLAN-1", "REQ-STABLE-PLAN-1-REV-1", "MEM-REQ-STABLE-PLAN-1")
 		requirement2 := requirementForIntegrity("REQ-STABLE-PLAN-2", "REQ-STABLE-PLAN-2-REV-1", "The system SHALL validate CAP-2.", "MEM-REQ-STABLE-PLAN-2")
 		requirement2.SubjectArtifactID = "CAP-2"
+		requirement2.SourceCapabilityRevisionID = "CAP-2-REV-1"
 		if _, err := requirement2.Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 			t.Fatal(err)
 		}
@@ -385,6 +388,7 @@ func TestSubjectDiscoveryRejectsMixedRequirementAndPlanHistories(t *testing.T) {
 		seedRequirementForC7C9(t, f, "REQ-MIXED-PLAN-1", "REQ-MIXED-PLAN-1-REV-1", "MEM-REQ-MIXED-PLAN-1")
 		requirement2 := requirementForIntegrity("REQ-MIXED-PLAN-2", "REQ-MIXED-PLAN-2-REV-1", "The system SHALL validate CAP-2 in the corrupt witness.", "MEM-REQ-MIXED-PLAN-2")
 		requirement2.SubjectArtifactID = "CAP-2"
+		requirement2.SourceCapabilityRevisionID = "CAP-2-REV-1"
 		if _, err := requirement2.Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 			t.Fatal(err)
 		}

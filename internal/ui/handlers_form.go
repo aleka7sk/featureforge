@@ -326,6 +326,8 @@ func handleEstablishRequirement(deps Dependencies) http.HandlerFunc {
 		}
 		artifactID, revisionID, statement := r.FormValue("artifact_id"), r.FormValue("revision_id"), r.FormValue("statement")
 		acceptanceRecordID := r.FormValue("acceptance_record_id")
+		sourceCapabilityRevisionID := r.FormValue("source_capability_revision_id")
+		sourceAcceptanceCriterionKey := r.FormValue("source_acceptance_criterion_key")
 
 		cc, problem := loadCapabilityContext(r.Context(), deps, featureCardID)
 		if problem != nil {
@@ -334,7 +336,9 @@ func handleEstablishRequirement(deps Dependencies) http.HandlerFunc {
 		}
 		result, err := callAPI(r.Context(), deps.API, http.MethodPost, "/api/v1/requirements", map[string]any{
 			"artifact_id": artifactID, "revision_id": revisionID, "statement": statement, "subject_artifact_id": cc.ArtifactID,
-			"acceptance_record_id": acceptanceRecordID,
+			"source_capability_revision_id":   sourceCapabilityRevisionID,
+			"source_acceptance_criterion_key": sourceAcceptanceCriterionKey,
+			"acceptance_record_id":            acceptanceRecordID,
 		})
 		if err != nil {
 			writeInternalErrorPage(w)
@@ -350,7 +354,7 @@ func handleEstablishRequirement(deps Dependencies) http.HandlerFunc {
 			return
 		}
 		data.FormError = result.ErrMsg
-		data.FormValues = formValues(r, "artifact_id", "revision_id", "acceptance_record_id", "statement")
+		data.FormValues = formValues(r, "artifact_id", "revision_id", "acceptance_record_id", "source_capability_revision_id", "source_acceptance_criterion_key", "statement")
 		render(w, http.StatusUnprocessableEntity, "requirements", data)
 	}
 }

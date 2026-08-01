@@ -376,6 +376,16 @@ on family and exact subject equality, sorted by `Key.String()`. It does **not**
 delegate the way `recordRepo.ListByKindAndSubject` delegates to `ListByKind`,
 because no `ListByFamily` exists — and none is added speculatively.
 
+**Forward integrity-discovery correction (AD-032/FF-023).** That statement
+describes the original AD-025 delivery only. Later adversarial cases proved
+that neither family, kind nor subject is a safe first filter: a contradictory
+projection would make its authoritative payload invisible. Integrity-sensitive
+Requirement, Validation Plan, Decision, Execution, Claim and lifecycle
+discovery therefore enumerates the complete Revision/Record population through
+deterministic `ListAll`, validates every payload/digest/projection, and filters
+only afterward. The original projection methods remain supported queries, but
+they are not completeness witnesses. No `ListByFamily` port is added.
+
 **Tests.** Covered by the shared suite in step 6.
 
 **Done when.** `go test ./internal/infrastructure/memory/...` passes.
@@ -492,10 +502,12 @@ population.** Decisions, executions, claims, and evidence remain discoverable
 by the existing means the contract investigation identified; no change is made
 for them.
 
-**As implemented.** Two exported functions, `DiscoverRequirementArtifactIDs`
-and `DiscoverValidationPlanArtifactIDs`, both backed by a shared
-`discoverArtifactIDsBySubject` helper that calls `ListByFamilyAndSubject` and
-returns deduplicated artifact IDs in ascending order. Neither
+**As first implemented.** Two exported functions,
+`DiscoverRequirementArtifactIDs` and
+`DiscoverValidationPlanArtifactIDs`, both backed by a shared
+`discoverArtifactIDsBySubject` helper that called
+`ListByFamilyAndSubject` and returned deduplicated artifact IDs in ascending
+order. Neither
 `EngineeringStateInput` nor `TimelineInput` changed shape: both keep their
 caller-supplied `RequirementArtifactIDs` / `PlanArtifactID` fields exactly as
 before, and a caller lacking them now calls the new discovery functions first
@@ -503,6 +515,14 @@ to obtain them, matching §6.2 of the contract investigation ("the transport
 simply becomes able to populate them"). The outdated "FF-009 §5 defines no
 requirement-to-capability index" doc comments on both structs were corrected
 to describe the current state without overclaiming a broader index.
+
+**Current authority (AD-032/FF-023).** The exported functions and input shapes
+remain, but their shared helper now obtains completeness from validated global
+Revision enumeration, not from an indexed projection query. Every Revision is
+inspected before family/subject filtering. A Requirement or Plan whose payload
+belongs to `CAP-1` but whose projection names another subject therefore fails
+the whole read as stored-state integrity instead of vanishing from the
+population.
 
 **Tests.** Step 10.
 
@@ -516,7 +536,9 @@ complete requirement population. Confirmed by the Step 10 proof.
 **Behaviour.** The step that proves the change solves the stated problem. After
 running the canonical scenario:
 
-1. Discover requirements for `CAP-1` via `ListByFamilyAndSubject`.
+1. Discover requirements for `CAP-1` via
+   `DiscoverRequirementArtifactIDs` (currently backed by validated `ListAll`;
+   the initial AD-025 implementation used `ListByFamilyAndSubject`).
 2. Assert the population is **exactly** `REQ-1`, `REQ-2`, `REQ-3`, `REQ-4` —
    including `REQ-4`, which has no plan activity and no claim.
 3. Feed the *discovered* population to `ResolveReadiness`.

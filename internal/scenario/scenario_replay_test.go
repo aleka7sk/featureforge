@@ -52,15 +52,36 @@ func (g *replayWriteGate) beforeWrite() error {
 
 func (g *replayWriteGate) wrap(r application.Repositories) application.Repositories {
 	return application.Repositories{
-		Projects:           gatedProjectRepository{ProjectRepository: r.Projects, gate: g},
-		FeatureCards:       gatedFeatureCardRepository{FeatureCardRepository: r.FeatureCards, gate: g},
-		Artifacts:          gatedArtifactRepository{ArtifactEnvelopeRepository: r.Artifacts, gate: g},
-		Revisions:          gatedRevisionRepository{RevisionEnvelopeRepository: r.Revisions, gate: g},
-		StructuredContent:  gatedStructuredContentRepository{StructuredContentRepository: r.StructuredContent, gate: g},
-		Records:            gatedRecordRepository{RecordEnvelopeRepository: r.Records, gate: g},
-		RevisionOrder:      gatedRevisionOrderRepository{RevisionOrderRepository: r.RevisionOrder, gate: g},
-		RevisionAcceptance: gatedRevisionAcceptanceRepository{RevisionAcceptanceRepository: r.RevisionAcceptance, gate: g},
+		Projects:             gatedProjectRepository{ProjectRepository: r.Projects, gate: g},
+		FeatureCards:         gatedFeatureCardRepository{FeatureCardRepository: r.FeatureCards, gate: g},
+		Artifacts:            gatedArtifactRepository{ArtifactEnvelopeRepository: r.Artifacts, gate: g},
+		Revisions:            gatedRevisionRepository{RevisionEnvelopeRepository: r.Revisions, gate: g},
+		StructuredContent:    gatedStructuredContentRepository{StructuredContentRepository: r.StructuredContent, gate: g},
+		Records:              gatedRecordRepository{RecordEnvelopeRepository: r.Records, gate: g},
+		RevisionOrder:        gatedRevisionOrderRepository{RevisionOrderRepository: r.RevisionOrder, gate: g},
+		RevisionAcceptance:   gatedRevisionAcceptanceRepository{RevisionAcceptanceRepository: r.RevisionAcceptance, gate: g},
+		RequirementTraces:    gatedRequirementTraceRepository{RequirementCriterionTraceRepository: r.RequirementTraces, gate: g},
+		LifecycleDefinitions: gatedLifecycleDefinitionRepository{LifecycleDefinitionRepository: r.LifecycleDefinitions, gate: g},
 	}
+}
+
+type gatedLifecycleDefinitionRepository struct {
+	application.LifecycleDefinitionRepository
+	gate *replayWriteGate
+}
+
+func (r gatedLifecycleDefinitionRepository) PutDefinition(ctx context.Context, value engineering.LifecycleDefinitionEnvelope) error {
+	if err := r.gate.beforeWrite(); err != nil {
+		return err
+	}
+	return r.LifecycleDefinitionRepository.PutDefinition(ctx, value)
+}
+
+func (r gatedLifecycleDefinitionRepository) PutVersion(ctx context.Context, value engineering.LifecycleDefinitionVersionEnvelope) error {
+	if err := r.gate.beforeWrite(); err != nil {
+		return err
+	}
+	return r.LifecycleDefinitionRepository.PutVersion(ctx, value)
 }
 
 type gatedProjectRepository struct {
@@ -159,6 +180,18 @@ type gatedRevisionAcceptanceRepository struct {
 	gate *replayWriteGate
 }
 
+type gatedRequirementTraceRepository struct {
+	application.RequirementCriterionTraceRepository
+	gate *replayWriteGate
+}
+
+func (r gatedRequirementTraceRepository) Put(ctx context.Context, trace engineering.RequirementCriterionTrace) error {
+	if err := r.gate.beforeWrite(); err != nil {
+		return err
+	}
+	return r.RequirementCriterionTraceRepository.Put(ctx, trace)
+}
+
 func (r gatedRevisionAcceptanceRepository) Append(ctx context.Context, record engineering.RevisionAcceptanceRecord) error {
 	if err := r.gate.beforeWrite(); err != nil {
 		return err
@@ -214,6 +247,14 @@ type contentSnapshot struct {
 	Canonical []byte
 }
 
+type requirementTraceSnapshot struct {
+	RequirementRevision    string
+	CapabilityRevision     string
+	AcceptanceCriterionKey string
+	RecordedAt             time.Time
+	Found                  bool
+}
+
 type recordSnapshot struct {
 	Key                string
 	Kind               engineering.RecordKind
@@ -239,6 +280,7 @@ type canonicalStoreSnapshot struct {
 	Artifacts  []artifactSnapshot
 	Revisions  []revisionSnapshot
 	Content    []contentSnapshot
+	Traces     []requirementTraceSnapshot
 	Records    []recordSnapshot
 	Order      []engineering.RevisionOrderMetadata
 	Acceptance []engineering.RevisionAcceptanceRecord
@@ -317,6 +359,17 @@ func canonicalPersistenceSnapshot(t *testing.T, ctx context.Context, uow applica
 					}
 				}
 				snapshot.Content = append(snapshot.Content, contentState)
+				trace, traceFound, err := r.RequirementTraces.Get(ctx, revision.Key)
+				if err != nil {
+					return err
+				}
+				traceState := requirementTraceSnapshot{RequirementRevision: revision.Key.String(), Found: traceFound}
+				if traceFound {
+					traceState.CapabilityRevision = trace.CapabilityRevision.String()
+					traceState.AcceptanceCriterionKey = trace.AcceptanceCriterionKey
+					traceState.RecordedAt = trace.RecordedAt
+				}
+				snapshot.Traces = append(snapshot.Traces, traceState)
 			}
 
 			orders, err := r.RevisionOrder.ListByArtifact(ctx, artifactID)
@@ -362,6 +415,9 @@ func canonicalPersistenceSnapshot(t *testing.T, ctx context.Context, uow applica
 	sort.Slice(snapshot.Cards, func(i, j int) bool { return snapshot.Cards[i].ID < snapshot.Cards[j].ID })
 	sort.Slice(snapshot.Revisions, func(i, j int) bool { return snapshot.Revisions[i].Key < snapshot.Revisions[j].Key })
 	sort.Slice(snapshot.Content, func(i, j int) bool { return snapshot.Content[i].Key < snapshot.Content[j].Key })
+	sort.Slice(snapshot.Traces, func(i, j int) bool {
+		return snapshot.Traces[i].RequirementRevision < snapshot.Traces[j].RequirementRevision
+	})
 	sort.Slice(snapshot.Records, func(i, j int) bool { return snapshot.Records[i].Key < snapshot.Records[j].Key })
 	sort.Slice(snapshot.Order, func(i, j int) bool { return snapshot.Order[i].Key.String() < snapshot.Order[j].Key.String() })
 	sort.Slice(snapshot.Acceptance, func(i, j int) bool {

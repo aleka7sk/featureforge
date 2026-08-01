@@ -25,13 +25,15 @@ func assertPriorRevisionValidationSurvives(t *testing.T, handler http.Handler) {
 	mustPost(t, handler, "/api/v1/features", map[string]any{"feature_card_id": "FC-H1", "project_id": "PRJ-H1", "title": "Feature"})
 	mustPost(t, handler, "/api/v1/capabilities", map[string]any{
 		"feature_card_id": "FC-H1", "artifact_id": "CAP-H1", "revision_id": "CAP-H1-REV-1",
-		"content": map[string]any{"schema_version": 1, "title": "T", "problem_statement": "P"},
+		"content": map[string]any{"schema_version": 1, "title": "T", "problem_statement": "P",
+			"acceptance_criteria": []map[string]any{{"key": "AC-1", "text": "History remains visible."}}},
 	})
 	mustPost(t, handler, "/api/v1/capabilities/CAP-H1/acceptances", map[string]any{
 		"record_id": "ACC-H1", "revision_id": "CAP-H1-REV-1", "state": "accepted",
 	})
 	mustPost(t, handler, "/api/v1/requirements", map[string]any{
 		"artifact_id": "REQ-H1", "revision_id": "REQ-H1-REV-1", "acceptance_record_id": "ACC-REQ-H1",
+		"source_capability_revision_id": "CAP-H1-REV-1", "source_acceptance_criterion_key": "AC-1",
 		"statement": "S", "subject_artifact_id": "CAP-H1",
 	})
 	mustPost(t, handler, "/api/v1/validation/plans", map[string]any{

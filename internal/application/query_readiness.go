@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/aleka7sk/featureforge/internal/engineering"
 )
@@ -23,9 +24,11 @@ const (
 // by the same ordering algorithm capability revisions use (FF-004 §3.2:
 // requirement revisions follow the same policy).
 type EffectiveRequirement struct {
-	ArtifactID  string
-	RevisionKey engineering.RevisionKey
-	Sequence    int
+	ArtifactID                string
+	RevisionKey               engineering.RevisionKey
+	Sequence                  int
+	SourceCapabilityRevision  engineering.RevisionKey
+	SourceAcceptanceCriterion string
 	// Statement is the requirement's text, decoded from its revision's
 	// stored payload (FF-020 §5, FF-001 §3.4). Populated only by
 	// GetFeatureEngineeringState, which has a projector; empty when
@@ -38,9 +41,12 @@ type EffectiveRequirement struct {
 // requirement in requirementArtifactIDs. Any requirement failing
 // resolution fails the whole query, naming it (FF-004 §3.2) -- a partial
 // requirement set would silently understate what must be satisfied.
-func ResolveEffectiveRequirements(ctx context.Context, repos Repositories, requirementArtifactIDs []string) ([]EffectiveRequirement, error) {
+func ResolveEffectiveRequirements(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, requirementArtifactIDs []string) ([]EffectiveRequirement, error) {
 	out := make([]EffectiveRequirement, 0, len(requirementArtifactIDs))
 	for _, artifactID := range requirementArtifactIDs {
+		if _, err := validateManagedHistory(ctx, repos, inspector, artifactID, engineering.RevisionFamilyRequirement, true); err != nil {
+			return nil, fmt.Errorf("validating requirement %s: %w", artifactID, err)
+		}
 		result, err := ResolveCurrentRevision(ctx, repos, artifactID)
 		if err != nil {
 			return nil, fmt.Errorf("resolving requirement %s: %w", artifactID, err)
@@ -48,7 +54,18 @@ func ResolveEffectiveRequirements(ctx context.Context, repos Repositories, requi
 		if !result.Found {
 			return nil, fmt.Errorf("%w: requirement %s has no accepted revision", ErrEngineeringStateIndeterminate, artifactID)
 		}
-		out = append(out, EffectiveRequirement{ArtifactID: artifactID, RevisionKey: result.Revision.Key, Sequence: result.Sequence})
+		trace, found, err := repos.RequirementTraces.Get(ctx, result.Revision.Key)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			return nil, integrityError("effective requirement has no criterion trace", nil)
+		}
+		out = append(out, EffectiveRequirement{
+			ArtifactID: artifactID, RevisionKey: result.Revision.Key, Sequence: result.Sequence,
+			SourceCapabilityRevision:  trace.CapabilityRevision,
+			SourceAcceptanceCriterion: trace.AcceptanceCriterionKey,
+		})
 	}
 	return out, nil
 }
@@ -87,7 +104,7 @@ type ReadinessResult struct {
 // resolved by the caller. A structural failure (ambiguous revision, dangling
 // reference) is the caller's concern via the errors those resolutions
 // already returned -- this function only computes the semantic verdict.
-func ResolveReadiness(ctx context.Context, repos Repositories, currentRevision engineering.RevisionEnvelope, requirements []EffectiveRequirement) (ReadinessResult, error) {
+func ResolveReadiness(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, currentRevision engineering.RevisionEnvelope, requirements []EffectiveRequirement) (ReadinessResult, error) {
 	if len(requirements) == 0 {
 		return ReadinessResult{Status: ReadinessIncomplete}, nil
 	}
@@ -105,7 +122,7 @@ func ResolveReadiness(ctx context.Context, repos Repositories, currentRevision e
 		if err != nil {
 			return ReadinessResult{}, err
 		}
-		claimResult, err := ResolveCurrentClaim(ctx, repos, subjectKey, scope, []string{criterionKey})
+		claimResult, err := ResolveCurrentClaim(ctx, repos, inspector, subjectKey, scope, []string{criterionKey})
 		if err != nil {
 			return ReadinessResult{}, err
 		}
@@ -118,7 +135,7 @@ func ResolveReadiness(ctx context.Context, repos Repositories, currentRevision e
 			// indistinguishable from "no claim at all". Search separately,
 			// across every subject, so a stale claim is reported as stale
 			// rather than silently read as missing (FF-010 §7).
-			staleSeq, staleFound, err := findStaleClaimSequence(ctx, repos, criterionKey, currentRevision.Key.ArtifactID)
+			staleSeq, staleFound, err := findStaleClaimSequence(ctx, repos, inspector, criterionKey, currentRevision.Key.ArtifactID)
 			if err != nil {
 				return ReadinessResult{}, err
 			}
@@ -138,7 +155,7 @@ func ResolveReadiness(ctx context.Context, repos Repositories, currentRevision e
 		per.Outcome = claimResult.Claim.Outcome
 		per.Rejected = claimResult.Rationale.Rejected
 
-		execOutcome, execErr := supportingExecutionOutcome(ctx, repos, claimResult.Claim)
+		execOutcome, execErr := supportingExecutionOutcome(ctx, repos, inspector, claimResult.Claim)
 		if execErr != nil {
 			return ReadinessResult{}, execErr
 		}
@@ -178,33 +195,44 @@ func ResolveReadiness(ctx context.Context, repos Repositories, currentRevision e
 
 // supportingExecutionOutcome resolves the Outcome projected on the first
 // execution record cited by claim, or "" if none is cited.
-func supportingExecutionOutcome(ctx context.Context, repos Repositories, claim engineering.RecordEnvelope) (string, error) {
+func supportingExecutionOutcome(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, claim engineering.RecordEnvelope) (string, error) {
 	if len(claim.ExecutionKeys) == 0 {
 		return "", nil
 	}
-	executions, err := repos.Records.ListByKind(ctx, engineering.RecordKindExecution)
+	executionID, ok := strings.CutPrefix(claim.ExecutionKeys[0], "execution:")
+	if !ok || executionID == "" {
+		return "", integrityError("claim cites a malformed execution identity", nil)
+	}
+	key, err := engineering.NewRecordKey(engineering.RecordKindExecution, executionID)
+	if err != nil {
+		return "", integrityError("claim cites a malformed execution identity", err)
+	}
+	execution, found, err := repos.Records.Get(ctx, key)
 	if err != nil {
 		return "", err
 	}
-	wanted := claim.ExecutionKeys[0]
-	for _, e := range executions {
-		if engineering.ExecutionKey(e.Key.ID) == wanted {
-			return e.Outcome, nil
-		}
+	if !found {
+		return "", integrityError("claim cites a missing execution", nil)
 	}
-	return "", nil
+	if err := inspectRecord(inspector, execution); err != nil {
+		return "", err
+	}
+	return execution.Outcome, nil
 }
 
 // findStaleClaimSequence searches every claim (regardless of subject) for
 // one citing criterionKey, and if found, resolves the sequence of the
 // capability revision it was evaluated against -- distinguishing "a claim
 // exists but is stale" from "no claim was ever recorded" (FF-010 §7).
-func findStaleClaimSequence(ctx context.Context, repos Repositories, criterionKey, capabilityArtifactID string) (int, bool, error) {
-	all, err := repos.Records.ListByKind(ctx, engineering.RecordKindClaim)
+func findStaleClaimSequence(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, criterionKey, capabilityArtifactID string) (int, bool, error) {
+	all, err := listValidatedRecords(ctx, repos, inspector)
 	if err != nil {
 		return 0, false, err
 	}
 	for _, c := range all {
+		if c.Kind != engineering.RecordKindClaim {
+			continue
+		}
 		if !containsString(c.CriterionKeys, criterionKey) {
 			continue
 		}

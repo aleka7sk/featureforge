@@ -25,17 +25,29 @@ type commandFixture struct {
 
 func newCommandFixture() commandFixture {
 	store := memory.NewStore()
-	return commandFixture{
+	f := commandFixture{
 		uow:   memory.NewUnitOfWork(store),
 		store: store,
 		rec:   peos.NewRecorder(),
 		clock: application.NewFixedClock(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)),
 	}
+	if err := application.EnsureLifecycleConfiguration(context.Background(), f.uow, f.rec, f.rec); err != nil {
+		panic(err)
+	}
+	return f
 }
 
 func mustContent(t *testing.T, title string) engineering.CapabilitySpecificationContent {
 	t.Helper()
 	c, err := engineering.NewCapabilitySpecificationContent(1, title, "problem statement")
+	if err != nil {
+		t.Fatal(err)
+	}
+	criterion, err := engineering.NewAcceptanceCriterion("AC-1", "The capability satisfies its primary acceptance criterion.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err = c.WithAcceptanceCriteria([]engineering.AcceptanceCriterion{criterion})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,6 +132,16 @@ func establishCapability(t *testing.T, f commandFixture) {
 		Content: mustContent(t, "Homework after a lesson"),
 	}
 	if _, err := cmd.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func acceptCapability(t *testing.T, f commandFixture, recordID, artifactID, revisionID string) {
+	t.Helper()
+	if _, err := (application.AcceptCapabilityRevisionCommand{
+		RecordID: recordID, ArtifactID: artifactID, RevisionID: revisionID,
+		State: engineering.AcceptanceStateAccepted,
+	}).Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -251,8 +273,10 @@ func TestEstablishRequirementCommand(t *testing.T) {
 	if _, err := establish.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
+	acceptCapability(t, f, "ACC-REQ-SOURCE", "CAP-1", "CAP-1-REV-1")
 	cmd := application.EstablishRequirementCommand{
 		ArtifactID: "REQ-1", RevisionID: "REQ-1-REV-1", Statement: "The system SHALL do X.", SubjectArtifactID: "CAP-1",
+		SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
 		AcceptanceRecordID: memberID("MEM-REQ-1"),
 	}
 	if _, err := cmd.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
@@ -269,6 +293,7 @@ func TestRecordArchitectureDecisionCommand(t *testing.T) {
 	if _, err := establish.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
+	acceptCapability(t, f, "ACC-DECISION-SOURCE", "CAP-1", "CAP-1-REV-1")
 	establishPlan(t, f, "VP-0", "VP-0-REV-1")
 	run := application.RecordValidationRunCommand{
 		ExecutionID: "ER-0", PlanArtifactID: "VP-0", PlanRevisionID: "VP-0-REV-1", ActivityKey: "A-1",
@@ -297,8 +322,10 @@ func TestValidationChainCommands(t *testing.T) {
 	if _, err := establish.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
+	acceptCapability(t, f, "ACC-VALIDATION-SOURCE", "CAP-1", "CAP-1-REV-1")
 	req := application.EstablishRequirementCommand{
 		ArtifactID: "REQ-1", RevisionID: "REQ-1-REV-1", Statement: "The system SHALL do X.", SubjectArtifactID: "CAP-1",
+		SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
 		AcceptanceRecordID: memberID("MEM-REQ-1"),
 	}
 	if _, err := req.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
@@ -346,7 +373,7 @@ func TestValidationChainCommands(t *testing.T) {
 	var claimResult application.CurrentClaimResult
 	err := f.uow.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		claimResult, err = application.ResolveCurrentClaim(context.Background(), r,
+		claimResult, err = application.ResolveCurrentClaim(context.Background(), r, f.rec,
 			engineering.ArtifactRevisionSubjectKey("CAP-1", "CAP-1-REV-1"), "featureforge:capability|CAP-1",
 			[]string{mustCriterionKey(t)})
 		return err
@@ -406,8 +433,15 @@ func TestAssignLifecycleStateCommand(t *testing.T) {
 	// capability must exist before its state can be recorded -- the state
 	// assignment's subject is CAP-1, not the Transition Record artifact the
 	// command creates alongside it (AD-021).
-	setupProjectAndFeature(t, f)
-	establishCapability(t, f)
+	seedCapability(t, f)
+	if _, err := (application.EstablishRequirementCommand{
+		ArtifactID: "REQ-LIFECYCLE", RevisionID: "REQ-LIFECYCLE-REV-1",
+		Statement: "The system SHALL support lifecycle specification.", SubjectArtifactID: "CAP-1",
+		SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
+		AcceptanceRecordID: memberID("MEM-REQ-LIFECYCLE"),
+	}).Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
+		t.Fatal(err)
+	}
 	entry := application.AssignLifecycleStateCommand{
 		AssignmentID: "SA-1", SubjectArtifactID: "CAP-1", State: "drafting", IsEntry: true,
 		TransitionRecordArtifactID: "TR-1", TransitionRecordRevisionID: "TR-1-REV-0",
@@ -417,9 +451,9 @@ func TestAssignLifecycleStateCommand(t *testing.T) {
 	}
 	f.clock.Advance(time.Hour)
 	transition := application.AssignLifecycleStateCommand{
-		AssignmentID: "SA-2", SubjectArtifactID: "CAP-1", State: "under-validation",
+		AssignmentID: "SA-2", SubjectArtifactID: "CAP-1", State: "specified",
 		TransitionRecordArtifactID: "TR-1", TransitionRecordRevisionID: "TR-1-REV-1",
-		TransitionKey: "begin-validation", FromAssignmentID: "SA-1",
+		TransitionKey: "specify", FromAssignmentID: "SA-1",
 	}
 	if _, err := transition.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
@@ -428,14 +462,14 @@ func TestAssignLifecycleStateCommand(t *testing.T) {
 	var result application.LifecycleStateResult
 	err := f.uow.Do(context.Background(), func(r application.Repositories) error {
 		var err error
-		result, err = application.ResolveLifecycleState(context.Background(), r, "CAP-1")
+		result, err = application.ResolveLifecycleState(context.Background(), r, f.rec, "CAP-1")
 		return err
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Found || result.Assignment.StateID != "featureforge:under-validation" {
-		t.Errorf("result = %+v, want under-validation", result)
+	if !result.Found || result.Assignment.StateID != "featureforge:specified" {
+		t.Errorf("result = %+v, want specified", result)
 	}
 }
 

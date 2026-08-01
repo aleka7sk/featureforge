@@ -6,10 +6,12 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aleka7sk/featureforge/internal/application"
 	"github.com/aleka7sk/featureforge/internal/engineering/peos"
 	"github.com/aleka7sk/featureforge/internal/infrastructure/memory"
+	"github.com/aleka7sk/featureforge/internal/scenario"
 	transporthttp "github.com/aleka7sk/featureforge/internal/transport/http"
 	"github.com/aleka7sk/featureforge/internal/ui"
 )
@@ -47,14 +49,7 @@ func mustPostForm(t *testing.T, handler http.Handler, path string, values url.Va
 // committed state is visible exactly as internal/transport/http's own
 // canonical scenario test proves it through the API directly.
 func TestCanonicalScenarioThroughUIForms(t *testing.T) {
-	api := transporthttp.NewHandler(transporthttp.Dependencies{
-		UOW:       memory.NewUnitOfWork(memory.NewStore()),
-		Recorder:  peos.NewRecorder(),
-		Inspector: peos.NewRecorder(),
-		Projector: peos.NewRecorder(),
-		Clock:     application.SystemClock{},
-	})
-	handler := ui.NewHandler(ui.Dependencies{API: api})
+	uow, recorder, handler := newTestStack()
 
 	// C1 create project.
 	mustPostForm(t, handler, "/projects", url.Values{
@@ -75,36 +70,27 @@ func TestCanonicalScenarioThroughUIForms(t *testing.T) {
 		"acceptance_criteria":   {"AC-1: Published homework is visible to the intended student."},
 	}, "/features/FC-1")
 
-	// C6 assign lifecycle (entry).
-	mustPostForm(t, handler, "/features/FC-1/lifecycle", url.Values{
-		"assignment_id": {"LC-1"}, "state": {"drafting"}, "is_entry": {"true"},
-		"transition_record_artifact_id": {"TR-1"}, "transition_record_revision_id": {"TR-1-REV-1"},
-	}, "/features/FC-1")
-
 	// C5 accept Revision 1 (before it can be the subject of a requirement
-	// or decision -- Revisions screen's per-revision form).
+	// or decision, and before C6 may establish the lifecycle entry).
 	mustPostForm(t, handler, "/features/FC-1/revisions/CAP-1-REV-1/acceptance", url.Values{
 		"record_id": {"ACC-1"}, "state": {"accepted"}, "reason": {""},
 	}, "/features/FC-1/revisions")
 
-	// C7 establish two requirements.
-	mustPostForm(t, handler, "/features/FC-1/requirements", url.Values{
-		"artifact_id": {"REQ-1"}, "revision_id": {"REQ-1-REV-1"},
-		"acceptance_record_id": {"ACC-REQ-1"},
-		"statement":            {"Published homework SHALL be visible to the student."},
-	}, "/features/FC-1/requirements")
-	mustPostForm(t, handler, "/features/FC-1/requirements", url.Values{
-		"artifact_id": {"REQ-2"}, "revision_id": {"REQ-2-REV-1"},
-		"acceptance_record_id": {"ACC-REQ-2"},
-		"statement":            {"Published homework SHALL NOT be visible to other users."},
-	}, "/features/FC-1/requirements")
+	// C6 establish the drafting lifecycle entry.
+	mustPostForm(t, handler, "/features/FC-1/lifecycle", url.Values{
+		"assignment_id": {"SA-1"}, "state": {"drafting"}, "is_entry": {"true"},
+		"transition_record_artifact_id": {"TR-1"}, "transition_record_revision_id": {"TR-1-REV-0"},
+	}, "/features/FC-1")
 
-	// C8 record a decision.
+	// C8 cites an Evidence act. There is intentionally no standalone
+	// Evidence form, so seed that prerequisite through the same real
+	// engineering repository used by the in-process API.
+	recordDecisionEvidenceForUI(t, uow, recorder, time.Now().UTC())
 	mustPostForm(t, handler, "/features/FC-1/decisions", url.Values{
 		"decision_id": {"DEC-1"}, "question": {"Should homework support audio?"},
 		"outcome_statement":    {"Homework supports one optional audio attachment."},
 		"alternatives":         {"Store inline.\nStore externally."},
-		"evidence_artifact_id": {"EV-DEC-1"}, "evidence_revision_id": {"EV-DEC-1-REV-1"},
+		"evidence_artifact_id": {scenario.DecisionEvidenceID}, "evidence_revision_id": {scenario.DecisionEvidenceID + "-REV-1"},
 		"assumptions": {"Audio is hosted externally."}, "constraints": {"No binary storage."},
 		"rationale": {"Avoids adding binary storage."},
 	}, "/features/FC-1/decisions")
@@ -120,6 +106,29 @@ func TestCanonicalScenarioThroughUIForms(t *testing.T) {
 		"record_id": {"ACC-2"}, "state": {"accepted"},
 	}, "/features/FC-1/revisions")
 
+	// C7 establishes Requirements against the exact current accepted
+	// capability revision and criterion.
+	mustPostForm(t, handler, "/features/FC-1/requirements", url.Values{
+		"artifact_id": {"REQ-1"}, "revision_id": {"REQ-1-REV-1"},
+		"acceptance_record_id":          {"ACC-REQ-1"},
+		"source_capability_revision_id": {"CAP-1-REV-2"}, "source_acceptance_criterion_key": {"AC-1"},
+		"statement": {"Published homework SHALL be visible to the student."},
+	}, "/features/FC-1/requirements")
+	mustPostForm(t, handler, "/features/FC-1/requirements", url.Values{
+		"artifact_id": {"REQ-2"}, "revision_id": {"REQ-2-REV-1"},
+		"acceptance_record_id":          {"ACC-REQ-2"},
+		"source_capability_revision_id": {"CAP-1-REV-2"}, "source_acceptance_criterion_key": {"AC-1"},
+		"statement": {"Published homework SHALL NOT be visible to other users."},
+	}, "/features/FC-1/requirements")
+
+	// The traced Requirements satisfy the drafting -> specified product
+	// precondition.
+	mustPostForm(t, handler, "/features/FC-1/lifecycle", url.Values{
+		"assignment_id": {"SA-2"}, "state": {"specified"},
+		"transition_record_artifact_id": {"TR-1"}, "transition_record_revision_id": {"TR-1-REV-1"},
+		"transition_key": {"specify"}, "from_assignment_id": {"SA-1"},
+	}, "/features/FC-1")
+
 	// C9 establish the validation plan (one activity, against REQ-1).
 	mustPostForm(t, handler, "/features/FC-1/validation-plan", url.Values{
 		"artifact_id": {"VP-1"}, "revision_id": {"VP-1-REV-1"},
@@ -127,11 +136,19 @@ func TestCanonicalScenarioThroughUIForms(t *testing.T) {
 		"activities":           {"A-1|manual-review|Satisfied when visibility is confirmed.|REQ-1|REQ-1-REV-1|Reviewer note"},
 	}, "/features/FC-1/validation")
 
-	// C10 record a run, then C11 record a satisfied claim against REQ-1.
+	// C10 records the completed current-plan execution required by the
+	// specified -> under-validation transition.
 	mustPostForm(t, handler, "/features/FC-1/validation-runs", url.Values{
 		"execution_id": {"ER-1"}, "activity_key": {"A-1"}, "method": {"manual-review"}, "outcome": {"completed"},
 		"evidence_artifact_id": {"EV-1"}, "evidence_revision_id": {"EV-1-REV-1"}, "evidence_locator": {"https://evidence.example/EV-1"},
 	}, "/features/FC-1/validation")
+	mustPostForm(t, handler, "/features/FC-1/lifecycle", url.Values{
+		"assignment_id": {"SA-3"}, "state": {"under-validation"},
+		"transition_record_artifact_id": {"TR-1"}, "transition_record_revision_id": {"TR-1-REV-2"},
+		"transition_key": {"begin-validation"}, "from_assignment_id": {"SA-2"},
+	}, "/features/FC-1")
+
+	// C11 records a satisfied claim against REQ-1 after validation begins.
 	mustPostForm(t, handler, "/features/FC-1/claims", url.Values{
 		"claim_id": {"CLM-1"}, "requirement_artifact_id": {"REQ-1"}, "requirement_revision_id": {"REQ-1-REV-1"},
 		"outcome": {"satisfied"}, "method": {"manual-review"},
@@ -156,7 +173,7 @@ func TestCanonicalScenarioThroughUIForms(t *testing.T) {
 	// as if it had been entered through JSON -- AD-028 preserved every API
 	// semantic (FF-021 §2).
 	_, overview := getPage(t, handler, "/features/FC-1")
-	if !strings.Contains(overview, "CAP-1-REV-2") || !strings.Contains(overview, "status-drafting") {
+	if !strings.Contains(overview, "CAP-1-REV-2") || !strings.Contains(overview, "status-under-validation") {
 		t.Errorf("expected the current revision and lifecycle state on the overview, got %s", overview)
 	}
 
@@ -169,7 +186,7 @@ func TestCanonicalScenarioThroughUIForms(t *testing.T) {
 	}
 
 	_, decisions := getPage(t, handler, "/features/FC-1/decisions")
-	if !strings.Contains(decisions, "DEC-1") || !strings.Contains(decisions, "EV-DEC-1") {
+	if !strings.Contains(decisions, "DEC-1") || !strings.Contains(decisions, scenario.DecisionEvidenceID) {
 		t.Errorf("expected the decision and its evidence, got %s", decisions)
 	}
 
@@ -224,14 +241,7 @@ func TestCreateProjectForm_CorrectableFailurePreservesInput(t *testing.T) {
 }
 
 func TestEstablishPlanForm_ConflictPreservesMemberIdentity(t *testing.T) {
-	api := transporthttp.NewHandler(transporthttp.Dependencies{
-		UOW:       memory.NewUnitOfWork(memory.NewStore()),
-		Recorder:  peos.NewRecorder(),
-		Inspector: peos.NewRecorder(),
-		Projector: peos.NewRecorder(),
-		Clock:     application.SystemClock{},
-	})
-	handler := ui.NewHandler(ui.Dependencies{API: api})
+	handler := newTestHandler()
 
 	mustPostForm(t, handler, "/projects", url.Values{"project_id": {"PRJ-PLAN-PRESERVE"}, "name": {"Pilot"}}, "/projects/PRJ-PLAN-PRESERVE")
 	mustPostForm(t, handler, "/projects/PRJ-PLAN-PRESERVE/features", url.Values{
@@ -240,12 +250,14 @@ func TestEstablishPlanForm_ConflictPreservesMemberIdentity(t *testing.T) {
 	mustPostForm(t, handler, "/features/FC-PLAN-PRESERVE/capability", url.Values{
 		"artifact_id": {"CAP-PLAN-PRESERVE"}, "revision_id": {"CAP-PLAN-PRESERVE-REV-1"},
 		"title": {"Homework"}, "problem_statement": {"No follow-up."},
+		"acceptance_criteria": {"AC-1: Homework is visible."},
 	}, "/features/FC-PLAN-PRESERVE")
 	mustPostForm(t, handler, "/features/FC-PLAN-PRESERVE/revisions/CAP-PLAN-PRESERVE-REV-1/acceptance", url.Values{
 		"record_id": {"ACC-CAP-PLAN-PRESERVE"}, "state": {"accepted"},
 	}, "/features/FC-PLAN-PRESERVE/revisions")
 	mustPostForm(t, handler, "/features/FC-PLAN-PRESERVE/requirements", url.Values{
 		"artifact_id": {"REQ-PLAN-PRESERVE"}, "revision_id": {"REQ-PLAN-PRESERVE-REV-1"},
+		"source_capability_revision_id": {"CAP-PLAN-PRESERVE-REV-1"}, "source_acceptance_criterion_key": {"AC-1"},
 		"acceptance_record_id": {"ACC-REQ-PLAN-PRESERVE"}, "statement": {"Homework SHALL be visible."},
 	}, "/features/FC-PLAN-PRESERVE/requirements")
 
@@ -273,14 +285,7 @@ func TestEstablishPlanForm_ConflictPreservesMemberIdentity(t *testing.T) {
 }
 
 func TestEstablishRequirementForm_ConflictPreservesMemberIdentity(t *testing.T) {
-	api := transporthttp.NewHandler(transporthttp.Dependencies{
-		UOW:       memory.NewUnitOfWork(memory.NewStore()),
-		Recorder:  peos.NewRecorder(),
-		Inspector: peos.NewRecorder(),
-		Projector: peos.NewRecorder(),
-		Clock:     application.SystemClock{},
-	})
-	handler := ui.NewHandler(ui.Dependencies{API: api})
+	handler := newTestHandler()
 
 	mustPostForm(t, handler, "/projects", url.Values{"project_id": {"PRJ-REQ-PRESERVE"}, "name": {"Pilot"}}, "/projects/PRJ-REQ-PRESERVE")
 	mustPostForm(t, handler, "/projects/PRJ-REQ-PRESERVE/features", url.Values{
@@ -289,16 +294,22 @@ func TestEstablishRequirementForm_ConflictPreservesMemberIdentity(t *testing.T) 
 	mustPostForm(t, handler, "/features/FC-REQ-PRESERVE/capability", url.Values{
 		"artifact_id": {"CAP-REQ-PRESERVE"}, "revision_id": {"CAP-REQ-PRESERVE-REV-1"},
 		"title": {"Homework"}, "problem_statement": {"No follow-up."},
+		"acceptance_criteria": {"AC-1: Homework is visible."},
 	}, "/features/FC-REQ-PRESERVE")
+	mustPostForm(t, handler, "/features/FC-REQ-PRESERVE/revisions/CAP-REQ-PRESERVE-REV-1/acceptance", url.Values{
+		"record_id": {"ACC-CAP-REQ-PRESERVE"}, "state": {"accepted"},
+	}, "/features/FC-REQ-PRESERVE/revisions")
 
 	path := "/features/FC-REQ-PRESERVE/requirements"
 	mustPostForm(t, handler, path, url.Values{
 		"artifact_id": {"REQ-PRESERVE"}, "revision_id": {"REQ-PRESERVE-REV-1"},
+		"source_capability_revision_id": {"CAP-REQ-PRESERVE-REV-1"}, "source_acceptance_criterion_key": {"AC-1"},
 		"acceptance_record_id": {"MEM-REQ-PRESERVE"}, "statement": {"Homework SHALL be visible."},
 	}, path)
 
 	rr := postForm(t, handler, path, url.Values{
 		"artifact_id": {"REQ-PRESERVE"}, "revision_id": {"REQ-PRESERVE-REV-1"},
+		"source_capability_revision_id": {"CAP-REQ-PRESERVE-REV-1"}, "source_acceptance_criterion_key": {"AC-1"},
 		"acceptance_record_id": {"MEM-REQ-PRESERVE-DIFFERENT"}, "statement": {"Homework SHALL be visible."},
 	})
 	if rr.Code != http.StatusUnprocessableEntity {
@@ -318,14 +329,7 @@ func TestEstablishRequirementForm_ConflictPreservesMemberIdentity(t *testing.T) 
 // non-entry assignment missing transition_key is rejected by the command,
 // and the UI shows exactly that rejection.
 func TestAssignLifecycleForm_TransitionKeyRequiredForNonEntry(t *testing.T) {
-	api := transporthttp.NewHandler(transporthttp.Dependencies{
-		UOW:       memory.NewUnitOfWork(memory.NewStore()),
-		Recorder:  peos.NewRecorder(),
-		Inspector: peos.NewRecorder(),
-		Projector: peos.NewRecorder(),
-		Clock:     application.SystemClock{},
-	})
-	handler := ui.NewHandler(ui.Dependencies{API: api})
+	handler := newTestHandler()
 
 	mustPostForm(t, handler, "/projects", url.Values{"project_id": {"PRJ-1"}, "name": {"Pilot"}}, "/projects/PRJ-1")
 	mustPostForm(t, handler, "/projects/PRJ-1/features", url.Values{"feature_card_id": {"FC-1"}, "title": {"Homework"}}, "/features/FC-1")

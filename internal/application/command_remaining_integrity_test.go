@@ -663,6 +663,7 @@ func seedSecondSemanticRequirement(t *testing.T, f commandFixture) application.E
 	cmd := application.EstablishRequirementCommand{
 		ArtifactID: "REQ-SEMANTIC-OTHER", RevisionID: "REQ-SEMANTIC-OTHER-REV-1",
 		Statement: "The system SHALL keep another criterion distinct.", SubjectArtifactID: "CAP-1",
+		SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
 		AcceptanceRecordID: memberID("MEM-REQ-SEMANTIC-OTHER"),
 	}
 	if _, err := cmd.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {

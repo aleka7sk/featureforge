@@ -152,10 +152,12 @@ func TestRevisionSubjectKeyColumnProjection(t *testing.T) {
 	ctx := context.Background()
 
 	seedCapability(t, uow, recorder, recorder, clock)
+	acceptCapabilityForRequirement(t, uow, recorder, clock)
 	acceptanceRecordID := "ACC-REQ-1-REV-1"
 	if _, err := (application.EstablishRequirementCommand{
 		ArtifactID: "REQ-1", RevisionID: "REQ-1-REV-1", AcceptanceRecordID: &acceptanceRecordID,
 		Statement: "Published homework SHALL be visible to the student.", SubjectArtifactID: "CAP-1",
+		SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
 	}).Execute(ctx, uow, recorder, recorder, clock); err != nil {
 		t.Fatalf("establish requirement: %v", err)
 	}

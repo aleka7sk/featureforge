@@ -132,8 +132,9 @@ separate Verdict entity. FeatureForge creates no such type.
 **Acceptance Journal** — the append-only record of revision acceptance
 transitions, carrying actor, timestamp, and reason. Feeds the timeline.
 
-**Acceptance State** — a capability revision's product-owned state: `draft`,
-`accepted`, or `withdrawn`. Not a PEOS lifecycle state
+**Acceptance State** — a managed capability, Requirement, or Validation Plan
+revision's product-owned state: `draft`, `accepted`, or `withdrawn`. C7/C9
+establish their semantic member as immediately `accepted`. Not a PEOS lifecycle state
 ([AD-004](decisions/README.md#ad-004--revision-acceptance-and-peos-lifecycle-state-are-separate-concerns)).
 
 **Capability Specification** — the PEOS Artifact of type
@@ -174,8 +175,9 @@ PEOS ([AD-005](decisions/README.md#ad-005--only-the-integration-layer-imports-pe
 [AD-013](decisions/README.md#ad-013--three-envelope-types-not-one-universal-envelope-no-relationenvelope-in-m3)).
 
 **Engineering State** — the immutable, provenance-bearing record of what was
-specified, required, decided, validated, and claimed. Modelled with PEOS values,
-insert-only.
+specified, required, decided, validated, and claimed. Modelled with PEOS values
+plus governed FeatureForge metadata such as content, order, acceptance journal,
+and Requirement Criterion Trace; insert-only or, for the journal, append-only.
 
 **EngineeringRecorder** — the port declared in `internal/application` and
 implemented by `internal/engineering/peos`, expressed entirely in `domain` and
@@ -187,14 +189,18 @@ established by a Transition Record Revision that carries no transition content,
 because PEOS v1.0.0 cannot express an entry Transition from an unassigned
 condition ([AD-014](decisions/README.md#ad-014--the-lifecycle-entry-assignment-is-established-by-a-content-free-transition-record-revision)).
 
-**FeatureCard** — the operational entry point for one capability. Mutable title
-and summary; one optional link to a capability Artifact; **no derived state**.
+**FeatureCard** — the operational entry point for one capability. Stable title
+and description in this POC; one optional, monotonic link to a capability
+Artifact; **no derived state**.
 
 **FeatureForge Namespace** — `featureforge`. The only namespace FeatureForge
 constructs vocabulary values in.
 
-**Operational State** — FeatureForge's own mutable bookkeeping. No engineering
-meaning; never represented as a PEOS value.
+**Operational State** — FeatureForge's own product bookkeeping, distinct from
+PEOS engineering state. The category permits product-owned mutation but does
+not promise it: AD-031 keeps establishment fields stable in this POC and allows
+only the one-time capability link. It has no engineering meaning and is never
+represented as a PEOS value.
 
 **Project** — an operational naming container for feature cards. No engineering
 semantics.

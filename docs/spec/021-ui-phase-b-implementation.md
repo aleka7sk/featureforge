@@ -21,6 +21,13 @@ complete acts create an immediate acceptance member whose identity the caller
 owns. The no-JavaScript design, in-process API-handler write path, route set,
 and all UI package boundaries remain unchanged.
 
+**Forward correction (AD-033/FF-023).** The C7 form also sends the exact current
+`source_capability_revision_id` resolved from Q4 and requires the person to
+select or type one `source_acceptance_criterion_key` from that revision's
+rendered structured content. Both are explicit form/JSON fields; neither is
+inferred from Requirement statement text. Requirement rows render their stored
+source revision and criterion key from Q4.
+
 ## 1. What this document is
 
 The implementation record for the planning packet accepted ahead of coding
@@ -107,6 +114,10 @@ Every command form's `subject_artifact_id` / `subject_revision_id` /
 `capabilityContext` in `internal/ui/handlers_form.go` — rather than asked of
 the person filling the form. Only genuinely new identities (a new
 requirement's artifact ID, a new claim's ID) are typed.
+
+AD-033 preserves that convenience without hiding C7 semantics: the source
+capability revision is the exact current revision carried as a form field, and
+the criterion key is an explicit human choice from its displayed criteria.
 
 ## 7. List-valued and multi-record form fields
 

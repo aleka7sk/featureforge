@@ -661,7 +661,7 @@ func validateAbsentEvidenceReferences(ctx context.Context, r Repositories, inspe
 }
 
 func executionEvidenceOwnersByArtifact(ctx context.Context, r Repositories, inspector EngineeringReplayInspector, artifactID string) ([]engineering.RecordEnvelope, error) {
-	records, err := r.Records.ListByKind(ctx, engineering.RecordKindExecution)
+	records, err := listValidatedRecordsByKind(ctx, r, inspector, engineering.RecordKindExecution)
 	if err != nil {
 		return nil, err
 	}
@@ -742,7 +742,7 @@ func validateEvidencePairOccupancy(ctx context.Context, r Repositories, inspecto
 }
 
 func evidenceHasDecisionCitation(ctx context.Context, r Repositories, inspector EngineeringReplayInspector, key engineering.RevisionKey) (bool, error) {
-	decisions, err := r.Records.ListByKind(ctx, engineering.RecordKindDecision)
+	decisions, err := listValidatedRecordsByKind(ctx, r, inspector, engineering.RecordKindDecision)
 	if err != nil {
 		return false, err
 	}
@@ -771,7 +771,7 @@ func evidenceHasDecisionCitation(ctx context.Context, r Repositories, inspector 
 }
 
 func evidenceOwners(ctx context.Context, r Repositories, inspector EngineeringReplayInspector, key engineering.RevisionKey) ([]engineering.RecordEnvelope, error) {
-	executions, err := r.Records.ListByKind(ctx, engineering.RecordKindExecution)
+	executions, err := listValidatedRecordsByKind(ctx, r, inspector, engineering.RecordKindExecution)
 	if err != nil {
 		return nil, err
 	}
@@ -795,7 +795,7 @@ func evidenceOwners(ctx context.Context, r Repositories, inspector EngineeringRe
 }
 
 func evidenceArtifactOwners(ctx context.Context, r Repositories, inspector EngineeringReplayInspector, artifactID string, soleKey engineering.RevisionKey) ([]engineering.RecordEnvelope, error) {
-	executions, err := r.Records.ListByKind(ctx, engineering.RecordKindExecution)
+	executions, err := listValidatedRecordsByKind(ctx, r, inspector, engineering.RecordKindExecution)
 	if err != nil {
 		return nil, err
 	}
@@ -1190,7 +1190,7 @@ func recordClaim(ctx context.Context, uow UnitOfWork, recorder EngineeringRecord
 		}
 		env = built
 		if in.HasCorrection {
-			_, err = ResolveCurrentClaim(ctx, r, env.SubjectKey, env.Scope, env.CriterionKeys)
+			_, err = ResolveCurrentClaim(ctx, r, inspector, env.SubjectKey, env.Scope, env.CriterionKeys)
 			if errors.Is(err, ErrCorrectionAmbiguous) {
 				// FF-010 §6 deliberately permits competing correction heads;
 				// ambiguity is a query result requiring human resolution, not

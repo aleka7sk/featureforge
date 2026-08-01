@@ -27,11 +27,13 @@ const (
 	PlanArtifactID = "VP-1"
 	PlanRevisionID = "VP-1-REV-1"
 
-	TransitionRecordArtifactID = "TR-1"
-	EntryTransitionRevisionID  = "TR-1-REV-0"
-	FirstTransitionRevisionID  = "TR-1-REV-1"
-	EntryAssignmentID          = "SA-1"
-	FirstAssignmentID          = "SA-2"
+	TransitionRecordArtifactID          = "TR-1"
+	EntryTransitionRevisionID           = "TR-1-REV-0"
+	SpecifyTransitionRevisionID         = "TR-1-REV-1"
+	BeginValidationTransitionRevisionID = "TR-1-REV-2"
+	EntryAssignmentID                   = "SA-1"
+	SpecifiedAssignmentID               = "SA-2"
+	UnderValidationAssignmentID         = "SA-3"
 )
 
 // RequirementArtifactIDs are REQ-1 .. REQ-4 (FF-011 §5). REQ-4 is
@@ -161,4 +163,11 @@ var requirementStatements = map[string]string{
 	"REQ-2": "Published homework SHALL NOT be visible to any user who is not the student of that lesson.",
 	"REQ-3": "Where homework has an audio attachment, that attachment SHALL have a representation the student can resolve.",
 	"REQ-4": "Published homework SHALL become observable to the student within 5 seconds of publication.",
+}
+
+var requirementCriterionKeys = map[string]string{
+	"REQ-1": "AC-1",
+	"REQ-2": "AC-2",
+	"REQ-3": "AC-3",
+	"REQ-4": "AC-4",
 }

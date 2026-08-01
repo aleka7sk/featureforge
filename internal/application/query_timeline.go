@@ -139,27 +139,34 @@ func ResolveApplicableValidationPlanID(ctx context.Context, repos Repositories, 
 // scoped to one revision rather than iterated across every revision the
 // way DiscoverDecisionIDs is -- the caller passes the revision it means,
 // typically the current one from ResolveCurrentRevision.
-func DiscoverExecutionAndClaimIDs(ctx context.Context, repos Repositories, capabilityArtifactID, capabilityRevisionID string) (executionIDs, claimIDs []string, err error) {
+func DiscoverExecutionAndClaimIDs(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, capabilityArtifactID, capabilityRevisionID string) (executionIDs, claimIDs []string, err error) {
+	if _, err := validateManagedHistory(ctx, repos, inspector, capabilityArtifactID, engineering.RevisionFamilyCapability, false); err != nil {
+		return nil, nil, err
+	}
 	subjectKey := engineering.ArtifactRevisionSubjectKey(capabilityArtifactID, capabilityRevisionID)
 
-	executions, err := repos.Records.ListByKindAndSubject(ctx, engineering.RecordKindExecution, subjectKey)
+	records, err := listValidatedRecords(ctx, repos, inspector)
 	if err != nil {
 		return nil, nil, err
 	}
-	executionIDs = make([]string, 0, len(executions))
-	for _, e := range executions {
-		executionIDs = append(executionIDs, e.Key.ID)
+	for _, record := range records {
+		if record.SubjectKey != subjectKey {
+			continue
+		}
+		switch record.Kind {
+		case engineering.RecordKindExecution:
+			if _, _, _, err := validateStoredExecutionAct(ctx, repos, inspector, record); err != nil {
+				return nil, nil, err
+			}
+			executionIDs = append(executionIDs, record.Key.ID)
+		case engineering.RecordKindClaim:
+			if err := validateStoredClaimReferences(ctx, repos, inspector, record); err != nil {
+				return nil, nil, err
+			}
+			claimIDs = append(claimIDs, record.Key.ID)
+		}
 	}
 	sort.Strings(executionIDs)
-
-	claims, err := repos.Records.ListByKindAndSubject(ctx, engineering.RecordKindClaim, subjectKey)
-	if err != nil {
-		return nil, nil, err
-	}
-	claimIDs = make([]string, 0, len(claims))
-	for _, c := range claims {
-		claimIDs = append(claimIDs, c.Key.ID)
-	}
 	sort.Strings(claimIDs)
 
 	return executionIDs, claimIDs, nil
@@ -174,24 +181,26 @@ func DiscoverExecutionAndClaimIDs(ctx context.Context, repos Repositories, capab
 // requires "superseded claims and prior revisions are visible, not
 // hidden" -- an execution, a piece of evidence, or a claim recorded
 // against an earlier capability revision must remain on the timeline
-// after a later revision becomes current. Revisions are enumerated with
-// Revisions.ListByArtifact, exactly as DiscoverDecisionIDs already does;
-// each revision's executions and claims are found via the existing
-// per-revision DiscoverExecutionAndClaimIDs and unioned by their own
-// authoritative record ID, deduplicated and sorted ascending, matching
-// discoverArtifactIDsBySubject's determinism guarantee. Used only by
+// after a later revision becomes current. All Revisions are enumerated and
+// inspected before artifact filtering; each matching revision's executions
+// and claims are then found through the validated per-revision discovery and
+// unioned by their own authoritative record ID, deduplicated and sorted
+// ascending. Used only by
 // GetFeatureTimelineForCard -- Q3/Q4's current-state population
 // (discoverEngineeringStateComponents) is unaffected and remains scoped to
 // the current revision alone: readiness must never let a claim against a
 // superseded revision satisfy the current one (FF-010 §7).
-func DiscoverExecutionAndClaimIDsAllRevisions(ctx context.Context, repos Repositories, capabilityArtifactID string) (executionIDs, claimIDs []string, err error) {
-	revisions, err := repos.Revisions.ListByArtifact(ctx, capabilityArtifactID)
+func DiscoverExecutionAndClaimIDsAllRevisions(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, capabilityArtifactID string) (executionIDs, claimIDs []string, err error) {
+	revisions, err := listValidatedRevisions(ctx, repos, inspector)
 	if err != nil {
 		return nil, nil, err
 	}
 	execSeen, claimSeen := map[string]bool{}, map[string]bool{}
 	for _, rev := range revisions {
-		revExecIDs, revClaimIDs, err := DiscoverExecutionAndClaimIDs(ctx, repos, capabilityArtifactID, rev.Key.RevisionID)
+		if rev.Key.ArtifactID != capabilityArtifactID {
+			continue
+		}
+		revExecIDs, revClaimIDs, err := DiscoverExecutionAndClaimIDs(ctx, repos, inspector, capabilityArtifactID, rev.Key.RevisionID)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -214,16 +223,17 @@ func DiscoverExecutionAndClaimIDsAllRevisions(ctx context.Context, repos Reposit
 }
 
 // DiscoverEvidenceArtifactIDs finds every evidence artifact cited by the
-// given executions and claims, returning their artifact IDs deduplicated
-// and sorted ascending (FF-018 §6.3). Both record kinds project
-// EvidenceKeys; ParseEvidenceKey recovers the artifact ID from each. A
-// malformed key, or an executionID/claimID that does not resolve to a
-// stored record, is an error rather than a silent skip -- both indicate the
-// store is in a state no answer can be derived from, matching
-// ErrTimelineSourceInvalid's existing use for the same class of condition.
-func DiscoverEvidenceArtifactIDs(ctx context.Context, repos Repositories, executionIDs, claimIDs []string) ([]string, error) {
+// given executions and claims, returning their artifact IDs deduplicated and
+// sorted ascending (FF-018 §6.3, corrected by FF-023). Every global Record
+// envelope is inspected before filtering, and each supplied Execution/Claim
+// is then validated with its mandatory exact Evidence references. A dangling
+// mandatory reference is stored-state integrity, never a silent skip.
+func DiscoverEvidenceArtifactIDs(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, executionIDs, claimIDs []string) ([]string, error) {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(executionIDs)+len(claimIDs))
+	if _, err := listValidatedRecords(ctx, repos, inspector); err != nil {
+		return nil, err
+	}
 
 	collect := func(kind engineering.RecordKind, ids []string) error {
 		for _, id := range ids {
@@ -237,6 +247,16 @@ func DiscoverEvidenceArtifactIDs(ctx context.Context, repos Repositories, execut
 			}
 			if !found {
 				return fmt.Errorf("%w: %s does not exist", ErrTimelineSourceInvalid, key)
+			}
+			switch kind {
+			case engineering.RecordKindExecution:
+				if _, _, _, err := validateStoredExecutionAct(ctx, repos, inspector, rec); err != nil {
+					return err
+				}
+			case engineering.RecordKindClaim:
+				if err := validateStoredClaimReferences(ctx, repos, inspector, rec); err != nil {
+					return err
+				}
 			}
 			for _, evidenceKey := range rec.EvidenceKeys {
 				artifactID, _, err := engineering.ParseEvidenceKey(evidenceKey)
@@ -264,11 +284,76 @@ func DiscoverEvidenceArtifactIDs(ctx context.Context, repos Repositories, execut
 	return out, nil
 }
 
+// DiscoverDecisionEvidenceArtifactIDs returns every Evidence Artifact cited
+// by the supplied Decisions. Unlike the execution/claim projection helper
+// above, a Decision citation is included only after both sides of the
+// relationship have passed their authoritative integrity checks: the Decision
+// payload must agree with its projections and references, and the exact cited
+// Evidence Artifact/Revision pair must be complete and valid. A dangling
+// citation is a broken timeline source, never an omitted event.
+func DiscoverDecisionEvidenceArtifactIDs(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, decisionIDs []string) ([]string, error) {
+	seen := make(map[string]bool, len(decisionIDs))
+	out := make([]string, 0, len(decisionIDs))
+	for _, decisionID := range decisionIDs {
+		key, err := engineering.NewRecordKey(engineering.RecordKindDecision, decisionID)
+		if err != nil {
+			return nil, err
+		}
+		decision, found, err := repos.Records.Get(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			return nil, fmt.Errorf("%w: decision %s does not exist", ErrTimelineSourceInvalid, key)
+		}
+		if err := inspectRecord(inspector, decision); err != nil {
+			return nil, err
+		}
+		if err := validateStoredDecisionReferences(ctx, repos, inspector, decision); err != nil {
+			return nil, err
+		}
+
+		artifactID, revisionID, err := engineering.ParseEvidenceKey(decision.EvidenceKeys[0])
+		if err != nil {
+			return nil, integrityError("decision evidence projection", err)
+		}
+		artifact, artifactFound, err := repos.Artifacts.Get(ctx, engineering.ArtifactKey{ArtifactID: artifactID})
+		if err != nil {
+			return nil, err
+		}
+		revisionKey := engineering.RevisionKey{ArtifactID: artifactID, RevisionID: revisionID}
+		revision, revisionFound, err := repos.Revisions.Get(ctx, revisionKey)
+		if err != nil {
+			return nil, err
+		}
+		if !artifactFound || !revisionFound {
+			return nil, fmt.Errorf("%w: decision %s cites unresolved evidence %s", ErrTimelineSourceInvalid, key, revisionKey)
+		}
+		if _, err := validateEvidencePairOccupancy(ctx, repos, inspector, artifact, revision); err != nil {
+			return nil, err
+		}
+		if !seen[artifactID] {
+			seen[artifactID] = true
+			out = append(out, artifactID)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // GetFeatureTimeline computes a feature's complete engineering timeline
 // (FF-010 §9). It is read-only and deterministic: repeated calls on
 // unchanged data return byte-identical results. No source value is mutated.
-func GetFeatureTimeline(ctx context.Context, repos Repositories, in TimelineInput) (TimelineResult, error) {
+func GetFeatureTimeline(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, in TimelineInput) (TimelineResult, error) {
 	var events []TimelineEvent
+	var lifecycleHistory LifecycleHistory
+	if in.CapabilityArtifactID != "" {
+		var err error
+		lifecycleHistory, err = ResolveLifecycleHistory(ctx, repos, inspector, in.CapabilityArtifactID)
+		if err != nil {
+			return TimelineResult{}, err
+		}
+	}
 
 	events = append(events, TimelineEvent{
 		EventID: string(EventProjectCreated) + ":" + in.Project.ID().String(),
@@ -290,15 +375,22 @@ func GetFeatureTimeline(ctx context.Context, repos Repositories, in TimelineInpu
 		if err != nil {
 			return TimelineResult{}, err
 		}
-		if found {
-			events = append(events, timelineFromArtifact(in.FeatureCard.ID(), EventCapabilityCreated, "Capability specification created", artEnv))
+		if !found {
+			return TimelineResult{}, fmt.Errorf("%w: capability artifact %s does not exist", ErrTimelineSourceInvalid, in.CapabilityArtifactID)
 		}
+		if err := inspectArtifact(inspector, artEnv); err != nil {
+			return TimelineResult{}, err
+		}
+		events = append(events, timelineFromArtifact(in.FeatureCard.ID(), EventCapabilityCreated, "Capability specification created", artEnv))
 
 		revisions, err := repos.Revisions.ListByArtifact(ctx, in.CapabilityArtifactID)
 		if err != nil {
 			return TimelineResult{}, err
 		}
 		for _, rev := range revisions {
+			if err := inspectRevision(inspector, rev); err != nil {
+				return TimelineResult{}, err
+			}
 			order, foundOrder, err := repos.RevisionOrder.Get(ctx, rev.Key)
 			if err != nil {
 				return TimelineResult{}, err
@@ -335,7 +427,13 @@ func GetFeatureTimeline(ctx context.Context, repos Repositories, in TimelineInpu
 		if err != nil {
 			return TimelineResult{}, err
 		}
+		if len(revisions) == 0 {
+			return TimelineResult{}, fmt.Errorf("%w: requirement artifact %s has no revisions", ErrTimelineSourceInvalid, reqID)
+		}
 		for _, rev := range revisions {
+			if err := inspectRevision(inspector, rev); err != nil {
+				return TimelineResult{}, err
+			}
 			events = append(events, timelineFromRevision(in.FeatureCard.ID(), EventRequirementRevised, "Requirement recorded", reqID, rev))
 		}
 	}
@@ -349,9 +447,13 @@ func GetFeatureTimeline(ctx context.Context, repos Repositories, in TimelineInpu
 		if err != nil {
 			return TimelineResult{}, err
 		}
-		if found {
-			events = append(events, timelineFromRecord(in.FeatureCard.ID(), EventDecisionRecorded, "Decision recorded", "", rec))
+		if !found {
+			return TimelineResult{}, fmt.Errorf("%w: decision %s does not exist", ErrTimelineSourceInvalid, key)
 		}
+		if err := inspectRecord(inspector, rec); err != nil {
+			return TimelineResult{}, err
+		}
+		events = append(events, timelineFromRecord(in.FeatureCard.ID(), EventDecisionRecorded, "Decision recorded", "", rec))
 	}
 
 	if in.PlanArtifactID != "" {
@@ -359,7 +461,13 @@ func GetFeatureTimeline(ctx context.Context, repos Repositories, in TimelineInpu
 		if err != nil {
 			return TimelineResult{}, err
 		}
+		if len(revisions) == 0 {
+			return TimelineResult{}, fmt.Errorf("%w: validation plan %s has no revisions", ErrTimelineSourceInvalid, in.PlanArtifactID)
+		}
 		for _, rev := range revisions {
+			if err := inspectRevision(inspector, rev); err != nil {
+				return TimelineResult{}, err
+			}
 			events = append(events, timelineFromRevision(in.FeatureCard.ID(), EventPlanRevised, "Validation plan revision recorded", "", rev))
 		}
 	}
@@ -373,17 +481,37 @@ func GetFeatureTimeline(ctx context.Context, repos Repositories, in TimelineInpu
 		if err != nil {
 			return TimelineResult{}, err
 		}
-		if found {
-			events = append(events, timelineFromRecord(in.FeatureCard.ID(), EventExecutionRecorded, "Validation activity executed", rec.Outcome, rec))
+		if !found {
+			return TimelineResult{}, fmt.Errorf("%w: execution %s does not exist", ErrTimelineSourceInvalid, key)
 		}
+		if err := inspectRecord(inspector, rec); err != nil {
+			return TimelineResult{}, err
+		}
+		events = append(events, timelineFromRecord(in.FeatureCard.ID(), EventExecutionRecorded, "Validation activity executed", rec.Outcome, rec))
 	}
 
 	for _, evID := range in.EvidenceArtifactIDs {
+		artifact, found, err := repos.Artifacts.Get(ctx, engineering.ArtifactKey{ArtifactID: evID})
+		if err != nil {
+			return TimelineResult{}, err
+		}
+		if !found {
+			return TimelineResult{}, fmt.Errorf("%w: evidence artifact %s does not exist", ErrTimelineSourceInvalid, evID)
+		}
+		if err := inspectArtifact(inspector, artifact); err != nil {
+			return TimelineResult{}, err
+		}
 		revisions, err := repos.Revisions.ListByArtifact(ctx, evID)
 		if err != nil {
 			return TimelineResult{}, err
 		}
+		if len(revisions) == 0 {
+			return TimelineResult{}, fmt.Errorf("%w: evidence artifact %s has no revisions", ErrTimelineSourceInvalid, evID)
+		}
 		for _, rev := range revisions {
+			if err := inspectRevision(inspector, rev); err != nil {
+				return TimelineResult{}, err
+			}
 			events = append(events, timelineFromRevision(in.FeatureCard.ID(), EventEvidenceRecorded, "Evidence recorded", "", rev))
 		}
 	}
@@ -398,7 +526,10 @@ func GetFeatureTimeline(ctx context.Context, repos Repositories, in TimelineInpu
 			return TimelineResult{}, err
 		}
 		if !found {
-			continue
+			return TimelineResult{}, fmt.Errorf("%w: claim %s does not exist", ErrTimelineSourceInvalid, key)
+		}
+		if err := inspectRecord(inspector, rec); err != nil {
+			return TimelineResult{}, err
 		}
 		kind := EventClaimRecorded
 		label := "Claim recorded"
@@ -418,13 +549,24 @@ func GetFeatureTimeline(ctx context.Context, repos Repositories, in TimelineInpu
 		events = append(events, ev)
 	}
 
-	if in.CapabilityArtifactID != "" {
-		assignments, err := repos.Records.ListByKindAndSubject(ctx, engineering.RecordKindStateAssignment, engineering.ArtifactSubjectKey(in.CapabilityArtifactID))
-		if err != nil {
-			return TimelineResult{}, err
-		}
-		for _, a := range assignments {
-			events = append(events, timelineFromRecord(in.FeatureCard.ID(), EventLifecycleTransitioned, "Lifecycle state -> "+a.StateID, a.StateID, a))
+	if lifecycleHistory.Found {
+		for _, node := range lifecycleHistory.Assignments {
+			events = append(events, TimelineEvent{
+				EventID:        string(EventLifecycleTransitioned) + ":" + node.Assignment.Key.String(),
+				FeatureCardID:  in.FeatureCard.ID(),
+				Kind:           EventLifecycleTransitioned,
+				OccurredAt:     node.Detail.EffectiveAt,
+				HasOccurredAt:  true,
+				Actor:          node.TransitionDetail.Actor,
+				Label:          "Lifecycle state -> " + node.Detail.StateID,
+				Summary:        node.Detail.StateID,
+				SourceIdentity: node.Assignment.Key.String(),
+				References: []string{
+					node.Transition.Key.String(),
+					lifecycleHistory.Policy.DefinitionID + "/" + lifecycleHistory.Policy.VersionID,
+				},
+				Rationale: "validated lifecycle predecessor-chain order",
+			})
 		}
 	}
 

@@ -168,6 +168,14 @@ instead of re-derived.
 - One new sentinel, `ErrStoredPayloadUnreadable`
   (`internal/application/errors.go`), wrapping any projector decode failure.
 
+**Forward correction (AD-033/FF-023).** `EffectiveRequirement` additionally
+carries `SourceCapabilityRevision engineering.RevisionKey` and
+`SourceAcceptanceCriterionKey string`, loaded from the required validated
+`RequirementCriterionTrace`. Q4's `effective_requirements[]` exposes the exact
+source artifact/revision and criterion key, and the Requirements screen renders
+them beside the statement. A missing or corrupt trace fails the whole read with
+opaque stored-state integrity; the UI never infers it from prose.
+
 Every change above is additive to an existing signature or type except the
 two `GetFeatureOverview`/`GetFeatureEngineeringStateForCard` parameter
 additions and the `GetCapabilityRevisions`/`GetCapabilityRevision` return-type
@@ -182,7 +190,7 @@ changes name, type, or meaning.
 | FF-001 need | Where |
 |---|---|
 | Revision specification content | `revisionDTO.content` (new `*contentDTO`, reusing C3/C4's request shape via new `mapContentDTOFromContent`), rendered only by the new `mapRevisionWithContentDTO` — Q6 and Q7 only. Q4's `current_revision` (via `mapRevisionDTO`) deliberately carries no content: `CurrentRevisionResult` has no content lookup, and adding one would have widened a much more broadly-used type for a field only Q6/Q7 need. |
-| Requirement statement | `effectiveRequirementDTO.statement` |
+| Requirement statement and exact source | `effectiveRequirementDTO.statement`, `source_capability_artifact_id`, `source_capability_revision_id`, `source_acceptance_criterion_key` |
 | Decision detail | `applicableDecisionDTO` gains `question`, `outcome_statement`, `rationale`, `alternatives[]`, `basis{evidence[], assumptions[], constraints[], uncertainties[]}` — `basis.evidence` reads the existing `EvidenceKeys` projection, not a decode |
 | Applicable validation plan + activities | `engineeringStateDTO.validation_plan` (new `validationPlanDTO`; its activity type is named `planActivityDetailDTO`, distinct from `dto_command.go`'s request-side `planActivityDTO`) |
 | Current claim detail | `readiness.per_requirement[]` gains `reasoning`, `criterion_keys[]` (from `Claim.CriterionKeys`), `corrects` (from `Claim.CorrectionTargetID` when `Claim.HasCorrection()`) |

@@ -52,9 +52,6 @@ func (c AssignLifecycleStateCommand) Execute(ctx context.Context, uow UnitOfWork
 	if err := requireIdentity("state", c.State); err != nil {
 		return AssignLifecycleStateResult{}, err
 	}
-	if err := requireOneOf("state", c.State, "drafting", "specified", "under-validation", "assessed"); err != nil {
-		return AssignLifecycleStateResult{}, err
-	}
 	if !c.IsEntry {
 		for field, value := range map[string]string{
 			"transition key": c.TransitionKey, "from assignment id": c.FromAssignmentID,
@@ -63,20 +60,7 @@ func (c AssignLifecycleStateCommand) Execute(ctx context.Context, uow UnitOfWork
 				return AssignLifecycleStateResult{}, err
 			}
 		}
-		transitionTargets := map[string]string{
-			"specify": "specified", "begin-validation": "under-validation", "assess": "assessed",
-		}
-		targetState, supported := transitionTargets[c.TransitionKey]
-		if !supported {
-			return AssignLifecycleStateResult{}, &fieldError{field: "transition key", reason: "must name a supported content-bearing transition"}
-		}
-		if c.State != targetState {
-			return AssignLifecycleStateResult{}, &fieldError{field: "state", reason: "must match the configured transition target"}
-		}
 	} else {
-		if c.State != "drafting" {
-			return AssignLifecycleStateResult{}, &fieldError{field: "state", reason: "must be drafting for an entry assignment"}
-		}
 		for field, value := range map[string]string{
 			"transition key": c.TransitionKey, "from assignment id": c.FromAssignmentID,
 		} {
@@ -131,7 +115,7 @@ func (c AssignLifecycleStateCommand) Execute(ctx context.Context, uow UnitOfWork
 		if err != nil {
 			return err
 		}
-		assignments, err := r.Records.ListByKind(ctx, engineering.RecordKindStateAssignment)
+		assignments, err := listValidatedRecordsByKind(ctx, r, inspector, engineering.RecordKindStateAssignment)
 		if err != nil {
 			return err
 		}
@@ -357,6 +341,20 @@ func (c AssignLifecycleStateCommand) Execute(ctx context.Context, uow UnitOfWork
 			if !artifact.Equal(expectedArtifact) || !storedRevision.Equal(expectedRevision) || !storedAssignment.Equal(expectedAssignment) {
 				return immutableConflict("lifecycle identities are occupied by different semantics")
 			}
+			history, historyErr := ResolveLifecycleHistory(ctx, r, inspector, c.SubjectArtifactID)
+			if historyErr != nil {
+				return historyErr
+			}
+			memberFound := false
+			for _, member := range history.Assignments {
+				if member.Assignment.Key == storedAssignment.Key && member.Transition.Key == storedRevision.Key {
+					memberFound = true
+					break
+				}
+			}
+			if !history.Found || !memberFound {
+				return integrityError("replayed lifecycle act is not a member of the validated subject history", nil)
+			}
 			result = AssignLifecycleStateResult{TransitionRevisionKey: storedRevision.Key, AssignmentKey: storedAssignment.Key}
 			return nil
 		}
@@ -372,10 +370,23 @@ func (c AssignLifecycleStateCommand) Execute(ctx context.Context, uow UnitOfWork
 			}
 			ordinaryDependencyError = err
 		}
+		history, historyErr := ResolveLifecycleHistory(ctx, r, inspector, c.SubjectArtifactID)
+		if historyErr != nil {
+			return historyErr
+		}
 
 		if c.IsEntry {
 			if ordinaryDependencyError != nil {
 				return ordinaryDependencyError
+			}
+			if history.Found {
+				return immutableConflict("lifecycle entry already exists for the subject")
+			}
+			if !history.Policy.HasInitialState(c.State) {
+				return lifecycleTransitionInvalid("state %q is not a configured initial state", c.State)
+			}
+			if effectiveAt.After(now) {
+				return lifecycleTransitionInvalid("entry effective time must not be after its recorded time")
 			}
 			if err := requireServerTime(now, "a new lifecycle-entry act"); err != nil {
 				return err
@@ -414,6 +425,24 @@ func (c AssignLifecycleStateCommand) Execute(ctx context.Context, uow UnitOfWork
 			}
 			if ordinaryDependencyError != nil {
 				return ordinaryDependencyError
+			}
+			if !history.Found {
+				return fmt.Errorf("%w: lifecycle subject has no entry assignment", ErrReferencedValueMissing)
+			}
+			if history.RootArtifactID != c.TransitionRecordArtifactID {
+				return fmt.Errorf("%w: predecessor belongs to another lifecycle root", ErrReferencedValueMissing)
+			}
+			if history.Head.Detail.AssignmentID != c.FromAssignmentID {
+				return fmt.Errorf("%w: predecessor %s is not the current lifecycle head", ErrLifecycleHeadConflict, c.FromAssignmentID)
+			}
+			if !history.Policy.Permits(c.TransitionKey, history.Head.Detail.StateID, c.State) {
+				return lifecycleTransitionInvalid("transition %q does not permit %s -> %s", c.TransitionKey, history.Head.Detail.StateID, c.State)
+			}
+			if !history.Head.Detail.EffectiveAt.Before(effectiveAt) || history.Head.Detail.RecordedAt.After(attemptedAt) || attemptedAt.After(completedAt) || completedAt.After(effectiveAt) || effectiveAt.After(now) {
+				return lifecycleTransitionInvalid("transition times do not satisfy source-effective < result-effective and source-recorded <= attempted <= completed <= result-effective <= recorded")
+			}
+			if err := validateLifecycleProductPrecondition(ctx, r, inspector, c.TransitionKey, c.SubjectArtifactID, completedAt); err != nil {
+				return err
 			}
 			if err := requireServerTime(now, "a new lifecycle-transition act"); err != nil {
 				return err

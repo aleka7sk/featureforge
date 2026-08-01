@@ -69,13 +69,16 @@ func TestCorruptAcceptanceMaterializationFailsReplayWithoutStateChange(t *testin
 	ctx := context.Background()
 
 	seedCapability(t, uow, recorder, recorder, clock)
+	acceptCapabilityForRequirement(t, uow, recorder, clock)
 	acceptanceRecordID := "ACC-REQ-1-REV-1"
 	command := application.EstablishRequirementCommand{
-		ArtifactID:         "REQ-1",
-		RevisionID:         "REQ-1-REV-1",
-		Statement:          "Published homework SHALL be visible to the student.",
-		SubjectArtifactID:  "CAP-1",
-		AcceptanceRecordID: &acceptanceRecordID,
+		ArtifactID:                   "REQ-1",
+		RevisionID:                   "REQ-1-REV-1",
+		Statement:                    "Published homework SHALL be visible to the student.",
+		SubjectArtifactID:            "CAP-1",
+		SourceCapabilityRevisionID:   "CAP-1-REV-1",
+		SourceAcceptanceCriterionKey: "AC-1",
+		AcceptanceRecordID:           &acceptanceRecordID,
 	}
 	if _, err := command.Execute(ctx, uow, recorder, recorder, clock); err != nil {
 		t.Fatalf("establishing requirement: %v", err)
@@ -151,6 +154,7 @@ func postgresStateSnapshot(t *testing.T, pool *pgxpool.Pool) []string {
 		`SELECT COALESCE(jsonb_agg(to_jsonb(row_data)), '[]'::jsonb)::text FROM (SELECT * FROM structured_content ORDER BY artifact_id, revision_id) AS row_data`,
 		`SELECT COALESCE(jsonb_agg(to_jsonb(row_data)), '[]'::jsonb)::text FROM (SELECT * FROM record_envelopes ORDER BY kind, id) AS row_data`,
 		`SELECT COALESCE(jsonb_agg(to_jsonb(row_data)), '[]'::jsonb)::text FROM (SELECT * FROM revision_order ORDER BY artifact_id, revision_id) AS row_data`,
+		`SELECT COALESCE(jsonb_agg(to_jsonb(row_data)), '[]'::jsonb)::text FROM (SELECT * FROM requirement_criterion_traces ORDER BY requirement_artifact_id, requirement_revision_id) AS row_data`,
 		`SELECT COALESCE(jsonb_agg(to_jsonb(row_data)), '[]'::jsonb)::text FROM (SELECT * FROM revision_acceptance ORDER BY id) AS row_data`,
 	}
 

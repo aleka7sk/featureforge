@@ -8,10 +8,27 @@ import (
 
 	"github.com/aleka7sk/featureforge/internal/application"
 	"github.com/aleka7sk/featureforge/internal/engineering"
+	peos "github.com/aleka7sk/featureforge/internal/engineering/peos"
 	"github.com/aleka7sk/featureforge/internal/infrastructure/memory"
 )
 
 func fixedTime() time.Time { return time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC) }
+
+// lenientEnvelopeInspector lets legacy algorithm-focused fixtures keep their
+// intentionally minimal non-PEOS envelopes while delegating every richer
+// lifecycle/configuration inspection to the real recorder. Integrity-focused
+// suites use peos.Recorder directly.
+type lenientEnvelopeInspector struct {
+	peos.Recorder
+}
+
+func newLenientEnvelopeInspector() lenientEnvelopeInspector {
+	return lenientEnvelopeInspector{Recorder: peos.NewRecorder()}
+}
+
+func (lenientEnvelopeInspector) ValidateArtifact(engineering.ArtifactEnvelope) error { return nil }
+func (lenientEnvelopeInspector) ValidateRevision(engineering.RevisionEnvelope) error { return nil }
+func (lenientEnvelopeInspector) ValidateRecord(engineering.RecordEnvelope) error     { return nil }
 
 func newStoreAndUOW() *memory.UnitOfWork {
 	return memory.NewUnitOfWork(memory.NewStore())
@@ -41,17 +58,16 @@ func newStoreWithRecordSubject(t *testing.T) *memory.UnitOfWork {
 	if err != nil {
 		t.Fatal(err)
 	}
+	recorder := peos.NewRecorder()
+	if err := application.EnsureLifecycleConfiguration(context.Background(), uow, recorder, recorder); err != nil {
+		t.Fatal(err)
+	}
 	return uow
 }
 
 func mustArtEnv(t *testing.T, artifactID string) engineering.ArtifactEnvelope {
 	t.Helper()
-	key, err := engineering.NewArtifactKey(artifactID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload := []byte(`{"artifact_id":"` + artifactID + `"}`)
-	env, err := engineering.NewArtifactEnvelope(key, "featureforge:product-capability", payload, engineering.ComputeDigest(payload), fixedTime())
+	env, err := peos.NewRecorder().RecordCapabilityArtifact(artifactID, fixedTime())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,15 +76,10 @@ func mustArtEnv(t *testing.T, artifactID string) engineering.ArtifactEnvelope {
 
 func mustRevEnv(t *testing.T, artifactID, revisionID string) engineering.RevisionEnvelope {
 	t.Helper()
-	key, err := engineering.NewRevisionKey(artifactID, revisionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload := []byte(`{"revision_id":"` + revisionID + `"}`)
-	env, err := engineering.NewRevisionEnvelope(engineering.RevisionEnvelopeInput{
-		Key: key, RevisionFamily: engineering.RevisionFamilyCapability,
-		ArtifactType: "featureforge:product-capability", IntegrityValue: "sha256:abc",
-		Payload: payload, PayloadDigest: engineering.ComputeDigest(payload), RecordedAt: fixedTime(),
+	env, err := peos.NewRecorder().RecordCapabilityRevision(engineering.CapabilityRevisionInput{
+		ArtifactID: artifactID, RevisionID: revisionID,
+		ContentDigest: engineering.ComputeDigest([]byte("test capability content")),
+		RecordedAt:    fixedTime(),
 	})
 	if err != nil {
 		t.Fatal(err)

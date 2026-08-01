@@ -313,6 +313,7 @@ func TestNoUpdateOrDeleteMethodExists(t *testing.T) {
 		(*application.RecordEnvelopeRepository)(nil),
 		(*application.RevisionOrderRepository)(nil),
 		(*application.RevisionAcceptanceRepository)(nil),
+		(*application.RequirementCriterionTraceRepository)(nil),
 	}
 	forbidden := []string{"Update", "Delete", "Remove", "Set"}
 	for _, rt := range repoTypes {

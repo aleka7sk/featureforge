@@ -95,6 +95,24 @@ func assertCanonicalEndState(
 		t.Errorf("current sequence = %d, want 2", currentRevision.Sequence)
 	}
 
+	// AD-033: every canonical Requirement revision carries an exact,
+	// persisted trace to CAP-1-REV-2 and its corresponding criterion.
+	criterionByRequirement := map[string]string{"REQ-1": "AC-1", "REQ-2": "AC-2", "REQ-3": "AC-3", "REQ-4": "AC-4"}
+	for requirementID, criterionKey := range criterionByRequirement {
+		requirementKey := mustRevisionKey(t, requirementID, requirementID+"-REV-1")
+		trace := doQuery(t, uow, func(r application.Repositories) (engineering.RequirementCriterionTrace, error) {
+			stored, found, err := r.RequirementTraces.Get(ctx, requirementKey)
+			if err == nil && !found {
+				t.Fatalf("criterion trace for %s not found", requirementKey)
+			}
+			return stored, err
+		})
+		if trace.CapabilityRevision != currentRevision.Revision.Key || trace.AcceptanceCriterionKey != criterionKey {
+			t.Errorf("criterion trace for %s = (%s, %s), want (%s, %s)",
+				requirementKey, trace.CapabilityRevision, trace.AcceptanceCriterionKey, currentRevision.Revision.Key, criterionKey)
+		}
+	}
+
 	// 3. Content is readable and its digest matches the revision's integrity.
 	content := doQuery(t, uow, func(r application.Repositories) (engineering.CapabilitySpecificationContent, error) {
 		c, found, err := r.StructuredContent.Get(ctx, currentRevision.Revision.Key)
@@ -141,7 +159,7 @@ func assertCanonicalEndState(
 
 	// 5. All four requirements exist.
 	effective := doQuery(t, uow, func(r application.Repositories) ([]application.EffectiveRequirement, error) {
-		return application.ResolveEffectiveRequirements(ctx, r, scenario.RequirementArtifactIDs)
+		return application.ResolveEffectiveRequirements(ctx, r, peos.NewRecorder(), scenario.RequirementArtifactIDs)
 	})
 	if len(effective) != 4 {
 		t.Fatalf("effective requirements = %d, want 4", len(effective))
@@ -250,7 +268,7 @@ func assertCanonicalEndState(
 	req4Key := mustRevisionKey(t, "REQ-4", "REQ-4-REV-1")
 	req4Criterion := mustCriterionKey(t, req4Key)
 	req4Result := doQuery(t, uow, func(r application.Repositories) (application.CurrentClaimResult, error) {
-		return application.ResolveCurrentClaim(ctx, r, subjectKey, claimScope, []string{req4Criterion})
+		return application.ResolveCurrentClaim(ctx, r, peos.NewRecorder(), subjectKey, claimScope, []string{req4Criterion})
 	})
 	if req4Result.Found {
 		t.Errorf("REQ-4 unexpectedly has a current claim: %s", req4Result.Claim.Key)
@@ -259,7 +277,7 @@ func assertCanonicalEndState(
 	// 10. Release readiness is not-ready (REQ-2 not satisfied; REQ-4 also
 	// reported uncovered).
 	readiness := doQuery(t, uow, func(r application.Repositories) (application.ReadinessResult, error) {
-		return application.ResolveReadiness(ctx, r, currentRevision.Revision, effective)
+		return application.ResolveReadiness(ctx, r, peos.NewRecorder(), currentRevision.Revision, effective)
 	})
 	if readiness.Status != application.ReadinessNotReady {
 		t.Errorf("readiness = %s, want %s", readiness.Status, application.ReadinessNotReady)
@@ -277,7 +295,7 @@ func assertCanonicalEndState(
 	// 11. Lifecycle state is under-validation, not assessed -- REQ-4 was
 	// never validated, so the assessment is not complete (FF-011 §8).
 	lifecycle := doQuery(t, uow, func(r application.Repositories) (application.LifecycleStateResult, error) {
-		return application.ResolveLifecycleState(ctx, r, scenario.CapabilityArtifactID)
+		return application.ResolveLifecycleState(ctx, r, peos.NewRecorder(), scenario.CapabilityArtifactID)
 	})
 	if !lifecycle.Found {
 		t.Fatal("expected a resolved lifecycle state")
@@ -288,10 +306,10 @@ func assertCanonicalEndState(
 
 	// 12. Timeline is complete and links CLM-4 to CLM-2.
 	timeline := doQuery(t, uow, func(r application.Repositories) (application.TimelineResult, error) {
-		return application.GetFeatureTimeline(ctx, r, timelineInput(t, ctx, r, result))
+		return application.GetFeatureTimeline(ctx, r, peos.NewRecorder(), timelineInput(t, ctx, r, result))
 	})
-	if len(timeline.Dated) == 0 {
-		t.Error("timeline has no dated events")
+	if len(timeline.Dated) != 29 || len(timeline.Undated) != 0 {
+		t.Errorf("timeline event counts = %d dated/%d undated, want 29 dated/0 undated", len(timeline.Dated), len(timeline.Undated))
 	}
 	sawCorrection := false
 	for _, ev := range timeline.Dated {
@@ -326,10 +344,10 @@ func assertCanonicalEndState(
 	}
 
 	discoveredEffective := doQuery(t, uow, func(r application.Repositories) ([]application.EffectiveRequirement, error) {
-		return application.ResolveEffectiveRequirements(ctx, r, discovered)
+		return application.ResolveEffectiveRequirements(ctx, r, peos.NewRecorder(), discovered)
 	})
 	discoveredReadiness := doQuery(t, uow, func(r application.Repositories) (application.ReadinessResult, error) {
-		return application.ResolveReadiness(ctx, r, currentRevision.Revision, discoveredEffective)
+		return application.ResolveReadiness(ctx, r, peos.NewRecorder(), currentRevision.Revision, discoveredEffective)
 	})
 	if discoveredReadiness.Status != application.ReadinessNotReady {
 		t.Errorf("readiness from discovered requirements = %s, want %s", discoveredReadiness.Status, application.ReadinessNotReady)
@@ -344,11 +362,11 @@ func assertCanonicalEndState(
 		t.Error("expected REQ-4, found via discovery rather than a caller-supplied list, to be reported with no applicable claim")
 	}
 
-	// 14. Transition-record subject discovery (AD-026, FF-017). Both
+	// 14. Transition-record subject discovery (AD-026, FF-017). All three
 	// lifecycle acts the scenario recorded -- the entry assignment (step 5,
 	// content-free per AD-014, whose SubjectKey the architecture review's
 	// finding F-001 identified as unrecoverable from its own payload) and the
-	// first transition (step 10) -- are revisions of RevisionFamily
+	// specify and begin-validation transitions -- are revisions of RevisionFamily
 	// TransitionRecord projecting CAP-1 as their subject. This is the
 	// narrowest layer that exercises BuildEntryAssignment and BuildTransition
 	// through the real command path against a real repository, on whichever
@@ -358,7 +376,8 @@ func assertCanonicalEndState(
 	})
 	wantTransitionKeys := []string{
 		scenario.TransitionRecordArtifactID + "/" + scenario.EntryTransitionRevisionID,
-		scenario.TransitionRecordArtifactID + "/" + scenario.FirstTransitionRevisionID,
+		scenario.TransitionRecordArtifactID + "/" + scenario.SpecifyTransitionRevisionID,
+		scenario.TransitionRecordArtifactID + "/" + scenario.BeginValidationTransitionRevisionID,
 	}
 	if len(transitionRecords) != len(wantTransitionKeys) {
 		t.Fatalf("transition-record revisions discovered by subject = %v, want exactly %v", transitionRecords, wantTransitionKeys)
@@ -424,12 +443,12 @@ func assertSameResolvedState(t *testing.T, ctx context.Context, uowA, uowB appli
 		claimA := doQuery(t, uowA, func(r application.Repositories) (application.CurrentClaimResult, error) {
 			revKey := mustRevisionKey(t, reqArtifact, reqArtifact+"-REV-1")
 			criterion := mustCriterionKey(t, revKey)
-			return application.ResolveCurrentClaim(ctx, r, subjectKey, claimScope, []string{criterion})
+			return application.ResolveCurrentClaim(ctx, r, peos.NewRecorder(), subjectKey, claimScope, []string{criterion})
 		})
 		claimB := doQuery(t, uowB, func(r application.Repositories) (application.CurrentClaimResult, error) {
 			revKey := mustRevisionKey(t, reqArtifact, reqArtifact+"-REV-1")
 			criterion := mustCriterionKey(t, revKey)
-			return application.ResolveCurrentClaim(ctx, r, subjectKey, claimScope, []string{criterion})
+			return application.ResolveCurrentClaim(ctx, r, peos.NewRecorder(), subjectKey, claimScope, []string{criterion})
 		})
 		if claimA.Found != claimB.Found || claimA.Claim.Key != claimB.Claim.Key {
 			t.Errorf("%s current claim differs by insertion order: %v vs %v", reqArtifact, claimA.Claim.Key, claimB.Claim.Key)
@@ -437,26 +456,26 @@ func assertSameResolvedState(t *testing.T, ctx context.Context, uowA, uowB appli
 	}
 
 	lifecycleA := doQuery(t, uowA, func(r application.Repositories) (application.LifecycleStateResult, error) {
-		return application.ResolveLifecycleState(ctx, r, scenario.CapabilityArtifactID)
+		return application.ResolveLifecycleState(ctx, r, peos.NewRecorder(), scenario.CapabilityArtifactID)
 	})
 	lifecycleB := doQuery(t, uowB, func(r application.Repositories) (application.LifecycleStateResult, error) {
-		return application.ResolveLifecycleState(ctx, r, scenario.CapabilityArtifactID)
+		return application.ResolveLifecycleState(ctx, r, peos.NewRecorder(), scenario.CapabilityArtifactID)
 	})
 	if lifecycleA.Assignment.StateID != lifecycleB.Assignment.StateID {
 		t.Errorf("lifecycle state differs by insertion order: %q vs %q", lifecycleA.Assignment.StateID, lifecycleB.Assignment.StateID)
 	}
 
 	effectiveA := doQuery(t, uowA, func(r application.Repositories) ([]application.EffectiveRequirement, error) {
-		return application.ResolveEffectiveRequirements(ctx, r, scenario.RequirementArtifactIDs)
+		return application.ResolveEffectiveRequirements(ctx, r, peos.NewRecorder(), scenario.RequirementArtifactIDs)
 	})
 	readinessA := doQuery(t, uowA, func(r application.Repositories) (application.ReadinessResult, error) {
-		return application.ResolveReadiness(ctx, r, currentA.Revision, effectiveA)
+		return application.ResolveReadiness(ctx, r, peos.NewRecorder(), currentA.Revision, effectiveA)
 	})
 	effectiveB := doQuery(t, uowB, func(r application.Repositories) ([]application.EffectiveRequirement, error) {
-		return application.ResolveEffectiveRequirements(ctx, r, scenario.RequirementArtifactIDs)
+		return application.ResolveEffectiveRequirements(ctx, r, peos.NewRecorder(), scenario.RequirementArtifactIDs)
 	})
 	readinessB := doQuery(t, uowB, func(r application.Repositories) (application.ReadinessResult, error) {
-		return application.ResolveReadiness(ctx, r, currentB.Revision, effectiveB)
+		return application.ResolveReadiness(ctx, r, peos.NewRecorder(), currentB.Revision, effectiveB)
 	})
 	if readinessA.Status != readinessB.Status {
 		t.Errorf("readiness differs by insertion order: %s vs %s", readinessA.Status, readinessB.Status)
@@ -471,7 +490,7 @@ func assertCurrentClaim(t *testing.T, ctx context.Context, uow application.UnitO
 	revKey := mustRevisionKey(t, reqArtifact, reqArtifact+"-REV-1")
 	criterion := mustCriterionKey(t, revKey)
 	result := doQuery(t, uow, func(r application.Repositories) (application.CurrentClaimResult, error) {
-		return application.ResolveCurrentClaim(ctx, r, subjectKey, scope, []string{criterion})
+		return application.ResolveCurrentClaim(ctx, r, peos.NewRecorder(), subjectKey, scope, []string{criterion})
 	})
 	if !result.Found {
 		t.Fatalf("%s: expected a current claim", reqArtifact)

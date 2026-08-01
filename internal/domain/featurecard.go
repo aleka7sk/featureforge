@@ -80,5 +80,17 @@ func (c FeatureCard) CapabilityArtifactID() (string, bool) {
 	return c.capabilityArtifactID, c.hasCapabilityArtifact
 }
 
+// SameEstablishment reports whether c and other carry the same stable base
+// FeatureCard value. The separately persisted, monotonic capability link is
+// deliberately excluded: materializing that link on a read must not turn an
+// otherwise identical create-only Put into a conflict.
+func (c FeatureCard) SameEstablishment(other FeatureCard) bool {
+	return c.id == other.id &&
+		c.projectID == other.projectID &&
+		c.title == other.title &&
+		c.description == other.description &&
+		c.createdAt.Equal(other.createdAt)
+}
+
 // IsZero reports whether c is the zero value.
 func (c FeatureCard) IsZero() bool { return c.id.IsZero() }

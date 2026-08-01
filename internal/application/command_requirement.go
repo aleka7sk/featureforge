@@ -13,11 +13,13 @@ import (
 // covers both a requirement's first appearance and any later revision,
 // since both record a requirement.Revision the identical way).
 type EstablishRequirementCommand struct {
-	ArtifactID         string
-	RevisionID         string
-	Statement          string
-	SubjectArtifactID  string
-	AcceptanceRecordID *string
+	ArtifactID                   string
+	RevisionID                   string
+	Statement                    string
+	SubjectArtifactID            string
+	SourceCapabilityRevisionID   string
+	SourceAcceptanceCriterionKey string
+	AcceptanceRecordID           *string
 }
 
 // EstablishRequirementResult names the keys created.
@@ -40,6 +42,12 @@ func (c EstablishRequirementCommand) Execute(ctx context.Context, uow UnitOfWork
 	}
 	if err := requireIdentity("subject artifact id", c.SubjectArtifactID); err != nil {
 		return EstablishRequirementResult{}, err
+	}
+	if err := requireIdentity("source capability revision id", c.SourceCapabilityRevisionID); err != nil {
+		return EstablishRequirementResult{}, err
+	}
+	if err := engineering.ValidateAcceptanceCriterionKey(c.SourceAcceptanceCriterionKey); err != nil {
+		return EstablishRequirementResult{}, invalidCommand(err)
 	}
 	key, err := engineering.NewRevisionKey(c.ArtifactID, c.RevisionID)
 	if err != nil {
@@ -65,7 +73,11 @@ func (c EstablishRequirementCommand) Execute(ctx context.Context, uow UnitOfWork
 		if err != nil {
 			return err
 		}
-		pOccupied := revisionFound || contentFound || orderFound || len(journal) > 0
+		trace, traceFound, err := r.RequirementTraces.Get(ctx, key)
+		if err != nil {
+			return err
+		}
+		pOccupied := revisionFound || contentFound || orderFound || len(journal) > 0 || traceFound
 
 		if pOccupied {
 			if !revisionFound {
@@ -103,6 +115,9 @@ func (c EstablishRequirementCommand) Execute(ctx context.Context, uow UnitOfWork
 			if _, err := validateManagedHistory(ctx, r, inspector, c.ArtifactID, engineering.RevisionFamilyRequirement, true); err != nil {
 				return err
 			}
+			if !traceFound {
+				return integrityError("requirement pair has no criterion trace", nil)
+			}
 			member, err := semanticAcceptanceMember(key, journal)
 			if err != nil {
 				return err
@@ -120,6 +135,18 @@ func (c EstablishRequirementCommand) Execute(ctx context.Context, uow UnitOfWork
 			}
 			if !artifactEnv.Equal(expectedArtifact) || !revisionEnv.Equal(expectedRevision) {
 				return immutableConflict("requirement pair is occupied by different semantics")
+			}
+			expectedSource, buildErr := engineering.NewRevisionKey(c.SubjectArtifactID, c.SourceCapabilityRevisionID)
+			if buildErr != nil {
+				return invalidCommand(buildErr)
+			}
+			expectedTrace, buildErr := engineering.NewRequirementCriterionTrace(
+				key, expectedSource, c.SourceAcceptanceCriterionKey, revisionEnv.RecordedAt)
+			if buildErr != nil {
+				return invalidCommand(buildErr)
+			}
+			if !trace.Equal(expectedTrace) {
+				return immutableConflict("requirement pair is occupied by a different criterion trace")
 			}
 			if err := validateCapabilityArtifactReference(ctx, r, recorder, inspector, c.SubjectArtifactID, "requirement subject", true); err != nil {
 				return err
@@ -174,7 +201,9 @@ func (c EstablishRequirementCommand) Execute(ctx context.Context, uow UnitOfWork
 			return err
 		}
 
-		if err := validateCapabilityArtifactReference(ctx, r, recorder, inspector, c.SubjectArtifactID, "requirement subject", false); err != nil {
+		sourceKey, err := validateNewRequirementCriterionSource(ctx, r, recorder, inspector,
+			c.SubjectArtifactID, c.SourceCapabilityRevisionID, c.SourceAcceptanceCriterionKey)
+		if err != nil {
 			return err
 		}
 		if now.IsZero() {
@@ -218,6 +247,14 @@ func (c EstablishRequirementCommand) Execute(ctx context.Context, uow UnitOfWork
 		if err := r.RevisionOrder.Put(ctx, newOrder); err != nil {
 			return err
 		}
+		trace, err = engineering.NewRequirementCriterionTrace(
+			newRevision.Key, sourceKey, c.SourceAcceptanceCriterionKey, now)
+		if err != nil {
+			return invalidCommand(err)
+		}
+		if err := r.RequirementTraces.Put(ctx, trace); err != nil {
+			return err
+		}
 		acceptance, err := engineering.NewRevisionAcceptanceRecord(
 			*c.AcceptanceRecordID, newRevision.Key, engineering.AcceptanceStateAccepted, now,
 			"featureforge:local-user", "requirement established",
@@ -236,6 +273,53 @@ func (c EstablishRequirementCommand) Execute(ctx context.Context, uow UnitOfWork
 		return EstablishRequirementResult{}, err
 	}
 	return result, nil
+}
+
+func validateNewRequirementCriterionSource(ctx context.Context, r Repositories, recorder EngineeringRecorder, inspector EngineeringReplayInspector, artifactID, revisionID, criterionKey string) (engineering.RevisionKey, error) {
+	if err := validateCapabilityArtifactReference(ctx, r, recorder, inspector, artifactID, "requirement criterion source", false); err != nil {
+		return engineering.RevisionKey{}, err
+	}
+	key, err := engineering.NewRevisionKey(artifactID, revisionID)
+	if err != nil {
+		return engineering.RevisionKey{}, invalidCommand(err)
+	}
+	revision, found, err := r.Revisions.Get(ctx, key)
+	if err != nil {
+		return engineering.RevisionKey{}, err
+	}
+	if !found {
+		return engineering.RevisionKey{}, fmt.Errorf("%w: source capability revision %s", ErrReferencedValueMissing, key)
+	}
+	if err := inspectRevision(inspector, revision); err != nil {
+		return engineering.RevisionKey{}, err
+	}
+	if revision.RevisionFamily != engineering.RevisionFamilyCapability {
+		return engineering.RevisionKey{}, integrityError("source capability history mixes revision families", nil)
+	}
+	current, err := ResolveCurrentRevision(ctx, r, artifactID)
+	if err != nil {
+		return engineering.RevisionKey{}, err
+	}
+	if !current.Found {
+		return engineering.RevisionKey{}, fmt.Errorf("%w: source capability has no accepted current revision", ErrReferencedValueMissing)
+	}
+	if current.Revision.Key != key {
+		return engineering.RevisionKey{}, fmt.Errorf("%w: source capability revision %s is not the accepted current revision", ErrReferencedValueMissing, key)
+	}
+	content, found, err := r.StructuredContent.Get(ctx, key)
+	if err != nil {
+		return engineering.RevisionKey{}, err
+	}
+	if !found {
+		return engineering.RevisionKey{}, integrityError("source capability revision has no structured content", nil)
+	}
+	if err := inspector.ValidateCapabilityContent(revision, content); err != nil {
+		return engineering.RevisionKey{}, integrityError("source capability content disagrees with its revision", err)
+	}
+	if !capabilityContentHasCriterion(content, criterionKey) {
+		return engineering.RevisionKey{}, fmt.Errorf("%w: acceptance criterion %s does not exist on source revision %s", ErrReferencedValueMissing, criterionKey, key)
+	}
+	return key, nil
 }
 
 func inspectDifferentAcceptanceCandidate(ctx context.Context, r Repositories, inspector EngineeringReplayInspector, supplied *string, exactMemberID string) error {

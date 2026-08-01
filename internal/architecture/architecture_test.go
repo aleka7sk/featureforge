@@ -146,7 +146,7 @@ func TestAdaptersDoNotImportEachOther(t *testing.T) {
 func TestNoUpdateOrDeleteOnEngineeringTables(t *testing.T) {
 	engineeringTables := []string{
 		"artifact_envelopes", "revision_envelopes", "structured_content",
-		"record_envelopes", "revision_order", "revision_acceptance",
+		"record_envelopes", "revision_order", "revision_acceptance", "requirement_criterion_traces",
 		"projects", "feature_cards",
 	}
 	dir := filepath.Join(ModuleRoot(), "internal", "infrastructure", "postgres")

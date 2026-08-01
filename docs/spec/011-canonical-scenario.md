@@ -52,10 +52,10 @@ Deterministic and fixed. No generation.
 | Execution records | `ER-1`, `ER-2`, `ER-3`, `ER-4` |
 | Claims | `CLM-1`, `CLM-2`, `CLM-3`, `CLM-4` |
 | Transition record artifact | `TR-1` |
-| Transition record revisions | `TR-1-REV-0` (entry), `TR-1-REV-1` |
-| State assignments | `SA-1` (drafting), `SA-2` (under-validation) |
+| Transition record revisions | `TR-1-REV-0` (entry), `TR-1-REV-1` (specify), `TR-1-REV-2` (begin validation) |
+| State assignments | `SA-1` (drafting), `SA-2` (specified), `SA-3` (under-validation) |
 | Lifecycle definition / version | `LCD-1` / `LCDV-1` |
-| Acceptance records | `ACC-1`, `ACC-2` |
+| Acceptance records | `ACC-1`, `ACC-2`, `ACC-REQ-1` … `ACC-REQ-4`, `ACC-VP-1` |
 
 **Claim naming.** M.1's narrative used `C-2`/`C-4`; the fixtures use `CLM-n` to
 avoid collision with acceptance-criterion keys `AC-n`. `CLM-2` is the incorrect
@@ -228,7 +228,8 @@ never merged into one field with one meaning.
 | Transitions | `specify` (drafting→specified), `begin-validation` (specified→under-validation), `assess` (under-validation→assessed), plus entry transition `enter` (→drafting) |
 | Subject | `core.NewLifecycleSubjectRefFromArtifact(core.NewArtifactRef(CAP-1))` |
 | `SA-1` (entry) | `lifecycle.NewStateAssignment(SA-1, subject, dvRef, drafting, effectiveAt, provenance, ref(TR-1, TR-1-REV-0))` where `TR-1-REV-0` is a plain `core.ArtifactRevision` with **no** transition content — see AD-014 |
-| `SA-2` | Established by a full `TransitionRecordRevision`: `lifecycle.NewTransitionRecordContent(subject, dvRef, transitionID, fromAssignment=SA-1.Ref(), attemptedAt, lifecycle.TransitionOutcomeSucceeded)` → `.WithToState(...)` → `.WithResultingAssignment(SA-2.Ref())` → `.WithCompletedAt(...)` → `lifecycle.NewTransitionRecordRevision(record, coreRev, content)` |
+| `SA-2` | `specify`: full `TransitionRecordRevision` from `SA-1/drafting`, resulting in `SA-2/specified` |
+| `SA-3` | `begin-validation`: full `TransitionRecordRevision` from `SA-2/specified`, resulting in `SA-3/under-validation` after the first execution has been recorded |
 | Sentinels | `lifecycle.ErrInvalidStateAssignment`, `ErrInvalidTransitionRecordRevision`, `ErrInvalidDefinitionVersion` |
 | Envelope | `RecordEnvelope` kind `state-assignment`; transition record revisions are `RevisionEnvelope` family `transition-record` |
 
@@ -237,12 +238,12 @@ never merged into one field with one meaning.
 Four requirements. Each subject is the capability Artifact `CAP-1`; each scope is
 `featureforge:capability|CAP-1`; each has one revision `REQ-n-REV-1`.
 
-| ID | Statement | From | Criterion reference | Plan activity | Final status |
+| ID | Statement | Exact source trace | Claim criterion | Plan activity | Final status |
 |---|---|---|---|---|---|
-| `REQ-1` | Published homework SHALL be visible to the student of the lesson it belongs to. | AC-1 | `REQ-1/REQ-1-REV-1` | `A-1` | **satisfied** (`CLM-1`) |
-| `REQ-2` | Published homework SHALL NOT be visible to any user who is not the student of that lesson. | AC-2 | `REQ-2/REQ-2-REV-1` | `A-2` | **not-satisfied** (`CLM-4`, correcting `CLM-2`) |
-| `REQ-3` | Where homework has an audio attachment, that attachment SHALL have a representation the student can resolve. | AC-3 | `REQ-3/REQ-3-REV-1` | `A-3` | **satisfied** (`CLM-3`) |
-| `REQ-4` | Published homework SHALL become observable to the student within 5 seconds of publication. | AC-4 | `REQ-4/REQ-4-REV-1` | **none** | **uncovered** — no claim |
+| `REQ-1` | Published homework SHALL be visible to the student of the lesson it belongs to. | `CAP-1/CAP-1-REV-2#AC-1` | `REQ-1/REQ-1-REV-1` | `A-1` | **satisfied** (`CLM-1`) |
+| `REQ-2` | Published homework SHALL NOT be visible to any user who is not the student of that lesson. | `CAP-1/CAP-1-REV-2#AC-2` | `REQ-2/REQ-2-REV-1` | `A-2` | **not-satisfied** (`CLM-4`, correcting `CLM-2`) |
+| `REQ-3` | Where homework has an audio attachment, that attachment SHALL have a representation the student can resolve. | `CAP-1/CAP-1-REV-2#AC-3` | `REQ-3/REQ-3-REV-1` | `A-3` | **satisfied** (`CLM-3`) |
+| `REQ-4` | Published homework SHALL become observable to the student within 5 seconds of publication. | `CAP-1/CAP-1-REV-2#AC-4` | `REQ-4/REQ-4-REV-1` | **none** | **uncovered** — no claim |
 
 **Requirement text lives in `requirement.Statement`**, a genuine PEOS-005 field.
 No PEOS field is invented, and requirement text is not duplicated into
@@ -251,8 +252,10 @@ FeatureForge-owned; requirement content is PEOS-owned.
 
 ### Why `REQ-4` is uncovered
 
-M.1 left AC-4 without a requirement. M.2 promotes it to a requirement and leaves
-it **without a validation activity and without a claim**. This is strictly
+M.1 left AC-4 without a requirement. AD-033 confirms M.2's executable choice to
+promote it to a requirement and leaves it **without a validation activity and
+without a claim**. Its exact Revision 2/AC-4 source is persisted. This is
+strictly
 better: it exercises `incomplete` (a requirement with no claim) alongside
 `not-ready` (a requirement with a negative claim), so the readiness precedence
 rule in [FF-010 §7](010-application-contracts.md#precedence--challenged-and-finalised)
@@ -329,15 +332,20 @@ after, and `CLM-2` still reads `satisfied` when fetched directly.
 An evidence reference is resolved by looking up `RevisionEnvelope` at the
 `RevisionKey` derived from the `EvidenceArtifactRevisionRef`'s artifact and
 revision IDs, and asserting `RevisionFamily = evidence`. A reference that does
-not resolve is `ErrReferencedValueMissing` at write time and
-`ErrTimelineSourceInvalid` at read time. Evidence is never resolved by scanning.
+not resolve in C10 or a Claim is `ErrReferencedValueMissing` at write time.
+AD-030/FF-022 make C8 the sole exception: a Decision may persist its exact
+structurally valid evidence citation before that Evidence pair is locally
+present. A read or timeline that requires the link to resolve fails loudly
+until it exists (`ErrTimelineSourceInvalid` on the timeline). Evidence is never
+resolved by scanning.
 
 ## 8. Lifecycle progression
 
 | Assignment | State | Established by |
 |---|---|---|
 | `SA-1` | `featureforge:drafting` | `TR-1/TR-1-REV-0` — entry revision, no transition content (AD-014) |
-| `SA-2` | `featureforge:under-validation` | `TR-1/TR-1-REV-1` — full transition record revision, `fromAssignment = SA-1` |
+| `SA-2` | `featureforge:specified` | `TR-1/TR-1-REV-1` — `specify`, `fromAssignment = SA-1`, after requirements/decision/accepted Revision 2 |
+| `SA-3` | `featureforge:under-validation` | `TR-1/TR-1-REV-2` — `begin-validation`, `fromAssignment = SA-2`, after the first execution |
 
 The scenario ends in `under-validation`, not `assessed`: REQ-4 was never
 validated, so the assessment is not complete. This is a deliberate demonstration
@@ -357,7 +365,7 @@ duplication check AD-018 exists to enforce.
 | Current claim — REQ-3 | `CLM-3` `satisfied` |
 | Current claim — REQ-4 | none |
 | **Release readiness** | **`not-ready`** — REQ-2 not satisfied; REQ-4 also reported uncovered |
-| Lifecycle state | `featureforge:under-validation` |
+| Lifecycle state | `featureforge:under-validation`, unique head `SA-3`, `LCD-1/LCDV-1`, established by `TR-1/TR-1-REV-2` |
 | Timeline | All acts, ordered, `CLM-4` linked to `CLM-2` |
 | History integrity | Revision 1 and `CLM-2` fully inspectable; nothing updated or deleted |
 

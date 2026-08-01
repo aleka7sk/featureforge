@@ -33,19 +33,23 @@ type EngineeringStateInput struct {
 // ascending -- never map iteration order (FF-009 §5). It is the shared
 // mechanism behind DiscoverRequirementArtifactIDs and
 // DiscoverValidationPlanArtifactIDs (AD-025, FF-016 §9). Completeness comes
-// from ListByFamilyAndSubject (FF-016 §4); this function adds only artifact
-// ID deduplication and ordering.
+// from global Revision enumeration followed by authoritative inspection;
+// family and subject filtering happens only afterward so a contradictory
+// projection fails loudly instead of disappearing (AD-032, FF-023).
 func discoverArtifactIDsBySubject(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, family engineering.RevisionFamily, capabilityArtifactID string) ([]string, error) {
 	subjectKey := engineering.ArtifactSubjectKey(capabilityArtifactID)
-	revisions, err := repos.Revisions.ListByFamilyAndSubject(ctx, family, subjectKey)
+	revisions, err := listValidatedRevisions(ctx, repos, inspector)
 	if err != nil {
 		return nil, err
 	}
 	seen := map[string]bool{}
 	out := make([]string, 0, len(revisions))
 	for _, rev := range revisions {
-		if rev.RevisionFamily != family || rev.SubjectKey != subjectKey {
-			return nil, integrityError("subject discovery returned a revision outside its requested projection", nil)
+		if rev.RevisionFamily != family {
+			continue
+		}
+		if rev.SubjectKey != subjectKey {
+			continue
 		}
 		if seen[rev.Key.ArtifactID] {
 			continue
@@ -110,26 +114,39 @@ func DiscoverRequirementArtifactIDs(ctx context.Context, repos Repositories, ins
 // decision recorded against an earlier revision remains part of the
 // feature's history after a later revision exists. Deduplicated and sorted
 // ascending, matching discoverArtifactIDsBySubject's determinism guarantee.
-func DiscoverDecisionIDs(ctx context.Context, repos Repositories, capabilityArtifactID string) ([]string, error) {
-	revisions, err := repos.Revisions.ListByArtifact(ctx, capabilityArtifactID)
+func DiscoverDecisionIDs(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, capabilityArtifactID string) ([]string, error) {
+	if _, err := validateManagedHistory(ctx, repos, inspector, capabilityArtifactID, engineering.RevisionFamilyCapability, false); err != nil {
+		return nil, err
+	}
+	revisions, err := listValidatedRevisions(ctx, repos, inspector)
 	if err != nil {
 		return nil, err
 	}
-	seen := map[string]bool{}
-	out := make([]string, 0, len(revisions))
+	records, err := listValidatedRecords(ctx, repos, inspector)
+	if err != nil {
+		return nil, err
+	}
+	subjects := make(map[string]struct{})
 	for _, rev := range revisions {
-		subjectKey := engineering.ArtifactRevisionSubjectKey(rev.Key.ArtifactID, rev.Key.RevisionID)
-		decisions, err := repos.Records.ListByKindAndSubject(ctx, engineering.RecordKindDecision, subjectKey)
-		if err != nil {
+		if rev.Key.ArtifactID != capabilityArtifactID {
+			continue
+		}
+		subjects[engineering.ArtifactRevisionSubjectKey(rev.Key.ArtifactID, rev.Key.RevisionID)] = struct{}{}
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0)
+	for _, dec := range records {
+		if dec.Kind != engineering.RecordKindDecision {
+			continue
+		}
+		if _, relevant := subjects[dec.SubjectKey]; !relevant || seen[dec.Key.ID] {
+			continue
+		}
+		if err := validateStoredDecisionReferences(ctx, repos, inspector, dec); err != nil {
 			return nil, err
 		}
-		for _, dec := range decisions {
-			if seen[dec.Key.ID] {
-				continue
-			}
-			seen[dec.Key.ID] = true
-			out = append(out, dec.Key.ID)
-		}
+		seen[dec.Key.ID] = true
+		out = append(out, dec.Key.ID)
 	}
 	sort.Strings(out)
 	return out, nil
@@ -205,7 +222,7 @@ func GetFeatureEngineeringState(ctx context.Context, repos Repositories, project
 	}
 	result.CurrentRevision = currentRevision
 
-	effective, err := ResolveEffectiveRequirements(ctx, repos, in.RequirementArtifactIDs)
+	effective, err := ResolveEffectiveRequirements(ctx, repos, inspector, in.RequirementArtifactIDs)
 	if err != nil {
 		return EngineeringStateResult{}, err
 	}
@@ -234,13 +251,20 @@ func GetFeatureEngineeringState(ctx context.Context, repos Repositories, project
 		if err != nil {
 			return EngineeringStateResult{}, err
 		}
-		if found {
-			detail, err := projector.ProjectDecisionDetail(rec.Payload)
-			if err != nil {
-				return EngineeringStateResult{}, fmt.Errorf("%w: decision %s: %w", ErrStoredPayloadUnreadable, decID, err)
-			}
-			result.ApplicableDecisions = append(result.ApplicableDecisions, ApplicableDecision{DecisionID: decID, Decision: rec, Detail: detail})
+		if !found {
+			return EngineeringStateResult{}, integrityError("applicable decision is missing", nil)
 		}
+		if err := inspectRecord(inspector, rec); err != nil {
+			return EngineeringStateResult{}, err
+		}
+		if err := validateStoredDecisionReferences(ctx, repos, inspector, rec); err != nil {
+			return EngineeringStateResult{}, err
+		}
+		detail, err := projector.ProjectDecisionDetail(rec.Payload)
+		if err != nil {
+			return EngineeringStateResult{}, fmt.Errorf("%w: decision %s: %w", ErrStoredPayloadUnreadable, decID, err)
+		}
+		result.ApplicableDecisions = append(result.ApplicableDecisions, ApplicableDecision{DecisionID: decID, Decision: rec, Detail: detail})
 	}
 
 	if in.PlanArtifactID != "" {
@@ -263,7 +287,7 @@ func GetFeatureEngineeringState(ctx context.Context, repos Repositories, project
 	}
 
 	if currentRevision.Found {
-		readiness, err := ResolveReadiness(ctx, repos, currentRevision.Revision, effective)
+		readiness, err := ResolveReadiness(ctx, repos, inspector, currentRevision.Revision, effective)
 		if err != nil {
 			return EngineeringStateResult{}, err
 		}
@@ -275,7 +299,7 @@ func GetFeatureEngineeringState(ctx context.Context, repos Repositories, project
 		result.Readiness = ReadinessResult{Status: ReadinessIncomplete}
 	}
 
-	lifecycle, err := ResolveLifecycleState(ctx, repos, in.CapabilityArtifactID)
+	lifecycle, err := ResolveLifecycleState(ctx, repos, inspector, in.CapabilityArtifactID)
 	if err != nil {
 		return EngineeringStateResult{}, err
 	}

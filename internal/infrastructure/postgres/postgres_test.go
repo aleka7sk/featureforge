@@ -62,7 +62,7 @@ func TestMigrateCreatesEveryTable(t *testing.T) {
 	want := []string{
 		"artifact_envelopes", "feature_card_capability_links", "feature_cards",
 		"projects", "record_envelopes", "revision_acceptance", "revision_envelopes",
-		"revision_order", "schema_migrations", "structured_content",
+		"requirement_criterion_traces", "revision_order", "schema_migrations", "structured_content",
 	}
 	for _, table := range want {
 		var exists bool

@@ -121,5 +121,23 @@ func mustContent(t *testing.T, title string) engineering.CapabilitySpecification
 	if err != nil {
 		t.Fatal(err)
 	}
+	criterion, err := engineering.NewAcceptanceCriterion("AC-1", "The capability satisfies its primary acceptance criterion.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err = c.WithAcceptanceCriteria([]engineering.AcceptanceCriterion{criterion})
+	if err != nil {
+		t.Fatal(err)
+	}
 	return c
+}
+
+func acceptCapabilityForRequirement(t *testing.T, uow application.UnitOfWork, inspector application.EngineeringReplayInspector, clock application.Clock) {
+	t.Helper()
+	if _, err := (application.AcceptCapabilityRevisionCommand{
+		RecordID: "ACC-CAP-1-REV-1", ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-1",
+		State: engineering.AcceptanceStateAccepted,
+	}).Execute(context.Background(), uow, inspector, clock); err != nil {
+		t.Fatal(err)
+	}
 }

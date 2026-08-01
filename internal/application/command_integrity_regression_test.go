@@ -69,6 +69,10 @@ func seedLifecycleEntryForIntegrity(t *testing.T, f commandFixture, transitionAr
 
 func seedLifecycleTransitionForIntegrity(t *testing.T, f commandFixture, transitionArtifactID, transitionRevisionID, assignmentID, subjectArtifactID, state, transitionKey, predecessorID string) application.AssignLifecycleStateCommand {
 	t.Helper()
+	// AD-032 requires strictly increasing lifecycle effective times. Integrity
+	// fixtures first create a coherent transition, then corrupt one selected
+	// member; keep the seed graph valid before applying that corruption.
+	f.clock.Advance(time.Minute)
 	cmd := application.AssignLifecycleStateCommand{
 		AssignmentID: assignmentID, SubjectArtifactID: subjectArtifactID, State: state,
 		TransitionRecordArtifactID: transitionArtifactID, TransitionRecordRevisionID: transitionRevisionID,
@@ -177,6 +181,7 @@ func TestC6CorruptSharedSiblingPrecedesDifferentAssignmentConflict(t *testing.T)
 	f := newCommandFixture()
 	ctx := context.Background()
 	seedCapability(t, f)
+	seedRequirementForReplay(t, f)
 	entry := seedLifecycleEntryForIntegrity(t, f, "TR-SIBLING", "TR-SIBLING-REV-0", "SA-SIBLING-ENTRY", "CAP-1")
 	primary := seedLifecycleTransitionForIntegrity(t, f, "TR-SIBLING", "TR-SIBLING-REV-1", "SA-SIBLING-PRIMARY", "CAP-1", "specified", "specify", entry.AssignmentID)
 	artifact, corruptSibling, _ := buildTransitionForIntegrity(
@@ -314,6 +319,7 @@ func TestC7RejectsCanonicalOrphanEvidenceForeignOccupancy(t *testing.T) {
 	request := application.EstablishRequirementCommand{
 		ArtifactID: artifact.Key.ArtifactID, RevisionID: revision.Key.RevisionID,
 		Statement: "The system SHALL not accept orphan evidence occupancy.", SubjectArtifactID: "CAP-1",
+		SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
 		AcceptanceRecordID: memberID("MEM-C7-ORPHAN"),
 	}
 	assertStoredIntegrityWithoutWrites(t, f, func() (application.EstablishRequirementResult, error) {
@@ -367,6 +373,7 @@ func TestAbsentC7AndC9PairsRejectStrayStructuredContent(t *testing.T) {
 			cmd := application.EstablishRequirementCommand{
 				ArtifactID: "REQ-STRAY-CONTENT", RevisionID: "REQ-STRAY-CONTENT-REV-1",
 				Statement: "The system SHALL reject stray content.", SubjectArtifactID: "CAP-UNREAD",
+				SourceCapabilityRevisionID: "CAP-UNREAD-REV-1", SourceAcceptanceCriterionKey: "AC-1",
 				AcceptanceRecordID: memberID("MEM-REQ-STRAY-CONTENT"),
 			}
 			_, err := cmd.Execute(ctx, uow, f.rec, f.rec, f.clock)
@@ -550,6 +557,7 @@ func TestC7AndC9RejectSiblingMetadataUnderMissingArtifactRoot(t *testing.T) {
 					cmd := application.EstablishRequirementCommand{
 						ArtifactID: artifactID, RevisionID: artifactID + "-REV-1",
 						Statement: "The system SHALL reject hidden root metadata.", SubjectArtifactID: "CAP-UNREAD",
+						SourceCapabilityRevisionID: "CAP-UNREAD-REV-1", SourceAcceptanceCriterionKey: "AC-1",
 						AcceptanceRecordID: memberID("MEM-REQ-HIDDEN-METADATA"),
 					}
 					if _, err := cmd.Execute(ctx, uow, f.rec, f.rec, f.clock); !errors.Is(err, application.ErrStoredStateIntegrity) {

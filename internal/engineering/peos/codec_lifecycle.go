@@ -11,16 +11,21 @@ import (
 )
 
 // The lifecycle Definition and Definition Version are fixed FeatureForge
-// configuration, established once in code (FF-003 §4), not persisted
-// through any repository -- FF-009 §5 defines none for this family. They
-// exist purely to supply the core.LifecycleDefinitionVersionRef every State
-// Assignment and Transition Record Content requires.
-var definitionVersionRef = mustDefinitionVersion()
+// configuration. AD-032 persists their canonical payloads; these package
+// values remain the sole construction authority used by both the startup
+// initializer and lifecycle engineering acts.
+var configuredDefinition, configuredDefinitionVersion = mustLifecycleConfiguration()
 
-func mustDefinitionVersion() core.LifecycleDefinitionVersionRef {
+var definitionVersionRef = mustDefinitionVersionRef(configuredDefinitionVersion)
+
+func mustLifecycleConfiguration() (lifecycle.Definition, lifecycle.DefinitionVersion) {
 	defID, err := core.NewLifecycleDefinitionID("LCD-1")
 	if err != nil {
 		panic(fmt.Sprintf("peos: lifecycle definition id: %v", err))
+	}
+	definition, err := lifecycle.NewDefinition(defID)
+	if err != nil {
+		panic(fmt.Sprintf("peos: lifecycle definition: %v", err))
 	}
 	defRef, err := core.NewLifecycleDefinitionRef(defID)
 	if err != nil {
@@ -32,10 +37,10 @@ func mustDefinitionVersion() core.LifecycleDefinitionVersionRef {
 	}
 
 	states := []lifecycle.State{
-		mustState(StateDrafting, "specification work is under way"),
-		mustState(StateSpecified, "an accepted revision and at least one requirement exist"),
-		mustState(StateUnderValidation, "a validation plan exists and execution has begun"),
-		mustState(StateAssessed, "validation has been executed and assessed"),
+		mustState(StateDrafting, "the capability lifecycle was entered for specification work"),
+		mustState(StateSpecified, "entry proved an accepted current capability revision and at least one effective requirement traced to it"),
+		mustState(StateUnderValidation, "entry proved a current accepted validation plan and at least one completed execution against the same capability revision"),
+		mustState(StateAssessed, "entry proved an applicable current claim for every effective requirement, regardless of claim outcome"),
 	}
 
 	// The entry transition is modeled as reflexive on the sole initial
@@ -71,6 +76,10 @@ func mustDefinitionVersion() core.LifecycleDefinitionVersionRef {
 	if err != nil {
 		panic(fmt.Sprintf("peos: lifecycle definition version: %v", err))
 	}
+	return definition, dv
+}
+
+func mustDefinitionVersionRef(dv lifecycle.DefinitionVersion) core.LifecycleDefinitionVersionRef {
 	ref, err := dv.Ref()
 	if err != nil {
 		panic(fmt.Sprintf("peos: lifecycle definition version ref: %v", err))
@@ -80,9 +89,8 @@ func mustDefinitionVersion() core.LifecycleDefinitionVersionRef {
 
 // configurationRecordedAt is the fixed provenance time for the one-time
 // Lifecycle Definition Version configuration. It is a compile-time literal,
-// not a call to time.Now, and it is not part of any engineering act's
-// timeline -- the Definition Version itself is never persisted or surfaced
-// to callers (FF-003 §4).
+// not a call to time.Now, and it is not part of a capability engineering
+// timeline. AD-032 persists and exposes the configuration separately.
 var configurationRecordedAt = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 func mustState(id lifecycle.StateID, meaning string) lifecycle.State {

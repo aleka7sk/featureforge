@@ -26,6 +26,7 @@ func seedSemanticValidationFoundation(t *testing.T, f commandFixture) {
 	requirement := application.EstablishRequirementCommand{
 		ArtifactID: "REQ-SEMANTIC", RevisionID: "REQ-SEMANTIC-REV-1",
 		Statement: "The system SHALL reject changed immutable command semantics.", SubjectArtifactID: "CAP-1",
+		SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
 		AcceptanceRecordID: memberID("MEM-REQ-SEMANTIC"),
 	}
 	if _, err := requirement.Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
@@ -187,6 +188,7 @@ func TestC1ThroughC12ChangedCallerSemanticsConflictWithoutWrites(t *testing.T) {
 		cmd := application.EstablishRequirementCommand{
 			ArtifactID: "REQ-C7-CONFLICT", RevisionID: "REQ-C7-CONFLICT-REV-1",
 			Statement: "The system SHALL retain the original statement.", SubjectArtifactID: "CAP-1",
+			SourceCapabilityRevisionID: "CAP-1-REV-1", SourceAcceptanceCriterionKey: "AC-1",
 			AcceptanceRecordID: memberID("MEM-C7-CONFLICT"),
 		}
 		if _, err := cmd.Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {

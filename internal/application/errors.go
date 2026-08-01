@@ -39,8 +39,8 @@ var (
 var (
 	ErrEngineeringStateIndeterminate = errors.New("application: engineering state indeterminate")
 	ErrTimelineSourceInvalid         = errors.New("application: timeline source invalid")
-	ErrAmbiguousLifecycleState       = errors.New("application: lifecycle state ambiguous")
-	ErrUnknownDefinitionVersion      = errors.New("application: unknown lifecycle definition version")
+	ErrLifecycleTransitionInvalid    = errors.New("application: lifecycle transition invalid")
+	ErrLifecycleHeadConflict         = errors.New("application: lifecycle head conflict")
 	// ErrValidationPlanAmbiguous reports that a capability's discovered
 	// validation-plan population spans more than one Plan Artifact. The composition
 	// that builds TimelineInput.PlanArtifactID (FF-018 §6.6) requires

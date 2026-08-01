@@ -88,6 +88,13 @@ func (t *transaction) merge() {
 	maps.Copy(c.content, t.overlay.content)
 	maps.Copy(c.records, t.overlay.records)
 	maps.Copy(c.order, t.overlay.order)
+	maps.Copy(c.traces, t.overlay.traces)
+	for key, definition := range t.overlay.lifecycleDefinitions {
+		c.lifecycleDefinitions[key] = cloneLifecycleDefinition(definition)
+	}
+	for key, version := range t.overlay.lifecycleVersions {
+		c.lifecycleVersions[key] = cloneLifecycleVersion(version)
+	}
 	for k, entries := range t.overlay.acceptance {
 		c.acceptance[k] = append(c.acceptance[k], entries...)
 	}

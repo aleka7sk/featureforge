@@ -55,16 +55,16 @@ type CurrentClaimResult struct {
 // and the current claim is the unique head -- the claim nothing points at.
 // Time is never used to select; a backdated correction remains valid if it
 // is the unique graph head.
-func ResolveCurrentClaim(ctx context.Context, repos Repositories, subjectKey, scope string, criterionKeys []string) (CurrentClaimResult, error) {
-	all, err := repos.Records.ListByKindAndSubject(ctx, engineering.RecordKindClaim, subjectKey)
+func ResolveCurrentClaim(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, subjectKey, scope string, criterionKeys []string) (CurrentClaimResult, error) {
+	allRecords, err := listValidatedRecords(ctx, repos, inspector)
 	if err != nil {
 		return CurrentClaimResult{}, err
 	}
 
 	// Step 2: restrict to claims matching the requested scope and criteria.
-	claims := make([]engineering.RecordEnvelope, 0, len(all))
-	for _, c := range all {
-		if c.Scope == scope && sameCriteria(c.CriterionKeys, criterionKeys) {
+	claims := make([]engineering.RecordEnvelope, 0, len(allRecords))
+	for _, c := range allRecords {
+		if c.Kind == engineering.RecordKindClaim && c.SubjectKey == subjectKey && c.Scope == scope && sameCriteria(c.CriterionKeys, criterionKeys) {
 			claims = append(claims, c)
 		}
 	}
