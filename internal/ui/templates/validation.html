@@ -24,7 +24,7 @@
     {{else}}
       {{template "empty-state" "No validation plan established yet."}}
     {{end}}
-    {{if not .PlanFound}}
+    {{if or (not .PlanFound) .PlanFormFailed}}
     <h3>Establish a validation plan</h3>
     <form class="command-form" method="post" action="/features/{{.FeatureCardID}}/validation-plan">
       <div class="field">
@@ -34,6 +34,10 @@
       <div class="field">
         <label for="plan_revision_id">Plan revision ID</label>
         <input type="text" id="plan_revision_id" name="revision_id" value="{{index .FormValues "revision_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
+        <label for="plan_acceptance_record_id">Acceptance record ID</label>
+        <input type="text" id="plan_acceptance_record_id" name="acceptance_record_id" value="{{index .FormValues "acceptance_record_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
       </div>
       <div class="field">
         <label for="activities">Activities</label>

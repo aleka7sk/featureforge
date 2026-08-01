@@ -27,7 +27,8 @@ func TestGetFeatureTimelineForCard_PreservesPriorRevisionActivity(t *testing.T) 
 	if _, err := (application.EstablishRequirementCommand{
 		ArtifactID: "REQ-1", RevisionID: "REQ-1-REV-1",
 		Statement: "Students see homework.", SubjectArtifactID: "CAP-1",
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+		AcceptanceRecordID: memberID("MEM-REQ-1"),
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	establishPlan(t, f, "VP-1", "VP-1-REV-1")
@@ -36,18 +37,18 @@ func TestGetFeatureTimelineForCard_PreservesPriorRevisionActivity(t *testing.T) 
 		ExecutionID: "ER-1", PlanArtifactID: "VP-1", PlanRevisionID: "VP-1-REV-1", ActivityKey: "A-1",
 		SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1", Method: "manual-review", Outcome: "completed",
 		EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1", EvidenceLocator: "https://evidence.example/EV-1",
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (application.RecordValidationClaimCommand{
 		ClaimID: "CLM-1", ScopeArtifactID: "CAP-1", SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1",
 		RequirementArtifactID: "REQ-1", RequirementRevisionID: "REQ-1-REV-1", Outcome: "satisfied", Method: "manual-review",
 		EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1", ExecutionID: "ER-1",
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 
-	before := timelineEventKindCounts(t, f.uow, "FC-1")
+	before := timelineEventKindCounts(t, f.uow, f.rec, "FC-1")
 	if before["execution.recorded"] != 1 || before["evidence.recorded"] != 1 || before["claim.recorded"] != 1 {
 		t.Fatalf("precondition failed before revising: got %v, want exactly one of each", before)
 	}
@@ -55,17 +56,17 @@ func TestGetFeatureTimelineForCard_PreservesPriorRevisionActivity(t *testing.T) 
 	if _, err := (application.ReviseCapabilitySpecificationCommand{
 		ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-2",
 		Content: mustContent(t, "Homework after a lesson, revised"),
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (application.AcceptCapabilityRevisionCommand{
 		RecordID: "ACC-2", ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-2",
 		State: engineering.AcceptanceStateAccepted,
-	}).Execute(ctx, f.uow, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 
-	after := timelineEventKindCounts(t, f.uow, "FC-1")
+	after := timelineEventKindCounts(t, f.uow, f.rec, "FC-1")
 	for _, kind := range []string{"execution.recorded", "evidence.recorded", "claim.recorded"} {
 		if after[kind] != 1 {
 			t.Errorf("%s count after CAP-1-REV-2 became current = %d, want exactly 1 (ER-1/EV-1/CLM-1 must remain, undisturbed and not duplicated)", kind, after[kind])
@@ -86,7 +87,8 @@ func TestGetFeatureEngineeringStateForCard_PriorRevisionClaimStaysStale(t *testi
 	if _, err := (application.EstablishRequirementCommand{
 		ArtifactID: "REQ-1", RevisionID: "REQ-1-REV-1",
 		Statement: "Students see homework.", SubjectArtifactID: "CAP-1",
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+		AcceptanceRecordID: memberID("MEM-REQ-1"),
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	establishPlan(t, f, "VP-1", "VP-1-REV-1")
@@ -94,31 +96,31 @@ func TestGetFeatureEngineeringStateForCard_PriorRevisionClaimStaysStale(t *testi
 		ExecutionID: "ER-1", PlanArtifactID: "VP-1", PlanRevisionID: "VP-1-REV-1", ActivityKey: "A-1",
 		SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1", Method: "manual-review", Outcome: "completed",
 		EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1", EvidenceLocator: "https://evidence.example/EV-1",
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (application.RecordValidationClaimCommand{
 		ClaimID: "CLM-1", ScopeArtifactID: "CAP-1", SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1",
 		RequirementArtifactID: "REQ-1", RequirementRevisionID: "REQ-1-REV-1", Outcome: "satisfied", Method: "manual-review",
 		EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1", ExecutionID: "ER-1",
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 
 	if _, err := (application.ReviseCapabilitySpecificationCommand{
 		ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-2",
 		Content: mustContent(t, "Homework after a lesson, revised"),
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (application.AcceptCapabilityRevisionCommand{
 		RecordID: "ACC-2", ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-2",
 		State: engineering.AcceptanceStateAccepted,
-	}).Execute(ctx, f.uow, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 
-	state, err := application.GetFeatureEngineeringStateForCard(ctx, f.uow, f.rec, mustFeatureCardID(t, "FC-1"))
+	state, err := application.GetFeatureEngineeringStateForCard(ctx, f.uow, f.rec, f.rec, mustFeatureCardID(t, "FC-1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,9 +135,9 @@ func TestGetFeatureEngineeringStateForCard_PriorRevisionClaimStaysStale(t *testi
 	}
 }
 
-func timelineEventKindCounts(t *testing.T, uow application.UnitOfWork, cardID string) map[string]int {
+func timelineEventKindCounts(t *testing.T, uow application.UnitOfWork, inspector application.EngineeringReplayInspector, cardID string) map[string]int {
 	t.Helper()
-	result, err := application.GetFeatureTimelineForCard(context.Background(), uow, mustFeatureCardID(t, cardID))
+	result, err := application.GetFeatureTimelineForCard(context.Background(), uow, inspector, mustFeatureCardID(t, cardID))
 	if err != nil {
 		t.Fatalf("GetFeatureTimelineForCard: %v", err)
 	}

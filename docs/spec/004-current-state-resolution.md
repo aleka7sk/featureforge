@@ -43,6 +43,25 @@ Revisions of FeatureForge-managed Artifacts.
    never repaired by picking one.
 9. **Resolution returns both the revision and a rationale** explaining how it was
    chosen and what was rejected.
+10. A Requirement Artifact has one canonical subject for its whole history,
+    and a Validation Plan Artifact has one canonical scope. A later revision
+    cannot retarget that shared Artifact; mixed stored history is an integrity
+    error even when the disagreeing revision is withdrawn.
+
+**Forward conformance correction (AD-030, FF-022).** The policy above always
+included Validation Plan revisions. Later Phase A/read-surface implementation
+prose incorrectly treated plans as having neither order metadata nor current
+resolution. AD-030 restores this section as written and makes one additional,
+explicit choice that this section did not previously imply: C9 writes order
+metadata and an immediate caller-identified `accepted` member atomically. A
+missing acceptance entry generally still means `draft` by absence; immediate
+acceptance is C9's new command postcondition, not a reinterpretation of that
+general rule. Selection among several plan Artifacts remains fail-loud and is
+separate from current-revision selection within one Artifact.
+Subject/scope projection is used only to discover candidate Artifacts. The
+application validates each candidate's complete history before current-state
+resolution, so an older matching revision can never make a newer revision for
+another capability appear applicable.
 
 ### Challenged against PEOS-002
 

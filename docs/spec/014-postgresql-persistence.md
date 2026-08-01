@@ -97,6 +97,14 @@ from it, so two entries sharing a `record_id` would collide two timeline
 events onto one event ID — which FF-006 itself calls a persistence bug.
 `Append` is therefore create-only on `RecordID` in *both* adapters.
 
+**Forward correction (AD-030, FF-022).** The statement above that the
+repository never looks up an acceptance by identity is superseded narrowly.
+`RevisionAcceptanceRepository.GetByRecordID` supports application-level
+candidate-integrity and replay classification. The existing `UNIQUE(record_id)`
+constraint and B-tree index are already sufficient; the surrogate primary key,
+append-only writes, payload representation, and transaction model remain
+unchanged. No migration is required.
+
 ## 4. Migrations
 
 No migration framework. SQL files are embedded with `embed.FS` and tracked in

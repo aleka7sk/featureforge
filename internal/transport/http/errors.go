@@ -83,6 +83,7 @@ var errorMappings = []errorMapping{
 	{application.ErrUnknownDefinitionVersion, http.StatusUnprocessableEntity, "unknown_definition_version", true},
 	{application.ErrNestedTransaction, http.StatusInternalServerError, "internal_error", false},
 	{application.ErrStoredPayloadUnreadable, http.StatusInternalServerError, "internal_error", false},
+	{application.ErrStoredStateIntegrity, http.StatusInternalServerError, "internal_error", false},
 	{application.ErrTransactionAborted, http.StatusServiceUnavailable, "transaction_aborted", true},
 }
 
@@ -115,7 +116,7 @@ func writeAppError(w http.ResponseWriter, r *http.Request, deps Dependencies, er
 	status, code, exposeMessage := statusFor(err)
 	switch status {
 	case http.StatusInternalServerError:
-		deps.logger().Error("unmapped application error", "method", r.Method, "path", r.URL.Path, "error", err)
+		deps.logger().Error("internal application error", "method", r.Method, "path", r.URL.Path, "error", err)
 	case http.StatusServiceUnavailable:
 		deps.logger().Warn("transaction retries exhausted", "method", r.Method, "path", r.URL.Path, "error", err)
 		w.Header().Set("Retry-After", "1")

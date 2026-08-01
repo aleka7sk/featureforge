@@ -66,7 +66,7 @@ func handleEstablishCapability(deps Dependencies) http.HandlerFunc {
 		result, err := (application.EstablishCapabilitySpecificationCommand{
 			FeatureCardID: req.FeatureCardID, ArtifactID: req.ArtifactID, RevisionID: req.RevisionID,
 			Content: content,
-		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Clock)
+		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Inspector, deps.Clock)
 		if err != nil {
 			writeAppError(w, r, deps, err)
 			return
@@ -96,7 +96,7 @@ func handleReviseCapability(deps Dependencies) http.HandlerFunc {
 		}
 		result, err := (application.ReviseCapabilitySpecificationCommand{
 			ArtifactID: artifactID, RevisionID: req.RevisionID, Content: content,
-		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Clock)
+		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Inspector, deps.Clock)
 		if err != nil {
 			writeAppError(w, r, deps, err)
 			return
@@ -121,8 +121,9 @@ func handleAcceptRevision(deps Dependencies) http.HandlerFunc {
 		}
 		result, err := (application.AcceptCapabilityRevisionCommand{
 			RecordID: req.RecordID, ArtifactID: artifactID, RevisionID: req.RevisionID,
-			State: engineering.AcceptanceState(req.State), Reason: req.Reason, EffectiveAt: req.EffectiveAt,
-		}).Execute(r.Context(), deps.UOW, deps.Clock)
+			State: engineering.AcceptanceState(req.State), Reason: req.Reason,
+			EffectiveAt: req.EffectiveAt.Value, HasEffectiveAt: req.EffectiveAt.Present,
+		}).Execute(r.Context(), deps.UOW, deps.Inspector, deps.Clock)
 		if err != nil {
 			writeAppError(w, r, deps, err)
 			return
@@ -145,11 +146,12 @@ func handleAssignLifecycle(deps Dependencies) http.HandlerFunc {
 		}
 		result, err := (application.AssignLifecycleStateCommand{
 			AssignmentID: req.AssignmentID, SubjectArtifactID: artifactID,
-			State: req.State, EffectiveAt: req.EffectiveAt,
+			State: req.State, EffectiveAt: req.EffectiveAt.Value, HasEffectiveAt: req.EffectiveAt.Present,
 			TransitionRecordArtifactID: req.TransitionRecordArtifactID, TransitionRecordRevisionID: req.TransitionRecordRevisionID,
 			IsEntry: req.IsEntry, TransitionKey: req.TransitionKey, FromAssignmentID: req.FromAssignmentID,
-			AttemptedAt: req.AttemptedAt, CompletedAt: req.CompletedAt,
-		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Clock)
+			AttemptedAt: req.AttemptedAt.Value, HasAttemptedAt: req.AttemptedAt.Present,
+			CompletedAt: req.CompletedAt.Value, HasCompletedAt: req.CompletedAt.Present,
+		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Inspector, deps.Clock)
 		if err != nil {
 			writeAppError(w, r, deps, err)
 			return
@@ -170,7 +172,8 @@ func handleEstablishRequirement(deps Dependencies) http.HandlerFunc {
 		result, err := (application.EstablishRequirementCommand{
 			ArtifactID: req.ArtifactID, RevisionID: req.RevisionID,
 			Statement: req.Statement, SubjectArtifactID: req.SubjectArtifactID,
-		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Clock)
+			AcceptanceRecordID: optionalStringPointer(req.AcceptanceRecordID),
+		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Inspector, deps.Clock)
 		if err != nil {
 			writeAppError(w, r, deps, err)
 			return
@@ -194,7 +197,7 @@ func handleRecordDecision(deps Dependencies) http.HandlerFunc {
 			EvidenceArtifactID: req.EvidenceArtifactID, EvidenceRevisionID: req.EvidenceRevisionID,
 			Assumptions: req.Assumptions, Constraints: req.Constraints, Uncertainties: req.Uncertainties,
 			Rationale: req.Rationale,
-		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Clock)
+		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Inspector, deps.Clock)
 		if err != nil {
 			writeAppError(w, r, deps, err)
 			return
@@ -212,8 +215,9 @@ func handleEstablishPlan(deps Dependencies) http.HandlerFunc {
 		}
 		result, err := (application.EstablishValidationPlanCommand{
 			ArtifactID: req.ArtifactID, RevisionID: req.RevisionID, ScopeArtifactID: req.ScopeArtifactID,
-			Activities: mapPlanActivities(req.Activities),
-		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Clock)
+			AcceptanceRecordID: optionalStringPointer(req.AcceptanceRecordID),
+			Activities:         mapPlanActivities(req.Activities),
+		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Inspector, deps.Clock)
 		if err != nil {
 			writeAppError(w, r, deps, err)
 			return
@@ -234,9 +238,10 @@ func handleRecordRun(deps Dependencies) http.HandlerFunc {
 		result, err := (application.RecordValidationRunCommand{
 			ExecutionID: req.ExecutionID, PlanArtifactID: req.PlanArtifactID, PlanRevisionID: req.PlanRevisionID,
 			ActivityKey: req.ActivityKey, SubjectArtifactID: req.SubjectArtifactID, SubjectRevisionID: req.SubjectRevisionID,
-			Method: req.Method, Outcome: req.Outcome, CompletedAt: req.CompletedAt,
+			Method: req.Method, Outcome: req.Outcome,
+			CompletedAt: req.CompletedAt.Value, HasCompletedAt: req.CompletedAt.Present,
 			EvidenceArtifactID: req.EvidenceArtifactID, EvidenceRevisionID: req.EvidenceRevisionID, EvidenceLocator: req.EvidenceLocator,
-		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Clock)
+		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Inspector, deps.Clock)
 		if err != nil {
 			writeAppError(w, r, deps, err)
 			return
@@ -261,8 +266,9 @@ func handleRecordClaim(deps Dependencies) http.HandlerFunc {
 			RequirementArtifactID: req.RequirementArtifactID, RequirementRevisionID: req.RequirementRevisionID,
 			Outcome: req.Outcome, Method: req.Method,
 			EvidenceArtifactID: req.EvidenceArtifactID, EvidenceRevisionID: req.EvidenceRevisionID,
-			ExecutionID: req.ExecutionID, Reasoning: req.Reasoning, Timestamp: req.Timestamp,
-		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Clock)
+			ExecutionID: req.ExecutionID, Reasoning: req.Reasoning,
+			Timestamp: req.Timestamp.Value, HasTimestamp: req.Timestamp.Present,
+		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Inspector, deps.Clock)
 		if err != nil {
 			writeAppError(w, r, deps, err)
 			return
@@ -285,8 +291,9 @@ func handleCorrectClaim(deps Dependencies) http.HandlerFunc {
 			RequirementArtifactID: req.RequirementArtifactID, RequirementRevisionID: req.RequirementRevisionID,
 			Outcome: req.Outcome, Method: req.Method,
 			EvidenceArtifactID: req.EvidenceArtifactID, EvidenceRevisionID: req.EvidenceRevisionID,
-			ExecutionID: req.ExecutionID, Reasoning: req.Reasoning, Timestamp: req.Timestamp,
-		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Clock)
+			ExecutionID: req.ExecutionID, Reasoning: req.Reasoning,
+			Timestamp: req.Timestamp.Value, HasTimestamp: req.Timestamp.Present,
+		}).Execute(r.Context(), deps.UOW, deps.Recorder, deps.Inspector, deps.Clock)
 		if err != nil {
 			writeAppError(w, r, deps, err)
 			return

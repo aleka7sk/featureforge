@@ -12,6 +12,7 @@ import (
 	peos "github.com/aleka7sk/featureforge/internal/engineering/peos"
 	"github.com/aleka7sk/featureforge/internal/infrastructure/postgres"
 	"github.com/aleka7sk/featureforge/internal/scenario"
+	"github.com/aleka7sk/featureforge/internal/testsupport/replaygate"
 )
 
 const postgresDSNEnvVar = "FEATUREFORGE_POSTGRES_TEST_DSN"
@@ -78,6 +79,5 @@ func newPostgresFixtureHTTP(t *testing.T) (application.UnitOfWork, peos.Recorder
 func TestCanonicalScenarioThroughHTTPPostgres(t *testing.T) {
 	ctx := context.Background()
 	uow, rec, clock := newPostgresFixtureHTTP(t)
-	handler := runScenarioThroughHTTP(t, ctx, uow, rec, clock)
-	assertCanonicalEndStateThroughHTTP(t, ctx, handler, uow, rec)
+	assertCanonicalScenarioHTTPReplay(t, ctx, replaygate.New(uow), rec, clock)
 }

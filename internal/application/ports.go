@@ -96,9 +96,12 @@ type RevisionOrderRepository interface {
 // no-op, and a differing record reusing an existing RecordID is
 // ErrImmutableValueConflict. FF-009 §4.3 declares RecordID unique and
 // FF-006 §2 derives a timeline event's identity from it, so a duplicate would
-// collide two timeline events onto one event ID (AD-021).
+// collide two timeline events onto one event ID (AD-021). GetByRecordID is a
+// global identity lookup: it returns (zero, false, nil) when no record exists
+// and a stored-state integrity error if uniqueness has already been violated.
 type RevisionAcceptanceRepository interface {
 	Append(ctx context.Context, record engineering.RevisionAcceptanceRecord) error
+	GetByRecordID(ctx context.Context, recordID string) (engineering.RevisionAcceptanceRecord, bool, error)
 	ListByRevision(ctx context.Context, key engineering.RevisionKey) ([]engineering.RevisionAcceptanceRecord, error)
 	ListByArtifact(ctx context.Context, artifactID string) ([]engineering.RevisionAcceptanceRecord, error)
 }

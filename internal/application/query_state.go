@@ -35,22 +35,59 @@ type EngineeringStateInput struct {
 // DiscoverValidationPlanArtifactIDs (AD-025, FF-016 §9). Completeness comes
 // from ListByFamilyAndSubject (FF-016 §4); this function adds only artifact
 // ID deduplication and ordering.
-func discoverArtifactIDsBySubject(ctx context.Context, repos Repositories, family engineering.RevisionFamily, capabilityArtifactID string) ([]string, error) {
-	revisions, err := repos.Revisions.ListByFamilyAndSubject(ctx, family, engineering.ArtifactSubjectKey(capabilityArtifactID))
+func discoverArtifactIDsBySubject(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, family engineering.RevisionFamily, capabilityArtifactID string) ([]string, error) {
+	subjectKey := engineering.ArtifactSubjectKey(capabilityArtifactID)
+	revisions, err := repos.Revisions.ListByFamilyAndSubject(ctx, family, subjectKey)
 	if err != nil {
 		return nil, err
 	}
 	seen := map[string]bool{}
 	out := make([]string, 0, len(revisions))
 	for _, rev := range revisions {
+		if rev.RevisionFamily != family || rev.SubjectKey != subjectKey {
+			return nil, integrityError("subject discovery returned a revision outside its requested projection", nil)
+		}
 		if seen[rev.Key.ArtifactID] {
 			continue
+		}
+		if err := validateStableSubjectProjection(ctx, repos, rev.Key.ArtifactID, family, subjectKey); err != nil {
+			return nil, err
+		}
+		if _, err := validateManagedHistory(ctx, repos, inspector, rev.Key.ArtifactID, family, true); err != nil {
+			return nil, err
 		}
 		seen[rev.Key.ArtifactID] = true
 		out = append(out, rev.Key.ArtifactID)
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// validateStableSubjectProjection prevents a single Requirement or
+// Validation Plan Artifact from being discovered for one capability through
+// an older revision while its current revision has silently retargeted the
+// shared Artifact to another capability. Command paths additionally decode
+// and inspect every envelope; read discovery can enforce this invariant from
+// the complete projected history it is already required to enumerate.
+func validateStableSubjectProjection(ctx context.Context, repos Repositories, artifactID string, family engineering.RevisionFamily, subjectKey string) error {
+	revisions, err := repos.Revisions.ListByArtifact(ctx, artifactID)
+	if err != nil {
+		return err
+	}
+	if len(revisions) == 0 {
+		return integrityError("subject discovery resolved an artifact with no revisions", nil)
+	}
+	seen := make(map[engineering.RevisionKey]struct{}, len(revisions))
+	for _, revision := range revisions {
+		if revision.Key.ArtifactID != artifactID || revision.RevisionFamily != family || revision.SubjectKey != subjectKey {
+			return integrityError("managed artifact history disagrees with its stable discovered subject", nil)
+		}
+		if _, duplicate := seen[revision.Key]; duplicate {
+			return integrityError("managed artifact history contains a duplicate revision", nil)
+		}
+		seen[revision.Key] = struct{}{}
+	}
+	return nil
 }
 
 // DiscoverRequirementArtifactIDs finds every requirement whose projected
@@ -61,8 +98,8 @@ func discoverArtifactIDsBySubject(ctx context.Context, repos Repositories, famil
 // (AD-025, FF-016 §9) -- including a requirement with no plan activity and
 // no claim, which a claim-derived or plan-derived population would silently
 // omit (FF-011 REQ-4, the counterexample AD-025 records).
-func DiscoverRequirementArtifactIDs(ctx context.Context, repos Repositories, capabilityArtifactID string) ([]string, error) {
-	return discoverArtifactIDsBySubject(ctx, repos, engineering.RevisionFamilyRequirement, capabilityArtifactID)
+func DiscoverRequirementArtifactIDs(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, capabilityArtifactID string) ([]string, error) {
+	return discoverArtifactIDsBySubject(ctx, repos, inspector, engineering.RevisionFamilyRequirement, capabilityArtifactID)
 }
 
 // DiscoverDecisionIDs finds every decision naming any revision of
@@ -112,15 +149,15 @@ type ApplicableDecision struct {
 // activities (FF-020 §5, FF-001 §3.6: "plan revision and its activities").
 // Found is false, with no error, when the capability has no applicable
 // plan yet -- the same well-formed-empty convention every other
-// EngineeringStateResult field already uses. A plan artifact carries
-// exactly one revision (no command revises a validation plan), so no
-// current-revision resolution applies here the way it does for
-// capabilities and requirements.
+// EngineeringStateResult field already uses. Validation-plan revisions use
+// the same governed order and acceptance resolution as capability and
+// requirement revisions.
 type ValidationPlanResult struct {
 	Found      bool
 	ArtifactID string
 	RevisionID string
 	Activities []engineering.PlanActivityDetail
+	Rationale  ResolutionRationale
 }
 
 // EngineeringStateResult bundles every current-state answer for one
@@ -140,8 +177,27 @@ type EngineeringStateResult struct {
 // bases, and plan activities -- from the payloads repos already returns;
 // a stored payload that will not decode is ErrStoredPayloadUnreadable
 // (FF-020 §7), never a silently empty field.
-func GetFeatureEngineeringState(ctx context.Context, repos Repositories, projector EngineeringProjector, in EngineeringStateInput) (EngineeringStateResult, error) {
+func GetFeatureEngineeringState(ctx context.Context, repos Repositories, projector EngineeringProjector, inspector EngineeringReplayInspector, in EngineeringStateInput) (EngineeringStateResult, error) {
 	var result EngineeringStateResult
+	if in.CapabilityArtifactID != "" {
+		subjectKey := engineering.ArtifactSubjectKey(in.CapabilityArtifactID)
+		for _, artifactID := range in.RequirementArtifactIDs {
+			if err := validateStableSubjectProjection(ctx, repos, artifactID, engineering.RevisionFamilyRequirement, subjectKey); err != nil {
+				return EngineeringStateResult{}, err
+			}
+			if _, err := validateManagedHistory(ctx, repos, inspector, artifactID, engineering.RevisionFamilyRequirement, true); err != nil {
+				return EngineeringStateResult{}, err
+			}
+		}
+		if in.PlanArtifactID != "" {
+			if err := validateStableSubjectProjection(ctx, repos, in.PlanArtifactID, engineering.RevisionFamilyValidationPlan, subjectKey); err != nil {
+				return EngineeringStateResult{}, err
+			}
+			if _, err := validateManagedHistory(ctx, repos, inspector, in.PlanArtifactID, engineering.RevisionFamilyValidationPlan, true); err != nil {
+				return EngineeringStateResult{}, err
+			}
+		}
+	}
 
 	currentRevision, err := ResolveCurrentRevision(ctx, repos, in.CapabilityArtifactID)
 	if err != nil {
@@ -188,18 +244,20 @@ func GetFeatureEngineeringState(ctx context.Context, repos Repositories, project
 	}
 
 	if in.PlanArtifactID != "" {
-		planRevisions, err := repos.Revisions.ListByArtifact(ctx, in.PlanArtifactID)
+		currentPlan, err := ResolveCurrentRevision(ctx, repos, in.PlanArtifactID)
 		if err != nil {
 			return EngineeringStateResult{}, err
 		}
-		if len(planRevisions) > 0 {
-			rev := planRevisions[len(planRevisions)-1]
+		result.ValidationPlan.Rationale = currentPlan.Rationale
+		if currentPlan.Found {
+			rev := currentPlan.Revision
 			activities, err := projector.ProjectPlanActivities(rev.Payload)
 			if err != nil {
 				return EngineeringStateResult{}, fmt.Errorf("%w: validation plan %s: %w", ErrStoredPayloadUnreadable, in.PlanArtifactID, err)
 			}
 			result.ValidationPlan = ValidationPlanResult{
 				Found: true, ArtifactID: rev.Key.ArtifactID, RevisionID: rev.Key.RevisionID, Activities: activities,
+				Rationale: currentPlan.Rationale,
 			}
 		}
 	}

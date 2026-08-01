@@ -23,7 +23,8 @@ func seedReadSurfaceFixture(t *testing.T, f commandFixture) {
 	if _, err := (application.EstablishRequirementCommand{
 		ArtifactID: "REQ-1", RevisionID: "REQ-1-REV-1",
 		Statement: "Published homework SHALL be visible to the student.", SubjectArtifactID: "CAP-1",
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+		AcceptanceRecordID: memberID("MEM-REQ-1"),
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatalf("EstablishRequirement: %v", err)
 	}
 
@@ -49,19 +50,20 @@ func seedReadSurfaceFixture(t *testing.T, f commandFixture) {
 		EvidenceArtifactID: "EV-0", EvidenceRevisionID: "EV-0-REV-1",
 		Assumptions: []string{"media hosted externally"}, Constraints: []string{"no binary storage"},
 		Uncertainties: []string{"small sample"}, Rationale: "Avoids scope creep.",
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatalf("RecordArchitectureDecision: %v", err)
 	}
 
 	if _, err := (application.EstablishValidationPlanCommand{
 		ArtifactID: "VP-1", RevisionID: "VP-1-REV-1", ScopeArtifactID: "CAP-1",
+		AcceptanceRecordID: memberID("MEM-PLAN-1"),
 		Activities: []application.PlanActivityCommandInput{{
 			Key: "A-1", SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1",
 			Method: "manual-review", OutcomeInterpretation: "Satisfied when reviewed.",
 			RequirementArtifactID: "REQ-1", RequirementRevisionID: "REQ-1-REV-1",
 			ExpectedEvidence: []string{"reviewer note"},
 		}},
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatalf("EstablishValidationPlan: %v", err)
 	}
 
@@ -70,7 +72,7 @@ func seedReadSurfaceFixture(t *testing.T, f commandFixture) {
 		SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1",
 		Method: "manual-review", Outcome: "completed",
 		EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1", EvidenceLocator: "https://evidence.example/EV-1",
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatalf("RecordValidationRun: %v", err)
 	}
 
@@ -81,7 +83,7 @@ func seedReadSurfaceFixture(t *testing.T, f commandFixture) {
 		Outcome: "satisfied", Method: "manual-review",
 		EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1", ExecutionID: "ER-1",
 		Reasoning: "The specification states it explicitly.",
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatalf("RecordValidationClaim: %v", err)
 	}
 }
@@ -95,7 +97,7 @@ func TestGetFeatureEngineeringStateForCard_RendersReadSurfaceContent(t *testing.
 	f := newCommandFixture()
 	seedReadSurfaceFixture(t, f)
 
-	state, err := application.GetFeatureEngineeringStateForCard(context.Background(), f.uow, f.rec, mustFeatureCardID(t, "FC-1"))
+	state, err := application.GetFeatureEngineeringStateForCard(context.Background(), f.uow, f.rec, f.rec, mustFeatureCardID(t, "FC-1"))
 	if err != nil {
 		t.Fatalf("GetFeatureEngineeringStateForCard: %v", err)
 	}
@@ -123,6 +125,9 @@ func TestGetFeatureEngineeringStateForCard_RendersReadSurfaceContent(t *testing.
 	}
 	if state.ValidationPlan.Activities[0].OutcomeInterpretation != "Satisfied when reviewed." {
 		t.Errorf("activity outcome interpretation = %q", state.ValidationPlan.Activities[0].OutcomeInterpretation)
+	}
+	if state.ValidationPlan.Rationale.Rule == "" || state.ValidationPlan.Rationale.SelectedKey.RevisionID != "VP-1-REV-1" || state.ValidationPlan.Rationale.SelectedSequence != 1 {
+		t.Errorf("ValidationPlan.Rationale = %+v, want selected VP-1-REV-1 at sequence 1", state.ValidationPlan.Rationale)
 	}
 
 	if len(state.Readiness.PerRequirement) != 1 {
@@ -158,7 +163,7 @@ func TestGetFeatureEngineeringStateForCard_NoCapability_EmptyReadSurface(t *test
 		t.Fatal(err)
 	}
 
-	state, err := application.GetFeatureEngineeringStateForCard(ctx, f.uow, f.rec, mustFeatureCardID(t, "FC-1"))
+	state, err := application.GetFeatureEngineeringStateForCard(ctx, f.uow, f.rec, f.rec, mustFeatureCardID(t, "FC-1"))
 	if err != nil {
 		t.Fatalf("GetFeatureEngineeringStateForCard: %v", err)
 	}
@@ -253,7 +258,7 @@ func TestGetFeatureEngineeringStateForCard_UndecodablePayload(t *testing.T) {
 		t.Fatalf("seeding a decision with an undecodable payload: %v", err)
 	}
 
-	_, err := application.GetFeatureEngineeringStateForCard(context.Background(), f.uow, f.rec, mustFeatureCardID(t, "FC-1"))
+	_, err := application.GetFeatureEngineeringStateForCard(context.Background(), f.uow, f.rec, f.rec, mustFeatureCardID(t, "FC-1"))
 	if !errors.Is(err, application.ErrStoredPayloadUnreadable) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrStoredPayloadUnreadable)", err)
 	}

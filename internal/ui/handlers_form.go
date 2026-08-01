@@ -325,6 +325,7 @@ func handleEstablishRequirement(deps Dependencies) http.HandlerFunc {
 			return
 		}
 		artifactID, revisionID, statement := r.FormValue("artifact_id"), r.FormValue("revision_id"), r.FormValue("statement")
+		acceptanceRecordID := r.FormValue("acceptance_record_id")
 
 		cc, problem := loadCapabilityContext(r.Context(), deps, featureCardID)
 		if problem != nil {
@@ -333,6 +334,7 @@ func handleEstablishRequirement(deps Dependencies) http.HandlerFunc {
 		}
 		result, err := callAPI(r.Context(), deps.API, http.MethodPost, "/api/v1/requirements", map[string]any{
 			"artifact_id": artifactID, "revision_id": revisionID, "statement": statement, "subject_artifact_id": cc.ArtifactID,
+			"acceptance_record_id": acceptanceRecordID,
 		})
 		if err != nil {
 			writeInternalErrorPage(w)
@@ -348,7 +350,7 @@ func handleEstablishRequirement(deps Dependencies) http.HandlerFunc {
 			return
 		}
 		data.FormError = result.ErrMsg
-		data.FormValues = formValues(r, "artifact_id", "revision_id", "statement")
+		data.FormValues = formValues(r, "artifact_id", "revision_id", "acceptance_record_id", "statement")
 		render(w, http.StatusUnprocessableEntity, "requirements", data)
 	}
 }
@@ -362,6 +364,7 @@ func handleRecordDecision(deps Dependencies) http.HandlerFunc {
 			return
 		}
 		decisionID, question, outcomeStatement := r.FormValue("decision_id"), r.FormValue("question"), r.FormValue("outcome_statement")
+		subjectRevisionID := strings.TrimSpace(r.FormValue("subject_revision_id"))
 		alternatives := r.FormValue("alternatives")
 		evidenceArtifactID, evidenceRevisionID := r.FormValue("evidence_artifact_id"), r.FormValue("evidence_revision_id")
 		assumptions, constraints, uncertainties, rationale := r.FormValue("assumptions"), r.FormValue("constraints"), r.FormValue("uncertainties"), r.FormValue("rationale")
@@ -371,8 +374,15 @@ func handleRecordDecision(deps Dependencies) http.HandlerFunc {
 			problem.write(w)
 			return
 		}
+		if subjectRevisionID == "" {
+			// Compatibility for forms rendered before the immutable revision
+			// witness was added. New forms always carry the exact revision the
+			// user was looking at so a later current revision cannot change a
+			// replay's command semantics.
+			subjectRevisionID = cc.CurrentRevisionID
+		}
 		result, err := callAPI(r.Context(), deps.API, http.MethodPost, "/api/v1/decisions", map[string]any{
-			"decision_id": decisionID, "subject_artifact_id": cc.ArtifactID, "subject_revision_id": cc.CurrentRevisionID,
+			"decision_id": decisionID, "subject_artifact_id": cc.ArtifactID, "subject_revision_id": subjectRevisionID,
 			"question": question, "outcome_statement": outcomeStatement, "alternatives": splitLines(alternatives),
 			"evidence_artifact_id": evidenceArtifactID, "evidence_revision_id": evidenceRevisionID,
 			"assumptions": splitLines(assumptions), "constraints": splitLines(constraints), "uncertainties": splitLines(uncertainties),
@@ -392,7 +402,7 @@ func handleRecordDecision(deps Dependencies) http.HandlerFunc {
 			return
 		}
 		data.FormError = result.ErrMsg
-		data.FormValues = formValues(r, "decision_id", "question", "outcome_statement", "alternatives",
+		data.FormValues = formValues(r, "decision_id", "subject_revision_id", "question", "outcome_statement", "alternatives",
 			"evidence_artifact_id", "evidence_revision_id", "assumptions", "constraints", "uncertainties", "rationale")
 		render(w, http.StatusUnprocessableEntity, "decisions", data)
 	}
@@ -436,6 +446,7 @@ func handleEstablishPlan(deps Dependencies) http.HandlerFunc {
 			return
 		}
 		artifactID, revisionID, activitiesField := r.FormValue("artifact_id"), r.FormValue("revision_id"), r.FormValue("activities")
+		acceptanceRecordID := r.FormValue("acceptance_record_id")
 
 		cc, problem := loadCapabilityContext(r.Context(), deps, featureCardID)
 		if problem != nil {
@@ -444,7 +455,8 @@ func handleEstablishPlan(deps Dependencies) http.HandlerFunc {
 		}
 		result, err := callAPI(r.Context(), deps.API, http.MethodPost, "/api/v1/validation/plans", map[string]any{
 			"artifact_id": artifactID, "revision_id": revisionID, "scope_artifact_id": cc.ArtifactID,
-			"activities": parsePlanActivities(activitiesField, cc.ArtifactID, cc.CurrentRevisionID),
+			"acceptance_record_id": acceptanceRecordID,
+			"activities":           parsePlanActivities(activitiesField, cc.ArtifactID, cc.CurrentRevisionID),
 		})
 		if err != nil {
 			writeInternalErrorPage(w)
@@ -460,7 +472,8 @@ func handleEstablishPlan(deps Dependencies) http.HandlerFunc {
 			return
 		}
 		data.FormError = result.ErrMsg
-		data.FormValues = formValues(r, "artifact_id", "revision_id", "activities")
+		data.FormValues = formValues(r, "artifact_id", "revision_id", "acceptance_record_id", "activities")
+		data.PlanFormFailed = true
 		render(w, http.StatusUnprocessableEntity, "validation", data)
 	}
 }

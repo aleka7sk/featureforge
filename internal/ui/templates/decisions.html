@@ -44,6 +44,7 @@
   <section class="panel" aria-labelledby="new-decision-heading">
     <h2 id="new-decision-heading">Record a decision</h2>
     <form class="command-form" method="post" action="/features/{{.FeatureCardID}}/decisions">
+      <input type="hidden" name="subject_revision_id" value="{{with index .FormValues "subject_revision_id"}}{{.}}{{else}}{{.SubjectRevisionID}}{{end}}">
       <div class="field">
         <label for="decision_id">Decision ID</label>
         <input type="text" id="decision_id" name="decision_id" value="{{index .FormValues "decision_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>

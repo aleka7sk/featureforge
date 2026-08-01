@@ -41,6 +41,10 @@
         <input type="text" id="revision_id" name="revision_id" value="{{index .FormValues "revision_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
       </div>
       <div class="field">
+        <label for="acceptance_record_id">Acceptance record ID</label>
+        <input type="text" id="acceptance_record_id" name="acceptance_record_id" value="{{index .FormValues "acceptance_record_id"}}" required {{if .FormError}}aria-describedby="form-error"{{end}}>
+      </div>
+      <div class="field">
         <label for="statement">Statement</label>
         <textarea id="statement" name="statement" rows="3" required {{if .FormError}}aria-describedby="form-error"{{end}}>{{index .FormValues "statement"}}</textarea>
       </div>

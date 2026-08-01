@@ -43,6 +43,17 @@ second execution succeeds and leaves the store byte-identical.
 **Conflict test.** Every command is executed twice with the same identities and
 differing content; the second fails with `ErrImmutableValueConflict`.
 
+**Forward correction (AD-030, FF-022).** Caller-controlled identity is
+necessary but does not make command replay automatic. After static validation,
+the command captures one normalized candidate time before `UnitOfWork.Do` so a
+transaction callback retry is stable. Inside the transaction it must first
+recover and validate its complete persisted semantic act, before consuming
+that candidate, allocating sequence, rebuilding a payload, or re-validating a
+journal transition as new. The idempotency and conflict tests above use an
+advancing clock and assert zero writes over the complete store. New C7 and C9
+acts also carry caller-owned `acceptance_record_id`; C7 alone permits omission
+when it recovers a complete existing act and creates nothing.
+
 ## 2. Time strategy
 
 ```
@@ -69,9 +80,11 @@ a dependency-injection framework, a service locator, or a context value.
 | State assignment `EffectiveAt` | Command input, defaulting to `Clock.Now()` |
 | Timeline `OccurredAt` | The family's own time (§8) |
 
-All timestamps are normalized to UTC before construction. `core.Timestamp`
-provides `Compare`, `Before`, `After`, and `Equal`; comparisons use `Compare` so
-that equal instants in different offsets compare equal.
+All timestamps are normalized to UTC and truncated to microsecond precision
+before construction or semantic comparison, matching the PostgreSQL storage
+representation. `core.Timestamp` provides `Compare`, `Before`, `After`, and
+`Equal`; comparisons use `Compare` so that equal instants in different offsets
+compare equal.
 
 **Correction ordering never uses time.** See §6.
 
@@ -92,11 +105,23 @@ differ from M.1's use-case list the rename is noted.
 | `AcceptCapabilityRevision` | `AcceptCapabilityRevision` | Acceptance journal entry |
 | `EstablishRequirement` | `AddRequirement` | Requirement artifact + revision + order metadata + acceptance entry (AD-019) |
 | `RecordArchitectureDecision` | `RecordDecision` | Decision + basis |
-| `EstablishValidationPlan` | `CreateValidationPlan` | Plan artifact + plan revision |
+| `EstablishValidationPlan` | `CreateValidationPlan` | Plan artifact + plan revision + order metadata + immediate accepted caller-owned member |
 | `RecordValidationRun` | `RecordValidationExecution` | Evidence artifact + revision, then execution record |
 | `RecordValidationClaim` | `RecordClaim` | Claim |
 | `CorrectValidationClaim` | `CorrectClaim` | Claim carrying a correction reference |
 | `AssignLifecycleState` | `AssignLifecycleState` | Transition record revision + state assignment |
+
+**AD-030 act-table correction.** C7's complete act includes its
+caller-identified semantic acceptance member. C9's newly selected complete act
+is Plan Artifact + Plan Revision + order metadata + immediate accepted,
+caller-identified member. C10's identity set includes both `execution_id` and
+the Evidence Artifact/revision pair it creates. The full C1–C12 occupancy and
+equality matrix is normative in FF-022 §6.
+
+Requirement and Validation Plan shared roots additionally preserve one
+canonical subject/scope across all revisions. A new retarget request is 409;
+stored mixed history is 500 and is rejected by command replay and Q3/Q4/Q5
+before projected discovery membership is trusted.
 
 **Challenged against the M.2 candidate list.** The candidate list omitted
 `AcceptCapabilityRevision` and `AssignLifecycleState`. Both are restored:

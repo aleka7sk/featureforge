@@ -19,6 +19,8 @@ import (
 func newTestHandler() http.Handler {
 	return transporthttp.NewHandler(transporthttp.Dependencies{
 		UOW:       memory.NewUnitOfWork(memory.NewStore()),
+		Recorder:  peos.NewRecorder(),
+		Inspector: peos.NewRecorder(),
 		Projector: peos.NewRecorder(),
 		Clock:     application.SystemClock{},
 	})

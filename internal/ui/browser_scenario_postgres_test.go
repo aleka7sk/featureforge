@@ -11,6 +11,8 @@ import (
 	"github.com/aleka7sk/featureforge/internal/application"
 	peos "github.com/aleka7sk/featureforge/internal/engineering/peos"
 	"github.com/aleka7sk/featureforge/internal/infrastructure/postgres"
+	"github.com/aleka7sk/featureforge/internal/scenario"
+	"github.com/aleka7sk/featureforge/internal/testsupport/replaygate"
 )
 
 const postgresDSNEnvVar = "FEATUREFORGE_POSTGRES_TEST_DSN"
@@ -75,6 +77,6 @@ func newPostgresFixtureUI(t *testing.T) (application.UnitOfWork, peos.Recorder) 
 // pattern). Skips cleanly when FEATUREFORGE_POSTGRES_TEST_DSN is unset.
 func TestCanonicalScenarioThroughUIBrowserPostgres(t *testing.T) {
 	uow, rec := newPostgresFixtureUI(t)
-	handler := runCanonicalScenarioThroughUIBrowser(t, uow, rec, application.SystemClock{})
-	assertCanonicalEndStateThroughUIBrowser(t, handler)
+	clock := application.NewFixedClock(scenario.FixedStart)
+	assertCanonicalScenarioUIReplay(t, replaygate.New(uow), rec, clock)
 }

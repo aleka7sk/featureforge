@@ -31,7 +31,7 @@ func TestConcurrentRevisionsProduceDistinctSequences(t *testing.T) {
 	clock := application.NewFixedClock(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC))
 	ctx := context.Background()
 
-	seedCapability(t, uow, recorder, clock)
+	seedCapability(t, uow, recorder, recorder, clock)
 
 	const writers = 4
 	var wg sync.WaitGroup
@@ -46,7 +46,7 @@ func TestConcurrentRevisionsProduceDistinctSequences(t *testing.T) {
 				RevisionID: "CAP-1-REV-CONC-" + string(rune('A'+i)),
 				Content:    mustContent(t, "Concurrent revision "+string(rune('A'+i))),
 			}
-			result, err := cmd.Execute(ctx, uow, recorder, clock)
+			result, err := cmd.Execute(ctx, uow, recorder, recorder, clock)
 			errs[i] = err
 			sequences[i] = result.Sequence
 		}(i)
@@ -97,7 +97,7 @@ func TestNestedDoIsRejected(t *testing.T) {
 
 // seedCapability establishes PRJ-1, FC-1, and CAP-1 with its founding
 // revision at sequence 1.
-func seedCapability(t *testing.T, uow application.UnitOfWork, recorder application.EngineeringRecorder, clock application.Clock) {
+func seedCapability(t *testing.T, uow application.UnitOfWork, recorder application.EngineeringRecorder, inspector application.EngineeringReplayInspector, clock application.Clock) {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := (application.CreateProjectCommand{ProjectID: "PRJ-1", Name: "Pilot"}).Execute(ctx, uow, clock); err != nil {
@@ -110,7 +110,7 @@ func seedCapability(t *testing.T, uow application.UnitOfWork, recorder applicati
 		FeatureCardID: "FC-1", ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-1",
 		Content: mustContent(t, "Homework after a lesson"),
 	}
-	if _, err := cmd.Execute(ctx, uow, recorder, clock); err != nil {
+	if _, err := cmd.Execute(ctx, uow, recorder, inspector, clock); err != nil {
 		t.Fatal(err)
 	}
 }

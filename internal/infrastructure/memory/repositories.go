@@ -147,6 +147,9 @@ func (r featureCardRepo) ListByProject(_ context.Context, projectID domain.Proje
 }
 
 func (r featureCardRepo) LinkCapability(_ context.Context, id domain.FeatureCardID, artifactID string) error {
+	if _, found := lookup(r.txn.overlay.featureCards, r.txn.store.committed.featureCards, id); !found {
+		return fmt.Errorf("%w: feature card %s", application.ErrReferencedValueMissing, id)
+	}
 	if err := r.txn.store.countWrite("capabilitylink"); err != nil {
 		return err
 	}
@@ -441,7 +444,10 @@ func (r acceptanceRepo) Append(_ context.Context, record engineering.RevisionAcc
 	if _, ok := lookup(r.txn.overlay.revisions, r.txn.store.committed.revisions, record.Key); !ok {
 		return fmt.Errorf("%w: acceptance record for revision %s references a revision that does not exist", application.ErrReferencedValueMissing, record.Key)
 	}
-	existing, found := r.findByRecordID(record.RecordID)
+	existing, found, err := r.GetByRecordID(r.ctx, record.RecordID)
+	if err != nil {
+		return err
+	}
 	if found {
 		if existing == record {
 			return nil
@@ -452,28 +458,38 @@ func (r acceptanceRepo) Append(_ context.Context, record engineering.RevisionAcc
 	return nil
 }
 
-// findByRecordID searches the whole journal for an entry with this RecordID.
+// GetByRecordID searches the whole journal for an entry with this RecordID.
 // FF-009 §4.3 declares RecordID unique and FF-006 §2 derives a timeline
-// event's identity from it, so the same id must not appear twice even under
-// two different revisions (AD-021). Append is therefore create-only on
-// RecordID: an identical re-append is a no-op, a differing one conflicts --
-// the same semantics every other repository's Put already has.
-func (r acceptanceRepo) findByRecordID(recordID string) (engineering.RevisionAcceptanceRecord, bool) {
+// event's identity from it. More than one match is therefore stored-state
+// corruption rather than an arbitrary choice of one record.
+func (r acceptanceRepo) GetByRecordID(_ context.Context, recordID string) (engineering.RevisionAcceptanceRecord, bool, error) {
+	var match engineering.RevisionAcceptanceRecord
+	matches := 0
 	for _, entries := range r.txn.store.committed.acceptance {
 		for _, e := range entries {
 			if e.RecordID == recordID {
-				return e, true
+				match = e
+				matches++
 			}
 		}
 	}
 	for _, entries := range r.txn.overlay.acceptance {
 		for _, e := range entries {
 			if e.RecordID == recordID {
-				return e, true
+				match = e
+				matches++
 			}
 		}
 	}
-	return engineering.RevisionAcceptanceRecord{}, false
+	switch matches {
+	case 0:
+		return engineering.RevisionAcceptanceRecord{}, false, nil
+	case 1:
+		return match, true, nil
+	default:
+		return engineering.RevisionAcceptanceRecord{}, false,
+			fmt.Errorf("%w: acceptance record id %q appears more than once", application.ErrStoredStateIntegrity, recordID)
+	}
 }
 
 func (r acceptanceRepo) ListByRevision(_ context.Context, key engineering.RevisionKey) ([]engineering.RevisionAcceptanceRecord, error) {

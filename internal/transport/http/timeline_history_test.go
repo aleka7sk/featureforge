@@ -31,10 +31,12 @@ func assertPriorRevisionValidationSurvives(t *testing.T, handler http.Handler) {
 		"record_id": "ACC-H1", "revision_id": "CAP-H1-REV-1", "state": "accepted",
 	})
 	mustPost(t, handler, "/api/v1/requirements", map[string]any{
-		"artifact_id": "REQ-H1", "revision_id": "REQ-H1-REV-1", "statement": "S", "subject_artifact_id": "CAP-H1",
+		"artifact_id": "REQ-H1", "revision_id": "REQ-H1-REV-1", "acceptance_record_id": "ACC-REQ-H1",
+		"statement": "S", "subject_artifact_id": "CAP-H1",
 	})
 	mustPost(t, handler, "/api/v1/validation/plans", map[string]any{
 		"artifact_id": "VP-H1", "revision_id": "VP-H1-REV-1", "scope_artifact_id": "CAP-H1",
+		"acceptance_record_id": "ACC-VP-H1",
 		"activities": []map[string]any{{
 			"key": "A-1", "subject_artifact_id": "CAP-H1", "subject_revision_id": "CAP-H1-REV-1",
 			"method": "manual-review", "outcome_interpretation": "Satisfied when reviewed.",
@@ -100,7 +102,7 @@ func TestTimelinePreservesPriorRevisionValidation(t *testing.T) {
 func TestTimelinePreservesPriorRevisionValidationPostgres(t *testing.T) {
 	uow, rec, clock := newPostgresFixtureHTTP(t)
 	handler := transporthttp.NewHandler(transporthttp.Dependencies{
-		UOW: uow, Recorder: rec, Projector: rec, Clock: clock,
+		UOW: uow, Recorder: rec, Inspector: rec, Projector: rec, Clock: clock,
 	})
 	assertPriorRevisionValidationSurvives(t, handler)
 }

@@ -2,6 +2,7 @@ package http_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,8 +12,10 @@ import (
 	"time"
 
 	"github.com/aleka7sk/featureforge/internal/application"
+	"github.com/aleka7sk/featureforge/internal/engineering"
 	"github.com/aleka7sk/featureforge/internal/engineering/peos"
 	"github.com/aleka7sk/featureforge/internal/infrastructure/memory"
+	"github.com/aleka7sk/featureforge/internal/testsupport/replaygate"
 	transporthttp "github.com/aleka7sk/featureforge/internal/transport/http"
 )
 
@@ -29,6 +32,7 @@ func newTestDeps() transporthttp.Dependencies {
 	return transporthttp.Dependencies{
 		UOW:       memory.NewUnitOfWork(memory.NewStore()),
 		Recorder:  peos.NewRecorder(),
+		Inspector: peos.NewRecorder(),
 		Projector: peos.NewRecorder(),
 		Clock:     application.NewFixedClock(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)),
 	}
@@ -188,7 +192,8 @@ func TestCommandEndpointsCanonicalOrder(t *testing.T) {
 	}
 	rr = postJSON(t, handler, "/api/v1/requirements", map[string]any{
 		"artifact_id": "REQ-1", "revision_id": "REQ-1-REV-1",
-		"statement": "Published homework SHALL be visible to the student.", "subject_artifact_id": "CAP-1",
+		"acceptance_record_id": "ACC-REQ-1",
+		"statement":            "Published homework SHALL be visible to the student.", "subject_artifact_id": "CAP-1",
 	}, &requirementEnvelope)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("C7: status = %d, want 201; body = %s", rr.Code, rr.Body.String())
@@ -224,6 +229,7 @@ func TestCommandEndpointsCanonicalOrder(t *testing.T) {
 	}
 	rr = postJSON(t, handler, "/api/v1/validation/plans", map[string]any{
 		"artifact_id": "VP-1", "revision_id": "VP-1-REV-1", "scope_artifact_id": "CAP-1",
+		"acceptance_record_id": "ACC-VP-1",
 		"activities": []map[string]any{{
 			"key": "A-1", "subject_artifact_id": "CAP-1", "subject_revision_id": "CAP-1-REV-2",
 			"method": "manual-review", "outcome_interpretation": "Satisfied when reviewed.",
@@ -349,19 +355,185 @@ func TestCommandIdempotentReplay(t *testing.T) {
 // TestCommandConflictingReplay proves a differing re-POST with the same
 // identity is 409 (FF-018 §11.1).
 func TestCommandConflictingReplay(t *testing.T) {
+	gate := replaygate.New(memory.NewUnitOfWork(memory.NewStore()))
 	deps := newTestDeps()
+	deps.UOW = gate
 	handler := transporthttp.NewHandler(deps)
 
 	first := postJSON(t, handler, "/api/v1/projects", map[string]any{"project_id": "PRJ-1", "name": "Original"}, nil)
 	if first.Code != http.StatusCreated {
 		t.Fatalf("first: status = %d, want 201", first.Code)
 	}
+	gate.RejectWrites()
 	second := postJSON(t, handler, "/api/v1/projects", map[string]any{"project_id": "PRJ-1", "name": "Different"}, nil)
 	if second.Code != http.StatusConflict {
 		t.Fatalf("conflicting replay: status = %d, want 409; body = %s", second.Code, second.Body.String())
 	}
 	if code := errorCode(t, second); code != "immutable_value_conflict" {
 		t.Errorf("code = %q, want immutable_value_conflict", code)
+	}
+	if attempts := gate.WriteAttempts(); attempts != 0 {
+		t.Fatalf("conflicting replay attempted %d writes, want zero", attempts)
+	}
+}
+
+func TestC7AndC9AcceptanceRecordIDJSONPresenceAndGrammar(t *testing.T) {
+	deps := newTestDeps()
+	handler := transporthttp.NewHandler(deps)
+
+	mustPost(t, handler, "/api/v1/projects", map[string]any{"project_id": "PRJ-ID-MATRIX", "name": "Identity matrix"})
+	mustPost(t, handler, "/api/v1/features", map[string]any{
+		"feature_card_id": "FC-ID-MATRIX", "project_id": "PRJ-ID-MATRIX", "title": "Identity matrix",
+	})
+	mustPost(t, handler, "/api/v1/capabilities", map[string]any{
+		"feature_card_id": "FC-ID-MATRIX", "artifact_id": "CAP-ID-MATRIX", "revision_id": "CAP-ID-MATRIX-REV-1",
+		"content": map[string]any{"schema_version": 1, "title": "Identity matrix", "problem_statement": "Member identity must be explicit."},
+	})
+
+	requirementBody := func(artifactID string) map[string]any {
+		return map[string]any{
+			"artifact_id": artifactID, "revision_id": artifactID + "-REV-1",
+			"statement": "The system SHALL preserve caller-owned member identity.", "subject_artifact_id": "CAP-ID-MATRIX",
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		present bool
+		value   any
+	}{
+		{name: "omitted"},
+		{name: "null", present: true, value: nil},
+		{name: "empty", present: true, value: ""},
+		{name: "malformed", present: true, value: "member id with spaces"},
+	} {
+		t.Run("C7 "+tc.name, func(t *testing.T) {
+			body := requirementBody("REQ-ID-MATRIX-" + strings.ToUpper(tc.name))
+			if tc.present {
+				body["acceptance_record_id"] = tc.value
+			}
+			rr := postJSON(t, handler, "/api/v1/requirements", body, nil)
+			if rr.Code != http.StatusBadRequest || errorCode(t, rr) != "invalid_command" {
+				t.Fatalf("status/code = %d/%s, want 400/invalid_command; body=%s", rr.Code, errorCode(t, rr), rr.Body.String())
+			}
+		})
+	}
+
+	requirement := requirementBody("REQ-ID-MATRIX-VALID")
+	requirement["acceptance_record_id"] = "MEM-REQ-ID-MATRIX-VALID"
+	mustPost(t, handler, "/api/v1/requirements", requirement)
+	// C7 alone has the governed omitted-ID replay compatibility path.
+	delete(requirement, "acceptance_record_id")
+	mustPost(t, handler, "/api/v1/requirements", requirement)
+
+	planBody := func(artifactID string) map[string]any {
+		return map[string]any{
+			"artifact_id": artifactID, "revision_id": artifactID + "-REV-1", "scope_artifact_id": "CAP-ID-MATRIX",
+			"activities": []map[string]any{{
+				"key": "ACT-ID-MATRIX", "subject_artifact_id": "CAP-ID-MATRIX", "subject_revision_id": "CAP-ID-MATRIX-REV-1",
+				"method": "manual-review", "outcome_interpretation": "Caller identity is present.",
+				"requirement_artifact_id": "REQ-ID-MATRIX-VALID", "requirement_revision_id": "REQ-ID-MATRIX-VALID-REV-1",
+				"expected_evidence": []string{"identity matrix"},
+			}},
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		present bool
+		value   any
+	}{
+		{name: "omitted"},
+		{name: "null", present: true, value: nil},
+		{name: "empty", present: true, value: ""},
+		{name: "malformed", present: true, value: "member id with spaces"},
+	} {
+		t.Run("C9 "+tc.name, func(t *testing.T) {
+			body := planBody("VP-ID-MATRIX-" + strings.ToUpper(tc.name))
+			if tc.present {
+				body["acceptance_record_id"] = tc.value
+			}
+			rr := postJSON(t, handler, "/api/v1/validation/plans", body, nil)
+			if rr.Code != http.StatusBadRequest || errorCode(t, rr) != "invalid_command" {
+				t.Fatalf("status/code = %d/%s, want 400/invalid_command; body=%s", rr.Code, errorCode(t, rr), rr.Body.String())
+			}
+		})
+	}
+	validPlan := planBody("VP-ID-MATRIX-VALID")
+	validPlan["acceptance_record_id"] = "MEM-VP-ID-MATRIX-VALID"
+	mustPost(t, handler, "/api/v1/validation/plans", validPlan)
+}
+
+func TestCorruptPersistedActMapsTo500AndAttemptsZeroWrites(t *testing.T) {
+	ctx := context.Background()
+	base := memory.NewUnitOfWork(memory.NewStore())
+	gate := replaygate.New(base)
+	rec := peos.NewRecorder()
+	clock := application.NewFixedClock(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC))
+	handler := transporthttp.NewHandler(transporthttp.Dependencies{
+		UOW: gate, Recorder: rec, Inspector: rec, Projector: rec, Clock: clock,
+	})
+	mustPost(t, handler, "/api/v1/projects", map[string]any{"project_id": "PRJ-CORRUPT-HTTP", "name": "Corrupt HTTP"})
+	mustPost(t, handler, "/api/v1/features", map[string]any{
+		"feature_card_id": "FC-CORRUPT-HTTP", "project_id": "PRJ-CORRUPT-HTTP", "title": "Corrupt HTTP",
+	})
+	mustPost(t, handler, "/api/v1/capabilities", map[string]any{
+		"feature_card_id": "FC-CORRUPT-HTTP", "artifact_id": "CAP-CORRUPT-HTTP", "revision_id": "CAP-CORRUPT-HTTP-REV-1",
+		"content": map[string]any{"schema_version": 1, "title": "Corrupt HTTP", "problem_statement": "Stored corruption must fail closed."},
+	})
+
+	artifact, revision, err := rec.RecordRequirement(engineering.RequirementInput{
+		ArtifactID: "REQ-CORRUPT-HTTP", RevisionID: "REQ-CORRUPT-HTTP-REV-1",
+		Statement: "The system SHALL reject a corrupt stored act.", SubjectArtifactID: "CAP-CORRUPT-HTTP", RecordedAt: clock.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision.PayloadDigest = engineering.ComputeDigest([]byte("deliberately corrupt digest"))
+	order, err := engineering.NewRevisionOrderMetadata(revision.Key, 1, clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	member, err := engineering.NewRevisionAcceptanceRecord(
+		"MEM-REQ-CORRUPT-HTTP", revision.Key, engineering.AcceptanceStateAccepted, clock.Now(),
+		"featureforge:local-user", "requirement established",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := base.Do(ctx, func(r application.Repositories) error {
+		if err := r.Artifacts.Put(ctx, artifact); err != nil {
+			return err
+		}
+		if err := r.Revisions.Put(ctx, revision); err != nil {
+			return err
+		}
+		if err := r.RevisionOrder.Put(ctx, order); err != nil {
+			return err
+		}
+		return r.RevisionAcceptance.Append(ctx, member)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	gate.RejectWrites()
+	rr := postJSON(t, handler, "/api/v1/requirements", map[string]any{
+		"artifact_id": "REQ-CORRUPT-HTTP", "revision_id": "REQ-CORRUPT-HTTP-REV-1",
+		"acceptance_record_id": "MEM-REQ-CORRUPT-HTTP",
+		"statement":            "The system SHALL reject a corrupt stored act.", "subject_artifact_id": "CAP-CORRUPT-HTTP",
+	}, nil)
+	if rr.Code != http.StatusInternalServerError || errorCode(t, rr) != "internal_error" {
+		t.Fatalf("status/code = %d/%s, want 500/internal_error; body=%s", rr.Code, errorCode(t, rr), rr.Body.String())
+	}
+	if attempts := gate.WriteAttempts(); attempts != 0 {
+		t.Fatalf("corrupt-state request attempted %d writes, want zero", attempts)
+	}
+	get := httptest.NewRequest(http.MethodGet, "/api/v1/features/FC-CORRUPT-HTTP/state", nil)
+	getResponse := httptest.NewRecorder()
+	handler.ServeHTTP(getResponse, get)
+	if getResponse.Code != http.StatusInternalServerError || errorCode(t, getResponse) != "internal_error" {
+		t.Fatalf("Q4 status/code = %d/%s, want 500/internal_error; body=%s", getResponse.Code, errorCode(t, getResponse), getResponse.Body.String())
+	}
+	if attempts := gate.WriteAttempts(); attempts != 0 {
+		t.Fatalf("corrupt-state POST+Q4 attempted %d writes, want zero", attempts)
 	}
 }
 
@@ -387,7 +559,7 @@ func TestCommandConflictingReplay(t *testing.T) {
 func TestAssignLifecycleReplayHonorsAD026SubjectKeyEquality(t *testing.T) {
 	clock := application.NewFixedClock(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC))
 	deps := transporthttp.Dependencies{
-		UOW: memory.NewUnitOfWork(memory.NewStore()), Recorder: peos.NewRecorder(), Clock: clock,
+		UOW: memory.NewUnitOfWork(memory.NewStore()), Recorder: peos.NewRecorder(), Inspector: peos.NewRecorder(), Clock: clock,
 	}
 	handler := transporthttp.NewHandler(deps)
 

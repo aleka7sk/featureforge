@@ -76,11 +76,20 @@ func TestCanonicalScenarioPostgres(t *testing.T) {
 	ctx := context.Background()
 	uow, rec, clock := newPostgresFixture(t)
 
-	result, err := scenario.Run(ctx, uow, rec, clock)
+	result, err := scenario.Run(ctx, uow, rec, rec, clock)
 	if err != nil {
 		t.Fatalf("scenario.Run against PostgreSQL: %v", err)
 	}
 	assertCanonicalEndState(t, ctx, uow, rec, result)
+}
+
+// TestCanonicalScenarioReplayPostgres runs the exact FF-011 command stream a
+// second time against the same PostgreSQL UnitOfWork and advancing clock. The
+// shared write gate rejects every repository mutator during replay, while the
+// shared closed-world snapshot proves every persisted byte remains unchanged.
+func TestCanonicalScenarioReplayPostgres(t *testing.T) {
+	uow, rec, clock := newPostgresFixture(t)
+	assertCanonicalScenarioReplay(t, context.Background(), uow, rec, clock)
 }
 
 // TestCanonicalScenarioPostgresInsertionOrderIndependence proves the
@@ -92,11 +101,11 @@ func TestCanonicalScenarioPostgresInsertionOrderIndependence(t *testing.T) {
 	ctx := context.Background()
 
 	uowA, recA, clockA := newPostgresFixture(t)
-	if _, err := scenario.Run(ctx, uowA, recA, clockA); err != nil {
+	if _, err := scenario.Run(ctx, uowA, recA, recA, clockA); err != nil {
 		t.Fatalf("scenario.Run (default order): %v", err)
 	}
 	uowB, recB, clockB := newPostgresFixture(t)
-	if _, err := scenario.RunPermuted(ctx, uowB, recB, clockB); err != nil {
+	if _, err := scenario.RunPermuted(ctx, uowB, recB, recB, clockB); err != nil {
 		t.Fatalf("scenario.RunPermuted: %v", err)
 	}
 

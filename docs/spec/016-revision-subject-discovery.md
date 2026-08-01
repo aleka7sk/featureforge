@@ -139,6 +139,15 @@ in both adapters. Extending it to revisions is a separate decision requiring
 its own evidence, and this document does not make it. The exclusion is
 recorded so a later reader does not read it as an oversight.
 
+**Forward integrity correction (AD-030, FF-022).** Repository lookup remains
+projection-only and adapters still do not decode PEOS. Application discovery,
+however, treats its result as candidates: it validates every discovered
+Requirement or Validation Plan Artifact's complete history with the engineering
+inspector. All revisions under one Requirement Artifact must preserve one
+subject; all revisions under one Validation Plan Artifact preserve one scope.
+A stored mixed history is a fail-loud integrity error, not membership in two
+capability populations.
+
 ### 3.7 The repository treats the value as opaque
 
 After construction-time validation, the persistence layer never parses,

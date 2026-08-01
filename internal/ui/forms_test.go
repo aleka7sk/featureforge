@@ -50,6 +50,7 @@ func TestCanonicalScenarioThroughUIForms(t *testing.T) {
 	api := transporthttp.NewHandler(transporthttp.Dependencies{
 		UOW:       memory.NewUnitOfWork(memory.NewStore()),
 		Recorder:  peos.NewRecorder(),
+		Inspector: peos.NewRecorder(),
 		Projector: peos.NewRecorder(),
 		Clock:     application.SystemClock{},
 	})
@@ -89,11 +90,13 @@ func TestCanonicalScenarioThroughUIForms(t *testing.T) {
 	// C7 establish two requirements.
 	mustPostForm(t, handler, "/features/FC-1/requirements", url.Values{
 		"artifact_id": {"REQ-1"}, "revision_id": {"REQ-1-REV-1"},
-		"statement": {"Published homework SHALL be visible to the student."},
+		"acceptance_record_id": {"ACC-REQ-1"},
+		"statement":            {"Published homework SHALL be visible to the student."},
 	}, "/features/FC-1/requirements")
 	mustPostForm(t, handler, "/features/FC-1/requirements", url.Values{
 		"artifact_id": {"REQ-2"}, "revision_id": {"REQ-2-REV-1"},
-		"statement": {"Published homework SHALL NOT be visible to other users."},
+		"acceptance_record_id": {"ACC-REQ-2"},
+		"statement":            {"Published homework SHALL NOT be visible to other users."},
 	}, "/features/FC-1/requirements")
 
 	// C8 record a decision.
@@ -120,7 +123,8 @@ func TestCanonicalScenarioThroughUIForms(t *testing.T) {
 	// C9 establish the validation plan (one activity, against REQ-1).
 	mustPostForm(t, handler, "/features/FC-1/validation-plan", url.Values{
 		"artifact_id": {"VP-1"}, "revision_id": {"VP-1-REV-1"},
-		"activities": {"A-1|manual-review|Satisfied when visibility is confirmed.|REQ-1|REQ-1-REV-1|Reviewer note"},
+		"acceptance_record_id": {"ACC-VP-1"},
+		"activities":           {"A-1|manual-review|Satisfied when visibility is confirmed.|REQ-1|REQ-1-REV-1|Reviewer note"},
 	}, "/features/FC-1/validation")
 
 	// C10 record a run, then C11 record a satisfied claim against REQ-1.
@@ -189,6 +193,7 @@ func TestCreateProjectForm_CorrectableFailurePreservesInput(t *testing.T) {
 	api := transporthttp.NewHandler(transporthttp.Dependencies{
 		UOW:       memory.NewUnitOfWork(memory.NewStore()),
 		Recorder:  peos.NewRecorder(),
+		Inspector: peos.NewRecorder(),
 		Projector: peos.NewRecorder(),
 		Clock:     application.SystemClock{},
 	})
@@ -218,6 +223,96 @@ func TestCreateProjectForm_CorrectableFailurePreservesInput(t *testing.T) {
 	}
 }
 
+func TestEstablishPlanForm_ConflictPreservesMemberIdentity(t *testing.T) {
+	api := transporthttp.NewHandler(transporthttp.Dependencies{
+		UOW:       memory.NewUnitOfWork(memory.NewStore()),
+		Recorder:  peos.NewRecorder(),
+		Inspector: peos.NewRecorder(),
+		Projector: peos.NewRecorder(),
+		Clock:     application.SystemClock{},
+	})
+	handler := ui.NewHandler(ui.Dependencies{API: api})
+
+	mustPostForm(t, handler, "/projects", url.Values{"project_id": {"PRJ-PLAN-PRESERVE"}, "name": {"Pilot"}}, "/projects/PRJ-PLAN-PRESERVE")
+	mustPostForm(t, handler, "/projects/PRJ-PLAN-PRESERVE/features", url.Values{
+		"feature_card_id": {"FC-PLAN-PRESERVE"}, "title": {"Homework"},
+	}, "/features/FC-PLAN-PRESERVE")
+	mustPostForm(t, handler, "/features/FC-PLAN-PRESERVE/capability", url.Values{
+		"artifact_id": {"CAP-PLAN-PRESERVE"}, "revision_id": {"CAP-PLAN-PRESERVE-REV-1"},
+		"title": {"Homework"}, "problem_statement": {"No follow-up."},
+	}, "/features/FC-PLAN-PRESERVE")
+	mustPostForm(t, handler, "/features/FC-PLAN-PRESERVE/revisions/CAP-PLAN-PRESERVE-REV-1/acceptance", url.Values{
+		"record_id": {"ACC-CAP-PLAN-PRESERVE"}, "state": {"accepted"},
+	}, "/features/FC-PLAN-PRESERVE/revisions")
+	mustPostForm(t, handler, "/features/FC-PLAN-PRESERVE/requirements", url.Values{
+		"artifact_id": {"REQ-PLAN-PRESERVE"}, "revision_id": {"REQ-PLAN-PRESERVE-REV-1"},
+		"acceptance_record_id": {"ACC-REQ-PLAN-PRESERVE"}, "statement": {"Homework SHALL be visible."},
+	}, "/features/FC-PLAN-PRESERVE/requirements")
+
+	activities := "A-PLAN|manual-review|Satisfied when visible|REQ-PLAN-PRESERVE|REQ-PLAN-PRESERVE-REV-1|review note"
+	path := "/features/FC-PLAN-PRESERVE/validation-plan"
+	mustPostForm(t, handler, path, url.Values{
+		"artifact_id": {"VP-PLAN-PRESERVE"}, "revision_id": {"VP-PLAN-PRESERVE-REV-1"},
+		"acceptance_record_id": {"ACC-VP-PLAN-PRESERVE"}, "activities": {activities},
+	}, "/features/FC-PLAN-PRESERVE/validation")
+
+	rr := postForm(t, handler, path, url.Values{
+		"artifact_id": {"VP-PLAN-PRESERVE"}, "revision_id": {"VP-PLAN-PRESERVE-REV-1"},
+		"acceptance_record_id": {"ACC-VP-DIFFERENT"}, "activities": {activities},
+	})
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body = %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `id="plan_acceptance_record_id"`) || !strings.Contains(body, `value="ACC-VP-DIFFERENT"`) {
+		t.Errorf("expected the conflicting member identity preserved in the visible C9 form, got %s", body)
+	}
+	if !strings.Contains(body, "VP-PLAN-PRESERVE") || !strings.Contains(body, `role="alert"`) {
+		t.Errorf("expected committed plan state and accessible conflict notice, got %s", body)
+	}
+}
+
+func TestEstablishRequirementForm_ConflictPreservesMemberIdentity(t *testing.T) {
+	api := transporthttp.NewHandler(transporthttp.Dependencies{
+		UOW:       memory.NewUnitOfWork(memory.NewStore()),
+		Recorder:  peos.NewRecorder(),
+		Inspector: peos.NewRecorder(),
+		Projector: peos.NewRecorder(),
+		Clock:     application.SystemClock{},
+	})
+	handler := ui.NewHandler(ui.Dependencies{API: api})
+
+	mustPostForm(t, handler, "/projects", url.Values{"project_id": {"PRJ-REQ-PRESERVE"}, "name": {"Pilot"}}, "/projects/PRJ-REQ-PRESERVE")
+	mustPostForm(t, handler, "/projects/PRJ-REQ-PRESERVE/features", url.Values{
+		"feature_card_id": {"FC-REQ-PRESERVE"}, "title": {"Homework"},
+	}, "/features/FC-REQ-PRESERVE")
+	mustPostForm(t, handler, "/features/FC-REQ-PRESERVE/capability", url.Values{
+		"artifact_id": {"CAP-REQ-PRESERVE"}, "revision_id": {"CAP-REQ-PRESERVE-REV-1"},
+		"title": {"Homework"}, "problem_statement": {"No follow-up."},
+	}, "/features/FC-REQ-PRESERVE")
+
+	path := "/features/FC-REQ-PRESERVE/requirements"
+	mustPostForm(t, handler, path, url.Values{
+		"artifact_id": {"REQ-PRESERVE"}, "revision_id": {"REQ-PRESERVE-REV-1"},
+		"acceptance_record_id": {"MEM-REQ-PRESERVE"}, "statement": {"Homework SHALL be visible."},
+	}, path)
+
+	rr := postForm(t, handler, path, url.Values{
+		"artifact_id": {"REQ-PRESERVE"}, "revision_id": {"REQ-PRESERVE-REV-1"},
+		"acceptance_record_id": {"MEM-REQ-PRESERVE-DIFFERENT"}, "statement": {"Homework SHALL be visible."},
+	})
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body = %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `id="acceptance_record_id"`) || !strings.Contains(body, `value="MEM-REQ-PRESERVE-DIFFERENT"`) {
+		t.Errorf("expected the conflicting member identity preserved in the visible C7 form, got %s", body)
+	}
+	if !strings.Contains(body, "REQ-PRESERVE") || !strings.Contains(body, `role="alert"`) {
+		t.Errorf("expected committed requirement state and accessible conflict notice, got %s", body)
+	}
+}
+
 // TestAssignLifecycleForm_TransitionKeyRequiredForNonEntry proves the API's
 // own validation (not a UI-side rule) is what the form surfaces: a
 // non-entry assignment missing transition_key is rejected by the command,
@@ -226,6 +321,7 @@ func TestAssignLifecycleForm_TransitionKeyRequiredForNonEntry(t *testing.T) {
 	api := transporthttp.NewHandler(transporthttp.Dependencies{
 		UOW:       memory.NewUnitOfWork(memory.NewStore()),
 		Recorder:  peos.NewRecorder(),
+		Inspector: peos.NewRecorder(),
 		Projector: peos.NewRecorder(),
 		Clock:     application.SystemClock{},
 	})

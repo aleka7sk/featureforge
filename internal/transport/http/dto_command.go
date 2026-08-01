@@ -1,8 +1,6 @@
 package http
 
 import (
-	"time"
-
 	"github.com/aleka7sk/featureforge/internal/application"
 	"github.com/aleka7sk/featureforge/internal/engineering"
 )
@@ -127,11 +125,11 @@ type reviseCapabilityResponse struct {
 // path: artifactID
 
 type acceptRevisionRequest struct {
-	RecordID    string    `json:"record_id"`
-	RevisionID  string    `json:"revision_id"`
-	State       string    `json:"state"`
-	Reason      string    `json:"reason"`
-	EffectiveAt time.Time `json:"effective_at"`
+	RecordID    string       `json:"record_id"`
+	RevisionID  string       `json:"revision_id"`
+	State       string       `json:"state"`
+	Reason      string       `json:"reason"`
+	EffectiveAt optionalTime `json:"effective_at"`
 }
 
 type acceptRevisionResponse struct {
@@ -142,16 +140,16 @@ type acceptRevisionResponse struct {
 // path: artifactID (mapped to SubjectArtifactID)
 
 type assignLifecycleRequest struct {
-	AssignmentID               string    `json:"assignment_id"`
-	State                      string    `json:"state"`
-	EffectiveAt                time.Time `json:"effective_at"`
-	TransitionRecordArtifactID string    `json:"transition_record_artifact_id"`
-	TransitionRecordRevisionID string    `json:"transition_record_revision_id"`
-	IsEntry                    bool      `json:"is_entry"`
-	TransitionKey              string    `json:"transition_key"`
-	FromAssignmentID           string    `json:"from_assignment_id"`
-	AttemptedAt                time.Time `json:"attempted_at"`
-	CompletedAt                time.Time `json:"completed_at"`
+	AssignmentID               string       `json:"assignment_id"`
+	State                      string       `json:"state"`
+	EffectiveAt                optionalTime `json:"effective_at"`
+	TransitionRecordArtifactID string       `json:"transition_record_artifact_id"`
+	TransitionRecordRevisionID string       `json:"transition_record_revision_id"`
+	IsEntry                    bool         `json:"is_entry"`
+	TransitionKey              string       `json:"transition_key"`
+	FromAssignmentID           string       `json:"from_assignment_id"`
+	AttemptedAt                optionalTime `json:"attempted_at"`
+	CompletedAt                optionalTime `json:"completed_at"`
 }
 
 type assignLifecycleResponse struct {
@@ -162,10 +160,11 @@ type assignLifecycleResponse struct {
 // --- C7 EstablishRequirement ---
 
 type establishRequirementRequest struct {
-	ArtifactID        string `json:"artifact_id"`
-	RevisionID        string `json:"revision_id"`
-	Statement         string `json:"statement"`
-	SubjectArtifactID string `json:"subject_artifact_id"`
+	ArtifactID         string         `json:"artifact_id"`
+	RevisionID         string         `json:"revision_id"`
+	Statement          string         `json:"statement"`
+	SubjectArtifactID  string         `json:"subject_artifact_id"`
+	AcceptanceRecordID optionalString `json:"acceptance_record_id"`
 }
 
 type establishRequirementResponse struct {
@@ -208,10 +207,11 @@ type planActivityDTO struct {
 }
 
 type establishPlanRequest struct {
-	ArtifactID      string            `json:"artifact_id"`
-	RevisionID      string            `json:"revision_id"`
-	ScopeArtifactID string            `json:"scope_artifact_id"`
-	Activities      []planActivityDTO `json:"activities"`
+	ArtifactID         string            `json:"artifact_id"`
+	RevisionID         string            `json:"revision_id"`
+	ScopeArtifactID    string            `json:"scope_artifact_id"`
+	AcceptanceRecordID optionalString    `json:"acceptance_record_id"`
+	Activities         []planActivityDTO `json:"activities"`
 }
 
 type establishPlanResponse struct {
@@ -235,18 +235,18 @@ func mapPlanActivities(dtos []planActivityDTO) []application.PlanActivityCommand
 // --- C10 RecordValidationRun ---
 
 type recordRunRequest struct {
-	ExecutionID        string    `json:"execution_id"`
-	PlanArtifactID     string    `json:"plan_artifact_id"`
-	PlanRevisionID     string    `json:"plan_revision_id"`
-	ActivityKey        string    `json:"activity_key"`
-	SubjectArtifactID  string    `json:"subject_artifact_id"`
-	SubjectRevisionID  string    `json:"subject_revision_id"`
-	Method             string    `json:"method"`
-	Outcome            string    `json:"outcome"`
-	CompletedAt        time.Time `json:"completed_at"`
-	EvidenceArtifactID string    `json:"evidence_artifact_id"`
-	EvidenceRevisionID string    `json:"evidence_revision_id"`
-	EvidenceLocator    string    `json:"evidence_locator"`
+	ExecutionID        string       `json:"execution_id"`
+	PlanArtifactID     string       `json:"plan_artifact_id"`
+	PlanRevisionID     string       `json:"plan_revision_id"`
+	ActivityKey        string       `json:"activity_key"`
+	SubjectArtifactID  string       `json:"subject_artifact_id"`
+	SubjectRevisionID  string       `json:"subject_revision_id"`
+	Method             string       `json:"method"`
+	Outcome            string       `json:"outcome"`
+	CompletedAt        optionalTime `json:"completed_at"`
+	EvidenceArtifactID string       `json:"evidence_artifact_id"`
+	EvidenceRevisionID string       `json:"evidence_revision_id"`
+	EvidenceLocator    string       `json:"evidence_locator"`
 }
 
 type recordRunResponse struct {
@@ -258,19 +258,19 @@ type recordRunResponse struct {
 // --- C11 RecordValidationClaim ---
 
 type recordClaimRequest struct {
-	ClaimID               string    `json:"claim_id"`
-	ScopeArtifactID       string    `json:"scope_artifact_id"`
-	SubjectArtifactID     string    `json:"subject_artifact_id"`
-	SubjectRevisionID     string    `json:"subject_revision_id"`
-	RequirementArtifactID string    `json:"requirement_artifact_id"`
-	RequirementRevisionID string    `json:"requirement_revision_id"`
-	Outcome               string    `json:"outcome"`
-	Method                string    `json:"method"`
-	EvidenceArtifactID    string    `json:"evidence_artifact_id"`
-	EvidenceRevisionID    string    `json:"evidence_revision_id"`
-	ExecutionID           string    `json:"execution_id"`
-	Reasoning             string    `json:"reasoning"`
-	Timestamp             time.Time `json:"timestamp"`
+	ClaimID               string       `json:"claim_id"`
+	ScopeArtifactID       string       `json:"scope_artifact_id"`
+	SubjectArtifactID     string       `json:"subject_artifact_id"`
+	SubjectRevisionID     string       `json:"subject_revision_id"`
+	RequirementArtifactID string       `json:"requirement_artifact_id"`
+	RequirementRevisionID string       `json:"requirement_revision_id"`
+	Outcome               string       `json:"outcome"`
+	Method                string       `json:"method"`
+	EvidenceArtifactID    string       `json:"evidence_artifact_id"`
+	EvidenceRevisionID    string       `json:"evidence_revision_id"`
+	ExecutionID           string       `json:"execution_id"`
+	Reasoning             string       `json:"reasoning"`
+	Timestamp             optionalTime `json:"timestamp"`
 }
 
 type recordClaimResponse struct {
@@ -280,21 +280,21 @@ type recordClaimResponse struct {
 // --- C12 CorrectValidationClaim ---
 
 type correctClaimRequest struct {
-	ClaimID               string    `json:"claim_id"`
-	CorrectionTarget      string    `json:"correction_target"`
-	CorrectionKind        string    `json:"correction_kind"`
-	ScopeArtifactID       string    `json:"scope_artifact_id"`
-	SubjectArtifactID     string    `json:"subject_artifact_id"`
-	SubjectRevisionID     string    `json:"subject_revision_id"`
-	RequirementArtifactID string    `json:"requirement_artifact_id"`
-	RequirementRevisionID string    `json:"requirement_revision_id"`
-	Outcome               string    `json:"outcome"`
-	Method                string    `json:"method"`
-	EvidenceArtifactID    string    `json:"evidence_artifact_id"`
-	EvidenceRevisionID    string    `json:"evidence_revision_id"`
-	ExecutionID           string    `json:"execution_id"`
-	Reasoning             string    `json:"reasoning"`
-	Timestamp             time.Time `json:"timestamp"`
+	ClaimID               string       `json:"claim_id"`
+	CorrectionTarget      string       `json:"correction_target"`
+	CorrectionKind        string       `json:"correction_kind"`
+	ScopeArtifactID       string       `json:"scope_artifact_id"`
+	SubjectArtifactID     string       `json:"subject_artifact_id"`
+	SubjectRevisionID     string       `json:"subject_revision_id"`
+	RequirementArtifactID string       `json:"requirement_artifact_id"`
+	RequirementRevisionID string       `json:"requirement_revision_id"`
+	Outcome               string       `json:"outcome"`
+	Method                string       `json:"method"`
+	EvidenceArtifactID    string       `json:"evidence_artifact_id"`
+	EvidenceRevisionID    string       `json:"evidence_revision_id"`
+	ExecutionID           string       `json:"execution_id"`
+	Reasoning             string       `json:"reasoning"`
+	Timestamp             optionalTime `json:"timestamp"`
 }
 
 type correctClaimResponse struct {

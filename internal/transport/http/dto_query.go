@@ -420,6 +420,7 @@ type engineeringStateDTO struct {
 // readiness explanation FF-011 requires.
 type engineeringStateRationaleDTO struct {
 	CurrentRevision resolutionRationaleDTO `json:"current_revision"`
+	ValidationPlan  resolutionRationaleDTO `json:"validation_plan"`
 	Lifecycle       lifecycleRationaleDTO  `json:"lifecycle"`
 }
 
@@ -442,6 +443,7 @@ func mapEngineeringStateDTO(s application.EngineeringStateResult) (engineeringSt
 	}
 	rationale := engineeringStateRationaleDTO{
 		CurrentRevision: mapResolutionRationaleDTO(s.CurrentRevision.Rationale),
+		ValidationPlan:  mapResolutionRationaleDTO(s.ValidationPlan.Rationale),
 		Lifecycle:       lifecycleRationaleDTO{Rule: s.Lifecycle.Rationale.Rule, Total: s.Lifecycle.Rationale.Total, Duplicate: s.Lifecycle.Rationale.Duplicate},
 	}
 	return data, rationale

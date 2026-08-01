@@ -14,6 +14,13 @@ PEOS-000 through PEOS-009 remain authoritative for every PEOS concept. This
 document adds no PEOS concept, redefines none, and adds no dependency.
 `internal/ui` does not import PEOS (`TestUIDoesNotImportPEOS`).
 
+**Forward correction (AD-030, FF-022).** §6's general rule remains: forms ask
+for genuinely new identities and resolve existing context server-side. The C7
+and C9 forms now also ask for `acceptance_record_id`, because their corrected
+complete acts create an immediate acceptance member whose identity the caller
+owns. The no-JavaScript design, in-process API-handler write path, route set,
+and all UI package boundaries remain unchanged.
+
 ## 1. What this document is
 
 The implementation record for the planning packet accepted ahead of coding

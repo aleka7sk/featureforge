@@ -2,7 +2,10 @@ package http_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -11,8 +14,32 @@ import (
 	peos "github.com/aleka7sk/featureforge/internal/engineering/peos"
 	"github.com/aleka7sk/featureforge/internal/infrastructure/memory"
 	"github.com/aleka7sk/featureforge/internal/scenario"
+	"github.com/aleka7sk/featureforge/internal/testsupport/replaygate"
 	transporthttp "github.com/aleka7sk/featureforge/internal/transport/http"
 )
+
+type capturedHTTPResponse struct {
+	Path   string
+	Status int
+	Body   string
+}
+
+func captureHTTPResponses(next http.Handler, captured *[]capturedHTTPResponse) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rr := httptest.NewRecorder()
+		next.ServeHTTP(rr, r)
+		for key, values := range rr.Header() {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(rr.Code)
+		_, _ = w.Write(rr.Body.Bytes())
+		if r.Method == http.MethodPost {
+			*captured = append(*captured, capturedHTTPResponse{Path: r.URL.Path, Status: rr.Code, Body: rr.Body.String()})
+		}
+	})
+}
 
 // mustPost is postJSON with the 201 check inlined, for the many scenario
 // acts below that don't need their response decoded.
@@ -101,6 +128,57 @@ func capabilityRevision2ContentJSON() map[string]any {
 func recordEvidenceDirectly(t *testing.T, ctx context.Context, uow application.UnitOfWork, rec peos.Recorder, now time.Time, evidenceID, locator string) {
 	t.Helper()
 	err := uow.Do(ctx, func(r application.Repositories) error {
+		artifactKey := engineering.ArtifactKey{ArtifactID: evidenceID}
+		revisionKey := engineering.RevisionKey{ArtifactID: evidenceID, RevisionID: evidenceID + "-REV-1"}
+		storedArtifact, artifactFound, err := r.Artifacts.Get(ctx, artifactKey)
+		if err != nil {
+			return err
+		}
+		storedRevision, revisionFound, err := r.Revisions.Get(ctx, revisionKey)
+		if err != nil {
+			return err
+		}
+		if artifactFound != revisionFound {
+			return fmt.Errorf("partial direct decision-evidence pair")
+		}
+		if artifactFound {
+			if err := rec.ValidateEvidenceArtifact(storedArtifact); err != nil {
+				return err
+			}
+			if err := rec.ValidateRevision(storedRevision); err != nil {
+				return err
+			}
+			if storedRevision.RevisionFamily != engineering.RevisionFamilyEvidence || storedArtifact.ArtifactType != storedRevision.ArtifactType || !storedArtifact.RecordedAt.Equal(storedRevision.RecordedAt) {
+				return fmt.Errorf("contradictory direct decision-evidence pair")
+			}
+			revisions, err := r.Revisions.ListByArtifact(ctx, evidenceID)
+			if err != nil {
+				return err
+			}
+			orders, err := r.RevisionOrder.ListByArtifact(ctx, evidenceID)
+			if err != nil {
+				return err
+			}
+			journal, err := r.RevisionAcceptance.ListByArtifact(ctx, evidenceID)
+			if err != nil {
+				return err
+			}
+			if _, found, err := r.StructuredContent.Get(ctx, revisionKey); err != nil {
+				return err
+			} else if found || len(revisions) != 1 || revisions[0].Key != revisionKey || len(orders) != 0 || len(journal) != 0 {
+				return fmt.Errorf("direct decision evidence has unexpected sibling state")
+			}
+			expectedArtifact, expectedRevision, err := rec.RecordEvidence(engineering.EvidenceInput{
+				ArtifactID: evidenceID, RevisionID: revisionKey.RevisionID, Locator: locator, RecordedAt: storedRevision.RecordedAt,
+			})
+			if err != nil {
+				return err
+			}
+			if !storedArtifact.Equal(expectedArtifact) || !storedRevision.Equal(expectedRevision) {
+				return fmt.Errorf("direct decision-evidence identity has different semantics")
+			}
+			return nil
+		}
 		artEnv, revEnv, err := rec.RecordEvidence(engineering.EvidenceInput{
 			ArtifactID: evidenceID, RevisionID: evidenceID + "-REV-1", Locator: locator, RecordedAt: now,
 		})
@@ -159,10 +237,13 @@ func runActivityViaHTTP(t *testing.T, handler http.Handler, tick func(), activit
 // only for the handful of facts (raw claim/correction fields, content
 // digests, lifecycle transition history) no Phase A query endpoint
 // surfaces.
-func runScenarioThroughHTTP(t *testing.T, ctx context.Context, uow application.UnitOfWork, rec peos.Recorder, clock *application.FixedClock) http.Handler {
+func runScenarioThroughHTTP(t *testing.T, ctx context.Context, uow application.UnitOfWork, rec peos.Recorder, clock *application.FixedClock, captures ...*[]capturedHTTPResponse) http.Handler {
 	t.Helper()
-	deps := transporthttp.Dependencies{UOW: uow, Recorder: rec, Projector: rec, Clock: clock}
-	handler := transporthttp.NewHandler(deps)
+	deps := transporthttp.Dependencies{UOW: uow, Recorder: rec, Inspector: rec, Projector: rec, Clock: clock}
+	var handler http.Handler = transporthttp.NewHandler(deps)
+	if len(captures) > 0 && captures[0] != nil {
+		handler = captureHTTPResponses(handler, captures[0])
+	}
 	tick := func() { clock.Advance(time.Hour) }
 
 	// 1. Project.
@@ -210,7 +291,8 @@ func runScenarioThroughHTTP(t *testing.T, ctx context.Context, uow application.U
 	for _, artifactID := range scenario.RequirementArtifactIDs {
 		mustPost(t, handler, "/api/v1/requirements", map[string]any{
 			"artifact_id": artifactID, "revision_id": artifactID + "-REV-1",
-			"statement": requirementStatements[artifactID], "subject_artifact_id": scenario.CapabilityArtifactID,
+			"acceptance_record_id": "ACC-" + artifactID,
+			"statement":            requirementStatements[artifactID], "subject_artifact_id": scenario.CapabilityArtifactID,
 		})
 		tick()
 	}
@@ -252,7 +334,8 @@ func runScenarioThroughHTTP(t *testing.T, ctx context.Context, uow application.U
 	// 10. Validation plan: A-1 (REQ-1), A-2 (REQ-2), A-3 (REQ-3); REQ-4 has none.
 	mustPost(t, handler, "/api/v1/validation/plans", map[string]any{
 		"artifact_id": scenario.PlanArtifactID, "revision_id": scenario.PlanRevisionID,
-		"scope_artifact_id": scenario.CapabilityArtifactID,
+		"scope_artifact_id":    scenario.CapabilityArtifactID,
+		"acceptance_record_id": "ACC-VP-1",
 		"activities": []map[string]any{
 			{
 				"key": "A-1", "subject_artifact_id": scenario.CapabilityArtifactID, "subject_revision_id": scenario.CapabilityRevision2,
@@ -317,11 +400,46 @@ func runScenarioThroughHTTP(t *testing.T, ctx context.Context, uow application.U
 // memory-backed handler (FF-018 §16 step 9).
 func TestCanonicalScenarioThroughHTTP(t *testing.T) {
 	ctx := context.Background()
-	uow := memory.NewUnitOfWork(memory.NewStore())
+	gate := replaygate.New(memory.NewUnitOfWork(memory.NewStore()))
 	rec := peos.NewRecorder()
 	clock := application.NewFixedClock(scenario.FixedStart)
-	handler := runScenarioThroughHTTP(t, ctx, uow, rec, clock)
-	assertCanonicalEndStateThroughHTTP(t, ctx, handler, uow, rec)
+	assertCanonicalScenarioHTTPReplay(t, ctx, gate, rec, clock)
+}
+
+func assertCanonicalScenarioHTTPReplay(t *testing.T, ctx context.Context, gate *replaygate.Gate, rec peos.Recorder, clock *application.FixedClock) {
+	t.Helper()
+	var first []capturedHTTPResponse
+	handler := runScenarioThroughHTTP(t, ctx, gate, rec, clock, &first)
+	assertCanonicalEndStateThroughHTTP(t, ctx, handler, gate, rec)
+
+	clock.Advance(24 * time.Hour)
+	gate.RejectWrites()
+	var replay []capturedHTTPResponse
+	replayHandler := runScenarioThroughHTTP(t, ctx, gate, rec, clock, &replay)
+	if gate.WriteAttempts() != 0 {
+		t.Fatalf("HTTP scenario replay attempted %d repository mutations", gate.WriteAttempts())
+	}
+	if !reflect.DeepEqual(replay, first) {
+		limit := len(first)
+		if len(replay) < limit {
+			limit = len(replay)
+		}
+		for i := 0; i < limit; i++ {
+			if replay[i] != first[i] {
+				t.Fatalf("HTTP replay response %d differs:\nfirst=%+v\nreplay=%+v", i, first[i], replay[i])
+			}
+		}
+		t.Fatalf("HTTP replay response count = %d, want %d", len(replay), len(first))
+	}
+	if len(first) < 12 {
+		t.Fatalf("canonical HTTP trace contains only %d POST responses", len(first))
+	}
+	for i, response := range replay {
+		if response.Status != http.StatusCreated {
+			t.Fatalf("HTTP replay response %d (%s) status = %d, want 201", i, response.Path, response.Status)
+		}
+	}
+	assertCanonicalEndStateThroughHTTP(t, ctx, replayHandler, gate, rec)
 }
 
 // assertCanonicalEndStateThroughHTTP is the HTTP-sourced counterpart of

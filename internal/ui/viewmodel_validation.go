@@ -18,6 +18,7 @@ type validationPageData struct {
 	Readiness      []readinessRow
 	FormError      string
 	FormValues     map[string]string
+	PlanFormFailed bool
 }
 
 func mapValidationPageData(featureCardID, capabilityID string, plan apiValidationPlanDTO, per []apiPerRequirementReadinessDTO, events []apiTimelineEventDTO) validationPageData {

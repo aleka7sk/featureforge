@@ -13,14 +13,18 @@ corrections, and history. It does not implement the capability itself.
 
 ## Status
 
-Phase **M.4 — PostgreSQL Persistence**: complete. The canonical scenario
-(FF-011) runs end to end against a real PEOS v1.0.0 SDK on **both** an
-in-memory store and a real PostgreSQL database, producing identical
-engineering answers, with one shared repository contract suite run against
-both adapters. See the
-[M.4 implementation report](docs/reports/m4-implementation-report.md), the
-[M.3 report](docs/reports/m3-implementation-report.md), and the
-[delivery roadmap](docs/spec/007-delivery-roadmap.md).
+Phase **M.5 — HTTP API and Minimal UI** is implemented. A pre-domain
+correctness audit then found that the published command replay guarantee was
+stronger than its evidence and that Validation Plan revisions had drifted from
+FF-004 ordering/current-state rules. [AD-030](docs/decisions/ad-030-command-idempotency-and-replay-conformance.md)
+records the correction; [FF-022](docs/spec/022-command-replay-and-aggregate-integrity.md)
+is accepted for implementation. Domain analysis remains blocked until FF-022
+is implemented and its advancing-clock, both-adapter evidence gate is complete.
+
+The M.4 canonical scenario continues to run end to end against a real PEOS
+v1.0.0 SDK on both an in-memory store and PostgreSQL. Historical milestone
+reports remain available under `docs/reports/` and are not rewritten by the
+forward correction.
 
 ## Running the tests
 
@@ -54,6 +58,12 @@ Start with the [product overview](docs/spec/000-product-overview.md).
 | [FF-012 Test Specification](docs/spec/012-test-specification.md) | What must the test suite prove? |
 | [FF-013 M.3 Implementation Packet](docs/spec/013-m3-implementation-packet.md) | What must M.3 build, and in what commit order? |
 | [FF-014 PostgreSQL Persistence](docs/spec/014-postgresql-persistence.md) | How is engineering state persisted in PostgreSQL, and why is that an adapter? |
+| [FF-015 HTTP API and UI](docs/spec/015-http-api-and-ui.md) | What public transport and UI constraints govern M.5? |
+| [FF-016 Revision Subject Discovery](docs/spec/016-revision-subject-discovery.md) | How are subject-bearing revisions discovered without decoding in adapters? |
+| [FF-018 Phase A HTTP Implementation](docs/spec/018-http-phase-a-implementation.md) | How were the twelve commands and seven queries exposed over HTTP? |
+| [FF-020 Read-Surface Extension](docs/spec/020-read-surface-extension.md) | How is authoritative engineering content projected for readers? |
+| [FF-021 Phase B Minimal UI](docs/spec/021-ui-phase-b-implementation.md) | How does the no-JavaScript UI reuse the API handler? |
+| [FF-022 Command Replay and Aggregate Integrity](docs/spec/022-command-replay-and-aggregate-integrity.md) | How will all C1–C12 retries and C7/C9 aggregate integrity be proven before domain analysis? |
 | [Decision log](docs/decisions/README.md) | What was decided, and why? |
 | [Glossary](docs/glossary.md) | What does this word mean here? |
 

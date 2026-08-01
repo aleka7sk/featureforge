@@ -42,13 +42,12 @@ var (
 	ErrAmbiguousLifecycleState       = errors.New("application: lifecycle state ambiguous")
 	ErrUnknownDefinitionVersion      = errors.New("application: unknown lifecycle definition version")
 	// ErrValidationPlanAmbiguous reports that a capability's discovered
-	// validation-plan population has more than one member. The composition
+	// validation-plan population spans more than one Plan Artifact. The composition
 	// that builds TimelineInput.PlanArtifactID (FF-018 §6.6) requires
-	// exactly one applicable plan; the model defines no acceptance or
-	// order metadata for plans (unlike capability and requirement
-	// revisions), so there is no mechanism to rank two, and none is
-	// invented here. Sort order is deterministic for discovery output but
-	// is never used to select a plan.
+	// exactly one applicable Plan Artifact. Within one Artifact, FF-004 order
+	// metadata and the governed acceptance journal resolve its current
+	// revision; no rule ranks two distinct Plan Artifacts. Sort order remains
+	// diagnostic only and is never used to select between them.
 	ErrValidationPlanAmbiguous = errors.New("application: validation plan ambiguous")
 	// ErrStoredPayloadUnreadable reports that a stored PEOS payload would
 	// not decode when a read-side projection (FF-020) tried to reconstruct
@@ -64,4 +63,9 @@ var (
 var (
 	ErrInvalidCommand          = errors.New("application: command is invalid")
 	ErrCapabilityAlreadyLinked = errors.New("application: feature card already linked to a different capability")
+	// ErrStoredStateIntegrity reports an occupied command aggregate that is
+	// partial, unreadable, or internally contradictory.  It deliberately
+	// maps to an opaque 500 response: persisted corruption is never a client
+	// immutable-value conflict.
+	ErrStoredStateIntegrity = errors.New("application: stored command state integrity failure")
 )

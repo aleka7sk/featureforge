@@ -41,7 +41,8 @@ func seedForQueries(t *testing.T, handler http.Handler) {
 		}},
 		{"/api/v1/capabilities/CAP-1/acceptances", map[string]any{"record_id": "ACC-1", "revision_id": "CAP-1-REV-1", "state": "accepted"}},
 		{"/api/v1/requirements", map[string]any{
-			"artifact_id": "REQ-1", "revision_id": "REQ-1-REV-1", "statement": "Statement.", "subject_artifact_id": "CAP-1",
+			"artifact_id": "REQ-1", "revision_id": "REQ-1-REV-1", "acceptance_record_id": "ACC-REQ-1",
+			"statement": "Statement.", "subject_artifact_id": "CAP-1",
 		}},
 		{"/api/v1/decisions", map[string]any{
 			"decision_id": "DEC-1", "subject_artifact_id": "CAP-1", "subject_revision_id": "CAP-1-REV-1",
@@ -50,6 +51,7 @@ func seedForQueries(t *testing.T, handler http.Handler) {
 		}},
 		{"/api/v1/validation/plans", map[string]any{
 			"artifact_id": "VP-1", "revision_id": "VP-1-REV-1", "scope_artifact_id": "CAP-1",
+			"acceptance_record_id": "ACC-VP-1",
 			"activities": []map[string]any{{
 				"key": "A-1", "subject_artifact_id": "CAP-1", "subject_revision_id": "CAP-1-REV-1",
 				"method": "manual-review", "outcome_interpretation": "Satisfied when reviewed.",
@@ -137,6 +139,11 @@ func TestGetFeatureStateHandler(t *testing.T) {
 			CurrentRevision struct {
 				Rule string `json:"rule"`
 			} `json:"current_revision"`
+			ValidationPlan struct {
+				Rule               string `json:"rule"`
+				SelectedRevisionID string `json:"selected_revision_id"`
+				SelectedSequence   int    `json:"selected_sequence"`
+			} `json:"validation_plan"`
 		} `json:"rationale"`
 	}
 	rr := getJSON(t, handler, "/api/v1/features/FC-1/state", &resp)
@@ -160,6 +167,9 @@ func TestGetFeatureStateHandler(t *testing.T) {
 	}
 	if resp.Rationale.CurrentRevision.Rule == "" {
 		t.Error("rationale.current_revision.rule must be present for a derived answer (FF-018 §10.1)")
+	}
+	if resp.Rationale.ValidationPlan.Rule == "" || resp.Rationale.ValidationPlan.SelectedRevisionID != "VP-1-REV-1" || resp.Rationale.ValidationPlan.SelectedSequence != 1 {
+		t.Errorf("rationale.validation_plan = %+v, want selected VP-1-REV-1 at sequence 1", resp.Rationale.ValidationPlan)
 	}
 }
 
@@ -206,6 +216,13 @@ func TestGetFeatureStateHandler_ReadSurfaceContent(t *testing.T) {
 				} `json:"per_requirement"`
 			} `json:"readiness"`
 		} `json:"data"`
+		Rationale struct {
+			ValidationPlan struct {
+				Rule               string `json:"rule"`
+				SelectedRevisionID string `json:"selected_revision_id"`
+				SelectedSequence   int    `json:"selected_sequence"`
+			} `json:"validation_plan"`
+		} `json:"rationale"`
 	}
 	rr := getJSON(t, handler, "/api/v1/features/FC-1/state", &resp)
 	if rr.Code != http.StatusOK {
@@ -268,6 +285,13 @@ func TestGetFeatureHandler(t *testing.T) {
 				} `json:"current_revision"`
 			} `json:"state"`
 		} `json:"data"`
+		Rationale struct {
+			ValidationPlan struct {
+				Rule               string `json:"rule"`
+				SelectedRevisionID string `json:"selected_revision_id"`
+				SelectedSequence   int    `json:"selected_sequence"`
+			} `json:"validation_plan"`
+		} `json:"rationale"`
 	}
 	rr := getJSON(t, handler, "/api/v1/features/FC-1", &resp)
 	if rr.Code != http.StatusOK {
@@ -278,6 +302,9 @@ func TestGetFeatureHandler(t *testing.T) {
 	}
 	if !resp.Data.State.CurrentRevision.Found {
 		t.Error("state.current_revision.found = false, want true")
+	}
+	if resp.Rationale.ValidationPlan.Rule == "" || resp.Rationale.ValidationPlan.SelectedRevisionID != "VP-1-REV-1" || resp.Rationale.ValidationPlan.SelectedSequence != 1 {
+		t.Errorf("rationale.validation_plan = %+v, want selected VP-1-REV-1 at sequence 1", resp.Rationale.ValidationPlan)
 	}
 }
 

@@ -33,6 +33,7 @@ func seedPageFixture(t *testing.T) pageFixture {
 	api := transporthttp.NewHandler(transporthttp.Dependencies{
 		UOW:       memory.NewUnitOfWork(memory.NewStore()),
 		Recorder:  peos.NewRecorder(),
+		Inspector: peos.NewRecorder(),
 		Projector: peos.NewRecorder(),
 		Clock:     application.SystemClock{},
 	})
@@ -55,11 +56,13 @@ func seedPageFixture(t *testing.T) pageFixture {
 	})
 	post(t, api, "/api/v1/requirements", map[string]any{
 		"artifact_id": "REQ-1", "revision_id": "REQ-1-REV-1",
-		"statement": "Published homework SHALL be visible to the student.", "subject_artifact_id": "CAP-1",
+		"acceptance_record_id": "ACC-REQ-1",
+		"statement":            "Published homework SHALL be visible to the student.", "subject_artifact_id": "CAP-1",
 	})
 	post(t, api, "/api/v1/requirements", map[string]any{
 		"artifact_id": "REQ-2", "revision_id": "REQ-2-REV-1",
-		"statement": "Published homework SHALL NOT be visible to other users.", "subject_artifact_id": "CAP-1",
+		"acceptance_record_id": "ACC-REQ-2",
+		"statement":            "Published homework SHALL NOT be visible to other users.", "subject_artifact_id": "CAP-1",
 	})
 	post(t, api, "/api/v1/decisions", map[string]any{
 		"decision_id": "DEC-1", "subject_artifact_id": "CAP-1", "subject_revision_id": "CAP-1-REV-1",
@@ -80,12 +83,19 @@ func seedPageFixture(t *testing.T) pageFixture {
 	})
 	post(t, api, "/api/v1/validation/plans", map[string]any{
 		"artifact_id": "VP-1", "revision_id": "VP-1-REV-1", "scope_artifact_id": "CAP-1",
+		"acceptance_record_id": "ACC-VP-1",
 		"activities": []map[string]any{
 			{
 				"key": "A-1", "subject_artifact_id": "CAP-1", "subject_revision_id": "CAP-1-REV-2",
 				"method": "manual-review", "outcome_interpretation": "Satisfied when visibility is confirmed.",
 				"requirement_artifact_id": "REQ-1", "requirement_revision_id": "REQ-1-REV-1",
 				"expected_evidence": []string{"Reviewer note"},
+			},
+			{
+				"key": "A-2", "subject_artifact_id": "CAP-1", "subject_revision_id": "CAP-1-REV-2",
+				"method": "manual-review", "outcome_interpretation": "Satisfied when exclusion is confirmed.",
+				"requirement_artifact_id": "REQ-2", "requirement_revision_id": "REQ-2-REV-1",
+				"expected_evidence": []string{"Access review note"},
 			},
 		},
 	})
@@ -105,7 +115,7 @@ func seedPageFixture(t *testing.T) pageFixture {
 	})
 	post(t, api, "/api/v1/validation/runs", map[string]any{
 		"execution_id": "ER-2", "plan_artifact_id": "VP-1", "plan_revision_id": "VP-1-REV-1",
-		"activity_key": "A-1", "subject_artifact_id": "CAP-1", "subject_revision_id": "CAP-1-REV-2",
+		"activity_key": "A-2", "subject_artifact_id": "CAP-1", "subject_revision_id": "CAP-1-REV-2",
 		"method": "manual-review", "outcome": "completed",
 		"evidence_artifact_id": "EV-2", "evidence_revision_id": "EV-2-REV-1", "evidence_locator": "https://evidence.example/EV-2",
 	})
@@ -119,7 +129,7 @@ func seedPageFixture(t *testing.T) pageFixture {
 	})
 	post(t, api, "/api/v1/validation/runs", map[string]any{
 		"execution_id": "ER-3", "plan_artifact_id": "VP-1", "plan_revision_id": "VP-1-REV-1",
-		"activity_key": "A-1", "subject_artifact_id": "CAP-1", "subject_revision_id": "CAP-1-REV-2",
+		"activity_key": "A-2", "subject_artifact_id": "CAP-1", "subject_revision_id": "CAP-1-REV-2",
 		"method": "manual-review", "outcome": "completed",
 		"evidence_artifact_id": "EV-3", "evidence_revision_id": "EV-3-REV-1", "evidence_locator": "https://evidence.example/EV-3",
 	})

@@ -288,7 +288,11 @@ func loadDecisionsPageData(ctx context.Context, deps Dependencies, featureCardID
 	if problem != nil {
 		return decisionsPageData{}, problem
 	}
-	return mapDecisionsPageData(featureCardID, capabilityIDFromState(state), state.ApplicableDecisions), nil
+	data := mapDecisionsPageData(featureCardID, capabilityIDFromState(state), state.ApplicableDecisions)
+	if state.CurrentRevision.Found && state.CurrentRevision.Revision != nil {
+		data.SubjectRevisionID = state.CurrentRevision.Revision.RevisionID
+	}
+	return data, nil
 }
 
 // handleValidation renders screen 6 (FF-001 §3.6), composing Q4 (plan

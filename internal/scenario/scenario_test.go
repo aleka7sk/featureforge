@@ -45,7 +45,7 @@ func TestCanonicalScenario(t *testing.T) {
 	ctx := context.Background()
 	uow, rec, clock := newFixture()
 
-	result, err := scenario.Run(ctx, uow, rec, clock)
+	result, err := scenario.Run(ctx, uow, rec, rec, clock)
 	if err != nil {
 		t.Fatalf("scenario.Run: %v", err)
 	}
@@ -313,7 +313,7 @@ func assertCanonicalEndState(
 	// silently omit REQ-4; this is the counterexample AD-025 exists to
 	// prevent, and the reason it must be checked here rather than assumed.
 	discovered := doQuery(t, uow, func(r application.Repositories) ([]string, error) {
-		return application.DiscoverRequirementArtifactIDs(ctx, r, scenario.CapabilityArtifactID)
+		return application.DiscoverRequirementArtifactIDs(ctx, r, rec, scenario.CapabilityArtifactID)
 	})
 	wantDiscovered := []string{"REQ-1", "REQ-2", "REQ-3", "REQ-4"}
 	if len(discovered) != len(wantDiscovered) {
@@ -389,12 +389,12 @@ func TestCanonicalScenarioInsertionOrderIndependence(t *testing.T) {
 	ctx := context.Background()
 
 	uowA, recA, clockA := newFixture()
-	if _, err := scenario.Run(ctx, uowA, recA, clockA); err != nil {
+	if _, err := scenario.Run(ctx, uowA, recA, recA, clockA); err != nil {
 		t.Fatalf("scenario.Run (default order): %v", err)
 	}
 
 	uowB, recB, clockB := newFixture()
-	if _, err := scenario.RunPermuted(ctx, uowB, recB, clockB); err != nil {
+	if _, err := scenario.RunPermuted(ctx, uowB, recB, recB, clockB); err != nil {
 		t.Fatalf("scenario.RunPermuted: %v", err)
 	}
 

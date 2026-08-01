@@ -268,8 +268,16 @@ No method returns `map`, `any`, or `interface{}`. No method exposes a PEOS type.
 | `StructuredContentRepository` | `Put`, `Get(RevisionKey)` |
 | `RecordEnvelopeRepository` | `Put`, `Get(RecordKey)`, `ListByKind(kind)`, `ListByKindAndSubject(kind, subjectKey)` |
 | `RevisionOrderRepository` | `Put`, `Get(RevisionKey)`, `ListByArtifact(artifactID)` |
-| `RevisionAcceptanceRepository` | `Append`, `ListByRevision(RevisionKey)`, `ListByArtifact(artifactID)` |
+| `RevisionAcceptanceRepository` | `Append`, `GetByRecordID(recordID)`, `ListByRevision(RevisionKey)`, `ListByArtifact(artifactID)` |
 | `UnitOfWork` | `Do(ctx, func(Repositories) error) error` |
+
+**Forward correction (AD-030, FF-022).** `GetByRecordID` is the one narrow
+addition to the accepted M.3 table. It exists so an application command can
+classify a caller-named acceptance identity before deciding replay, conflict,
+or stored-integrity failure. It is read-only; the journal remains append-only.
+Absence returns `(zero, false, nil)`, one readable record returns
+`(record, true, nil)`, and unreadable or contradictory persistence returns an
+error rather than masquerading as absence.
 
 ### Per-operation semantics
 
@@ -283,6 +291,11 @@ No method returns `map`, `any`, or `interface{}`. No method exposes a PEOS type.
 | Conflict | `Put` with a differing payload for an existing key returns `ErrImmutableValueConflict` |
 | Ordering | Every `List` returns a deterministic order, specified per repository: envelopes by key ascending; order metadata by sequence ascending; acceptance records by `(EffectiveAt, RecordID)` ascending. **Never map iteration order.** |
 | Transaction | Every operation participates in the ambient unit of work; there is no non-transactional path |
+
+Repository idempotency in this table remains a storage guarantee. It is not by
+itself proof that a whole application command is replay-safe: AD-030 and
+FF-022 require the application to recover and compare the complete persisted
+semantic act before reconstructing server-owned time, order, or provenance.
 
 `ProjectRepository.Put` and `FeatureCardRepository.Put` are create-only: a second
 `Put` for an existing ID with different content is `ErrImmutableValueConflict`.

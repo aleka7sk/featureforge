@@ -1,0 +1,68 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Go and PostgreSQL gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: featureforge
+          POSTGRES_PASSWORD: featureforge
+          POSTGRES_DB: featureforge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U featureforge -d featureforge"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 20
+
+    env:
+      FEATUREFORGE_POSTGRES_TEST_DSN: postgres://featureforge:featureforge@localhost:5432/featureforge?sslmode=disable
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [[ -n "$unformatted" ]]; then
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test with PostgreSQL
+        run: go test ./... -count=1
+
+      - name: Race test with PostgreSQL
+        run: go test ./... -race -count=1

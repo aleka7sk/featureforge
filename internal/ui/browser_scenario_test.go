@@ -4,13 +4,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aleka7sk/featureforge/internal/application"
 	"github.com/aleka7sk/featureforge/internal/engineering/peos"
 	"github.com/aleka7sk/featureforge/internal/infrastructure/memory"
+	"github.com/aleka7sk/featureforge/internal/scenario"
+	"github.com/aleka7sk/featureforge/internal/testsupport/replaygate"
 	transporthttp "github.com/aleka7sk/featureforge/internal/transport/http"
 	"github.com/aleka7sk/featureforge/internal/ui"
 )
@@ -26,6 +30,16 @@ import (
 // extraction, matching FF-021 §14's "no new dependency" constraint.
 
 var formActionRe = regexp.MustCompile(`<form[^>]*\baction="([^"]+)"`)
+
+func inputValue(t *testing.T, html, name string) string {
+	t.Helper()
+	re := regexp.MustCompile(`<input[^>]*\bname="` + regexp.QuoteMeta(name) + `"[^>]*\bvalue="([^"]*)"`)
+	match := re.FindStringSubmatch(html)
+	if match == nil {
+		t.Fatalf("input %q not found in page:\n%s", name, html)
+	}
+	return match[1]
+}
 
 // formActionAfter returns the action of the first <form> appearing after
 // marker in html -- marker is the section heading immediately preceding
@@ -64,8 +78,17 @@ func linkHrefFor(t *testing.T, html, text string) string {
 // redirects automatically, so the test sees and asserts on the same
 // Location a real browser's address bar would move to.
 type browserSession struct {
-	t       *testing.T
-	handler http.Handler
+	t        *testing.T
+	handler  http.Handler
+	captured *[]capturedUIResponse
+}
+
+type capturedUIResponse struct {
+	Action       string
+	RequestBody  string
+	Status       int
+	Location     string
+	ResponseBody string
 }
 
 func (b *browserSession) get(path string) string {
@@ -83,10 +106,17 @@ func (b *browserSession) get(path string) string {
 // successful command.
 func (b *browserSession) submit(action string, values url.Values) string {
 	b.t.Helper()
-	req := httptest.NewRequest(http.MethodPost, action, strings.NewReader(values.Encode()))
+	requestBody := values.Encode()
+	req := httptest.NewRequest(http.MethodPost, action, strings.NewReader(requestBody))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
 	b.handler.ServeHTTP(rr, req)
+	if b.captured != nil {
+		*b.captured = append(*b.captured, capturedUIResponse{
+			Action: action, RequestBody: requestBody, Status: rr.Code,
+			Location: rr.Header().Get("Location"), ResponseBody: rr.Body.String(),
+		})
+	}
 	if rr.Code != http.StatusSeeOther {
 		b.t.Fatalf("POST %s: status = %d, want 303; body = %s", action, rr.Code, rr.Body.String())
 	}
@@ -98,11 +128,14 @@ func (b *browserSession) submit(action string, values url.Values) string {
 // offers -- the same identities and order internal/scenario.Run and
 // internal/transport/http's runScenarioThroughHTTP use, this time as a
 // person clicking links and filling forms would experience it.
-func runCanonicalScenarioThroughUIBrowser(t *testing.T, uow application.UnitOfWork, rec peos.Recorder, clock application.Clock) http.Handler {
+func runCanonicalScenarioThroughUIBrowser(t *testing.T, uow application.UnitOfWork, rec peos.Recorder, clock application.Clock, captures ...*[]capturedUIResponse) http.Handler {
 	t.Helper()
-	api := transporthttp.NewHandler(transporthttp.Dependencies{UOW: uow, Recorder: rec, Projector: rec, Clock: clock})
+	api := transporthttp.NewHandler(transporthttp.Dependencies{UOW: uow, Recorder: rec, Inspector: rec, Projector: rec, Clock: clock})
 	handler := ui.NewHandler(ui.Dependencies{API: api})
 	b := &browserSession{t: t, handler: handler}
+	if len(captures) > 0 {
+		b.captured = captures[0]
+	}
 
 	// 1. Projects screen: create the project.
 	home := b.get("/")
@@ -154,12 +187,14 @@ func runCanonicalScenarioThroughUIBrowser(t *testing.T, uow application.UnitOfWo
 	requirements := b.get(requirementsHref)
 	loc = b.submit(formActionAfter(t, requirements, "Add a requirement"), url.Values{
 		"artifact_id": {"REQ-1"}, "revision_id": {"REQ-1-REV-1"},
-		"statement": {"Published homework SHALL be visible to the student of the lesson it belongs to."},
+		"acceptance_record_id": {"ACC-REQ-1"},
+		"statement":            {"Published homework SHALL be visible to the student of the lesson it belongs to."},
 	})
 	requirements = b.get(loc)
 	loc = b.submit(formActionAfter(t, requirements, "Add a requirement"), url.Values{
 		"artifact_id": {"REQ-2"}, "revision_id": {"REQ-2-REV-1"},
-		"statement": {"Published homework SHALL NOT be visible to any user who is not the student of that lesson."},
+		"acceptance_record_id": {"ACC-REQ-2"},
+		"statement":            {"Published homework SHALL NOT be visible to any user who is not the student of that lesson."},
 	})
 	requirements = b.get(loc)
 
@@ -167,7 +202,8 @@ func runCanonicalScenarioThroughUIBrowser(t *testing.T, uow application.UnitOfWo
 	decisionsHref := linkHrefFor(t, requirements, "Decisions")
 	decisions := b.get(decisionsHref)
 	loc = b.submit(formActionAfter(t, decisions, "Record a decision"), url.Values{
-		"decision_id": {"DEC-1"}, "question": {"Should homework support an optional audio attachment?"},
+		"decision_id": {"DEC-1"}, "subject_revision_id": {inputValue(t, decisions, "subject_revision_id")},
+		"question":             {"Should homework support an optional audio attachment?"},
 		"outcome_statement":    {"Homework supports at most one optional audio attachment."},
 		"alternatives":         {"Store audio inline.\nStore audio externally."},
 		"evidence_artifact_id": {"EV-DEC-1"}, "evidence_revision_id": {"EV-DEC-1-REV-1"},
@@ -199,7 +235,8 @@ func runCanonicalScenarioThroughUIBrowser(t *testing.T, uow application.UnitOfWo
 	validation := b.get(validationHref)
 	loc = b.submit(formActionAfter(t, validation, "Establish a validation plan"), url.Values{
 		"artifact_id": {"VP-1"}, "revision_id": {"VP-1-REV-1"},
-		"activities": {"A-1|manual-review|Satisfied when the reviewer confirms student visibility is specified.|REQ-1|REQ-1-REV-1|Reviewer note"},
+		"acceptance_record_id": {"ACC-VP-1"},
+		"activities":           {"A-1|manual-review|Satisfied when the reviewer confirms student visibility is specified.|REQ-1|REQ-1-REV-1|Reviewer note"},
 	})
 	validation = b.get(loc)
 
@@ -288,8 +325,64 @@ func assertCanonicalEndStateThroughUIBrowser(t *testing.T, handler http.Handler)
 // (FF-021 §14): the full lifecycle, driven through rendered links and
 // forms on a memory-backed store.
 func TestCanonicalScenarioThroughUIBrowser(t *testing.T) {
-	uow := memory.NewUnitOfWork(memory.NewStore())
+	gate := replaygate.New(memory.NewUnitOfWork(memory.NewStore()))
 	rec := peos.NewRecorder()
-	handler := runCanonicalScenarioThroughUIBrowser(t, uow, rec, application.SystemClock{})
+	clock := application.NewFixedClock(scenario.FixedStart)
+	assertCanonicalScenarioUIReplay(t, gate, rec, clock)
+}
+
+func assertCanonicalScenarioUIReplay(t *testing.T, gate *replaygate.Gate, rec peos.Recorder, clock *application.FixedClock) {
+	t.Helper()
+	var first []capturedUIResponse
+	handler := runCanonicalScenarioThroughUIBrowser(t, gate, rec, clock, &first)
 	assertCanonicalEndStateThroughUIBrowser(t, handler)
+
+	clock.Advance(24 * time.Hour)
+	gate.RejectWrites()
+	replay := replayCapturedUISubmissions(t, handler, first)
+	if gate.WriteAttempts() != 0 {
+		t.Fatalf("UI scenario replay attempted %d repository mutations", gate.WriteAttempts())
+	}
+	if !reflect.DeepEqual(replay, first) {
+		limit := len(first)
+		if len(replay) < limit {
+			limit = len(replay)
+		}
+		for i := 0; i < limit; i++ {
+			if replay[i] != first[i] {
+				t.Fatalf("UI replay response %d differs:\nfirst=%+v\nreplay=%+v", i, first[i], replay[i])
+			}
+		}
+		t.Fatalf("UI replay response count = %d, want %d", len(replay), len(first))
+	}
+	if len(first) < 12 {
+		t.Fatalf("canonical UI trace contains only %d form submissions", len(first))
+	}
+	for i, response := range replay {
+		if response.Status != http.StatusSeeOther || response.Location == "" {
+			t.Fatalf("UI replay response %d (%s) = status %d, Location %q; want 303 with redirect", i, response.Action, response.Status, response.Location)
+		}
+	}
+	assertCanonicalEndStateThroughUIBrowser(t, handler)
+}
+
+// replayCapturedUISubmissions repeats the exact form submissions discovered
+// from rendered pages during the first browser journey. Create forms are
+// intentionally hidden once their aggregate exists, so replay must use the
+// already-observed action and encoded form body rather than pretending those
+// forms remain visible in completed-state pages.
+func replayCapturedUISubmissions(t *testing.T, handler http.Handler, first []capturedUIResponse) []capturedUIResponse {
+	t.Helper()
+	replay := make([]capturedUIResponse, 0, len(first))
+	for _, request := range first {
+		req := httptest.NewRequest(http.MethodPost, request.Action, strings.NewReader(request.RequestBody))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		replay = append(replay, capturedUIResponse{
+			Action: request.Action, RequestBody: request.RequestBody, Status: rr.Code,
+			Location: rr.Header().Get("Location"), ResponseBody: rr.Body.String(),
+		})
+	}
+	return replay
 }

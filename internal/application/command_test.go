@@ -18,13 +18,16 @@ import (
 // command test and the eventual scenario driver both use.
 type commandFixture struct {
 	uow   *memory.UnitOfWork
+	store *memory.Store
 	rec   peos.Recorder
 	clock *application.FixedClock
 }
 
 func newCommandFixture() commandFixture {
+	store := memory.NewStore()
 	return commandFixture{
-		uow:   memory.NewUnitOfWork(memory.NewStore()),
+		uow:   memory.NewUnitOfWork(store),
+		store: store,
 		rec:   peos.NewRecorder(),
 		clock: application.NewFixedClock(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)),
 	}
@@ -37,6 +40,28 @@ func mustContent(t *testing.T, title string) engineering.CapabilitySpecification
 		t.Fatal(err)
 	}
 	return c
+}
+
+func memberID(value string) *string { return &value }
+
+func seedEvidenceRevision(t *testing.T, f commandFixture, artifactID, revisionID string) {
+	t.Helper()
+	ctx := context.Background()
+	artifact, revision, err := f.rec.RecordEvidence(engineering.EvidenceInput{
+		ArtifactID: artifactID, RevisionID: revisionID,
+		Locator: "https://evidence.example/" + artifactID, RecordedAt: f.clock.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.uow.Do(ctx, func(r application.Repositories) error {
+		if err := r.Artifacts.Put(ctx, artifact); err != nil {
+			return err
+		}
+		return r.Revisions.Put(ctx, revision)
+	}); err != nil {
+		t.Fatalf("seed evidence %s/%s: %v", artifactID, revisionID, err)
+	}
 }
 
 func TestCreateProjectCommand(t *testing.T) {
@@ -94,7 +119,7 @@ func establishCapability(t *testing.T, f commandFixture) {
 		FeatureCardID: "FC-1", ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-1",
 		Content: mustContent(t, "Homework after a lesson"),
 	}
-	if _, err := cmd.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	if _, err := cmd.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -115,7 +140,7 @@ func TestEstablishCapabilitySpecificationCommand(t *testing.T) {
 	cmd := application.EstablishCapabilitySpecificationCommand{
 		FeatureCardID: "FC-1", ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-1", Content: mustContent(t, "Homework after a lesson"),
 	}
-	result, err := cmd.Execute(context.Background(), f.uow, f.rec, f.clock)
+	result, err := cmd.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,14 +148,14 @@ func TestEstablishCapabilitySpecificationCommand(t *testing.T) {
 		t.Errorf("Sequence = %d, want 1", result.Sequence)
 	}
 	// Idempotent re-execution.
-	if _, err := cmd.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	if _, err := cmd.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Errorf("re-execution should be a no-op, got %v", err)
 	}
 	// Conflict on differing content.
 	conflicting := application.EstablishCapabilitySpecificationCommand{
 		FeatureCardID: "FC-1", ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-1", Content: mustContent(t, "Different Title"),
 	}
-	if _, err := conflicting.Execute(context.Background(), f.uow, f.rec, f.clock); !errors.Is(err, application.ErrImmutableValueConflict) {
+	if _, err := conflicting.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); !errors.Is(err, application.ErrImmutableValueConflict) {
 		t.Errorf("err = %v, want ErrImmutableValueConflict", err)
 	}
 
@@ -164,13 +189,13 @@ func TestReviseCapabilitySpecificationCommand(t *testing.T) {
 	establish := application.EstablishCapabilitySpecificationCommand{
 		FeatureCardID: "FC-1", ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-1", Content: mustContent(t, "Rev 1"),
 	}
-	if _, err := establish.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	if _, err := establish.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	revise := application.ReviseCapabilitySpecificationCommand{
 		ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-2", Content: mustContent(t, "Rev 2"),
 	}
-	result, err := revise.Execute(context.Background(), f.uow, f.rec, f.clock)
+	result, err := revise.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,13 +210,13 @@ func TestAcceptCapabilityRevisionCommand(t *testing.T) {
 	establish := application.EstablishCapabilitySpecificationCommand{
 		FeatureCardID: "FC-1", ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-1", Content: mustContent(t, "Rev 1"),
 	}
-	if _, err := establish.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	if _, err := establish.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	accept := application.AcceptCapabilityRevisionCommand{
 		RecordID: "ACC-1", ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-1", State: engineering.AcceptanceStateAccepted,
 	}
-	if _, err := accept.Execute(context.Background(), f.uow, f.clock); err != nil {
+	if _, err := accept.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 
@@ -212,7 +237,7 @@ func TestAcceptCapabilityRevisionCommand(t *testing.T) {
 	invalid := application.AcceptCapabilityRevisionCommand{
 		RecordID: "ACC-2", ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-1", State: engineering.AcceptanceStateDraft,
 	}
-	if _, err := invalid.Execute(context.Background(), f.uow, f.clock); !errors.Is(err, application.ErrAcceptanceTransitionInvalid) {
+	if _, err := invalid.Execute(context.Background(), f.uow, f.rec, f.clock); !errors.Is(err, application.ErrAcceptanceTransitionInvalid) {
 		t.Errorf("err = %v, want ErrAcceptanceTransitionInvalid", err)
 	}
 }
@@ -223,13 +248,14 @@ func TestEstablishRequirementCommand(t *testing.T) {
 	establish := application.EstablishCapabilitySpecificationCommand{
 		FeatureCardID: "FC-1", ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-1", Content: mustContent(t, "Rev 1"),
 	}
-	if _, err := establish.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	if _, err := establish.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	cmd := application.EstablishRequirementCommand{
 		ArtifactID: "REQ-1", RevisionID: "REQ-1-REV-1", Statement: "The system SHALL do X.", SubjectArtifactID: "CAP-1",
+		AcceptanceRecordID: memberID("MEM-REQ-1"),
 	}
-	if _, err := cmd.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	if _, err := cmd.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -240,15 +266,16 @@ func TestRecordArchitectureDecisionCommand(t *testing.T) {
 	establish := application.EstablishCapabilitySpecificationCommand{
 		FeatureCardID: "FC-1", ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-1", Content: mustContent(t, "Rev 1"),
 	}
-	if _, err := establish.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	if _, err := establish.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
+	establishPlan(t, f, "VP-0", "VP-0-REV-1")
 	run := application.RecordValidationRunCommand{
-		ExecutionID: "ER-0", PlanArtifactID: "VP-0", PlanRevisionID: "VP-0-REV-1", ActivityKey: "A-0",
+		ExecutionID: "ER-0", PlanArtifactID: "VP-0", PlanRevisionID: "VP-0-REV-1", ActivityKey: "A-1",
 		SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1", Method: "manual-review", Outcome: "completed",
 		EvidenceArtifactID: "EV-0", EvidenceRevisionID: "EV-0-REV-1", EvidenceLocator: "https://evidence.example/EV-0",
 	}
-	if _, err := run.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	if _, err := run.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	cmd := application.RecordArchitectureDecisionCommand{
@@ -256,7 +283,7 @@ func TestRecordArchitectureDecisionCommand(t *testing.T) {
 		Question: "Should X happen?", OutcomeStatement: "X happens.",
 		EvidenceArtifactID: "EV-0", EvidenceRevisionID: "EV-0-REV-1",
 	}
-	if _, err := cmd.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	if _, err := cmd.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -267,24 +294,26 @@ func TestValidationChainCommands(t *testing.T) {
 	establish := application.EstablishCapabilitySpecificationCommand{
 		FeatureCardID: "FC-1", ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-1", Content: mustContent(t, "Rev 1"),
 	}
-	if _, err := establish.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	if _, err := establish.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	req := application.EstablishRequirementCommand{
 		ArtifactID: "REQ-1", RevisionID: "REQ-1-REV-1", Statement: "The system SHALL do X.", SubjectArtifactID: "CAP-1",
+		AcceptanceRecordID: memberID("MEM-REQ-1"),
 	}
-	if _, err := req.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	if _, err := req.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	plan := application.EstablishValidationPlanCommand{
 		ArtifactID: "VP-1", RevisionID: "VP-1-REV-1", ScopeArtifactID: "CAP-1",
+		AcceptanceRecordID: memberID("MEM-PLAN-1"),
 		Activities: []application.PlanActivityCommandInput{{
 			Key: "A-1", SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1",
 			Method: "manual-review", OutcomeInterpretation: "Satisfied when reviewed.",
 			RequirementArtifactID: "REQ-1", RequirementRevisionID: "REQ-1-REV-1",
 		}},
 	}
-	if _, err := plan.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	if _, err := plan.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	run := application.RecordValidationRunCommand{
@@ -292,7 +321,7 @@ func TestValidationChainCommands(t *testing.T) {
 		SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1", Method: "manual-review", Outcome: "completed",
 		EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1", EvidenceLocator: "https://evidence.example/EV-1",
 	}
-	if _, err := run.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	if _, err := run.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	claim := application.RecordValidationClaimCommand{
@@ -300,7 +329,7 @@ func TestValidationChainCommands(t *testing.T) {
 		RequirementArtifactID: "REQ-1", RequirementRevisionID: "REQ-1-REV-1", Outcome: "satisfied", Method: "manual-review",
 		EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1", ExecutionID: "ER-1",
 	}
-	if _, err := claim.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	if _, err := claim.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 
@@ -310,7 +339,7 @@ func TestValidationChainCommands(t *testing.T) {
 		RequirementArtifactID: "REQ-1", RequirementRevisionID: "REQ-1-REV-1", Outcome: "not-satisfied", Method: "manual-review",
 		EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1", ExecutionID: "ER-1", Reasoning: "corrected assessment",
 	}
-	if _, err := correct.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	if _, err := correct.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 
@@ -351,7 +380,7 @@ func TestCorrectValidationClaimRejectsSelfCorrection(t *testing.T) {
 		RequirementArtifactID: "REQ-1", RequirementRevisionID: "REQ-1-REV-1", Outcome: "not-satisfied", Method: "manual-review",
 		EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1", ExecutionID: "ER-1",
 	}
-	_, err := cmd.Execute(context.Background(), f.uow, f.rec, f.clock)
+	_, err := cmd.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock)
 	if !errors.Is(err, application.ErrCorrectionSelfReference) {
 		t.Errorf("err = %v, want ErrCorrectionSelfReference", err)
 	}
@@ -365,7 +394,7 @@ func TestCorrectValidationClaimRejectsMissingTarget(t *testing.T) {
 		RequirementArtifactID: "REQ-1", RequirementRevisionID: "REQ-1-REV-1", Outcome: "not-satisfied", Method: "manual-review",
 		EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1", ExecutionID: "ER-1",
 	}
-	_, err := cmd.Execute(context.Background(), f.uow, f.rec, f.clock)
+	_, err := cmd.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock)
 	if !errors.Is(err, application.ErrCorrectionTargetMissing) {
 		t.Errorf("err = %v, want ErrCorrectionTargetMissing", err)
 	}
@@ -383,7 +412,7 @@ func TestAssignLifecycleStateCommand(t *testing.T) {
 		AssignmentID: "SA-1", SubjectArtifactID: "CAP-1", State: "drafting", IsEntry: true,
 		TransitionRecordArtifactID: "TR-1", TransitionRecordRevisionID: "TR-1-REV-0",
 	}
-	if _, err := entry.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	if _, err := entry.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	f.clock.Advance(time.Hour)
@@ -392,7 +421,7 @@ func TestAssignLifecycleStateCommand(t *testing.T) {
 		TransitionRecordArtifactID: "TR-1", TransitionRecordRevisionID: "TR-1-REV-1",
 		TransitionKey: "begin-validation", FromAssignmentID: "SA-1",
 	}
-	if _, err := transition.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	if _, err := transition.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 
@@ -417,7 +446,7 @@ func TestAssignLifecycleStateRejectsUnknownFromAssignment(t *testing.T) {
 		TransitionRecordArtifactID: "TR-1", TransitionRecordRevisionID: "TR-1-REV-1",
 		TransitionKey: "specify", FromAssignmentID: "SA-GHOST",
 	}
-	_, err := cmd.Execute(context.Background(), f.uow, f.rec, f.clock)
+	_, err := cmd.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock)
 	if !errors.Is(err, application.ErrReferencedValueMissing) {
 		t.Errorf("err = %v, want ErrReferencedValueMissing", err)
 	}
@@ -434,7 +463,7 @@ func TestEachEngineeringActIsOneTransaction(t *testing.T) {
 	// pre-creating a conflicting revision under the same key with different
 	// content, then verify the artifact from a first successful call is
 	// exactly what exists -- i.e., nothing partial was ever written.
-	if _, err := establish.Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	if _, err := establish.Execute(context.Background(), f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	err := f.uow.Do(context.Background(), func(r application.Repositories) error {

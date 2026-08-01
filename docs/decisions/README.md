@@ -1368,6 +1368,36 @@ implementation had silently outpaced its own governing decision.
 
 ---
 
+## AD-030 — Command idempotency is recovered from validated persisted acts
+
+Status: Accepted
+Date: 2026-08-01
+Phase: M.5 (correctness closure before domain analysis)
+
+Recorded in
+[ad-030-command-idempotency-and-replay-conformance.md](ad-030-command-idempotency-and-replay-conformance.md).
+
+Exact replay is recognized from the complete, integrity-checked persisted
+semantic act before the application reconstructs server time, sequence,
+provenance, or transition state. This narrowly supersedes AD-029's claim that
+the already-present identity fields and repository re-`Put` behavior made all
+twelve commands replay-safe without code changes. AD-029's rejection of
+server-generated identity and a separate idempotency-key mechanism remains.
+
+AD-030 also clarifies AD-019's C7 accepted member and makes its new
+`acceptance_record_id` caller-owned; supersedes AD-021's statement that no
+acceptance lookup by identity is needed; preserves AD-026 repository equality;
+and explicitly chooses C9's new complete act as Validation Plan Artifact +
+Revision + order metadata + immediate accepted caller-identified member.
+One Requirement Artifact now has one lifetime subject and one Validation Plan
+Artifact one lifetime scope: new retarget attempts conflict, while mixed stored
+history fails integrity. Subject projection only enumerates Q3/Q4/Q5 candidates;
+the application inspector validates each complete history before use.
+Implementation and completion evidence are governed by
+[FF-022](../spec/022-command-replay-and-aggregate-integrity.md).
+
+---
+
 ## Open questions
 
 None. Every material architecture decision for M.1 through M.4 is resolved, as
@@ -1429,3 +1459,11 @@ architecture guard AD-023 specified but the Phase A/B decomposition dropped
 evidence discovery so prior-revision validation activity remains visible
 after a later capability revision becomes current (M-1), per FF-006 §1 and
 FF-007's M.5 exit criterion.
+
+Corrected forward in the M.5 pre-domain closure: AD-030 establishes that
+client-owned identity is necessary but not sufficient for command replay.
+Application-level persisted-act inspection is required before reconstructing
+time-bearing values. It also adds caller-owned acceptance identities to C7 and
+C9, with a narrow replay-only omission exception for a complete historical C7
+act. The historical publication-remediation report remains unchanged; FF-022
+owns implementation and evidence for this correction.

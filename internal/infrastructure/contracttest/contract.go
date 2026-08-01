@@ -48,12 +48,14 @@ func RunRepositoryContractSuite(t *testing.T, newUOW func() application.UnitOfWo
 	t.Run("ConflictAbortsAct", func(t *testing.T) { testConflictAbortsAct(t, newUOW()) })
 	t.Run("NestedTransactionRejected", func(t *testing.T) { testNestedTransactionRejected(t, newUOW()) })
 	t.Run("AcceptanceJournalHistory", func(t *testing.T) { testAcceptanceJournalHistory(t, newUOW()) })
+	t.Run("AcceptanceLookupByRecordID", func(t *testing.T) { testAcceptanceLookupByRecordID(t, newUOW()) })
 	t.Run("RevisionOrderHistory", func(t *testing.T) { testRevisionOrderHistory(t, newUOW()) })
 	t.Run("SequenceUniquenessEnforced", func(t *testing.T) { testSequenceUniquenessEnforced(t, newUOW()) })
 
 	// AD-021: invariants the specifications declare and both adapters must
 	// now enforce identically.
 	t.Run("FeatureCardPutRequiresExistingProject", func(t *testing.T) { testFeatureCardRequiresProject(t, newUOW()) })
+	t.Run("CapabilityLinkRequiresExistingFeatureCard", func(t *testing.T) { testCapabilityLinkRequiresFeatureCard(t, newUOW()) })
 	t.Run("RecordEnvelopePutRequiresResolvableSubject", func(t *testing.T) { testRecordRequiresSubject(t, newUOW()) })
 	t.Run("RecordEnvelopePutRejectsMalformedSubjectKey", func(t *testing.T) { testRecordRejectsMalformedSubject(t, newUOW()) })
 	t.Run("AcceptanceRecordIDIsUnique", func(t *testing.T) { testAcceptanceRecordIDIsUnique(t, newUOW()) })
@@ -469,12 +471,96 @@ func testAcceptanceJournalHistory(t *testing.T, uow application.UnitOfWork) {
 	}
 }
 
+func testAcceptanceLookupByRecordID(t *testing.T, uow application.UnitOfWork) {
+	revKey, err := engineering.NewRevisionKey("CAP-ACC-LOOKUP", "REV-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := engineering.NewRevisionAcceptanceRecord(
+		"ACC-LOOKUP", revKey, engineering.AcceptanceStateAccepted,
+		fixedContractTime(), "featureforge:local-user", "lookup contract",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The lookup must observe a journal append made earlier in the same act.
+	err = uow.Do(context.Background(), func(r application.Repositories) error {
+		if err := r.Artifacts.Put(context.Background(), mustArtifactEnvelope(t, "CAP-ACC-LOOKUP")); err != nil {
+			return err
+		}
+		if err := r.Revisions.Put(context.Background(), mustRevisionEnvelope(t, revKey)); err != nil {
+			return err
+		}
+		if err := r.RevisionAcceptance.Append(context.Background(), want); err != nil {
+			return err
+		}
+		got, found, err := r.RevisionAcceptance.GetByRecordID(context.Background(), want.RecordID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			t.Error("GetByRecordID did not observe an append in the current act")
+			return nil
+		}
+		if !sameAcceptanceRecord(got, want) {
+			t.Errorf("GetByRecordID = %+v, want %+v", got, want)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A committed record remains globally addressable without its RevisionKey,
+	// while absence follows the standard (zero, false, nil) repository shape.
+	err = uow.Do(context.Background(), func(r application.Repositories) error {
+		got, found, err := r.RevisionAcceptance.GetByRecordID(context.Background(), want.RecordID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			t.Error("GetByRecordID did not find the committed record")
+		} else if !sameAcceptanceRecord(got, want) {
+			t.Errorf("GetByRecordID = %+v, want %+v", got, want)
+		}
+
+		missing, found, err := r.RevisionAcceptance.GetByRecordID(context.Background(), "ACC-MISSING")
+		if err != nil {
+			return err
+		}
+		if found {
+			t.Errorf("GetByRecordID found missing record: %+v", missing)
+		}
+		if missing != (engineering.RevisionAcceptanceRecord{}) {
+			t.Errorf("GetByRecordID missing value = %+v, want zero value", missing)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func sameAcceptanceRecord(a, b engineering.RevisionAcceptanceRecord) bool {
+	return a.RecordID == b.RecordID && a.Key == b.Key && a.State == b.State &&
+		a.EffectiveAt.Equal(b.EffectiveAt) && a.Actor == b.Actor && a.Reason == b.Reason
+}
+
 func testRevisionOrderHistory(t *testing.T, uow application.UnitOfWork) {
 	err := uow.Do(context.Background(), func(r application.Repositories) error {
 		if err := r.Artifacts.Put(context.Background(), mustArtifactEnvelope(t, "CAP-ORDER")); err != nil {
 			return err
 		}
-		for i, revID := range []string{"REV-2", "REV-1"} { // insertion order reversed on purpose
+		entries := []struct {
+			revisionID string
+			sequence   int
+		}{
+			{revisionID: "REV-A-SECOND", sequence: 2},
+			{revisionID: "REV-Z-FIRST", sequence: 1},
+		}
+		for _, entry := range entries {
+			revID := entry.revisionID
 			key, err := engineering.NewRevisionKey("CAP-ORDER", revID)
 			if err != nil {
 				return err
@@ -491,18 +577,13 @@ func testRevisionOrderHistory(t *testing.T, uow application.UnitOfWork) {
 			if err := r.Revisions.Put(context.Background(), env); err != nil {
 				return err
 			}
-			seq := 1
-			if revID == "REV-2" {
-				seq = 2
-			}
-			order, err := engineering.NewRevisionOrderMetadata(key, seq, fixedContractTime())
+			order, err := engineering.NewRevisionOrderMetadata(key, entry.sequence, fixedContractTime())
 			if err != nil {
 				return err
 			}
 			if err := r.RevisionOrder.Put(context.Background(), order); err != nil {
 				return err
 			}
-			_ = i
 		}
 		return nil
 	})
@@ -514,7 +595,9 @@ func testRevisionOrderHistory(t *testing.T, uow application.UnitOfWork) {
 		if err != nil {
 			return err
 		}
-		if len(list) != 2 || list[0].Sequence != 1 || list[1].Sequence != 2 {
+		if len(list) != 2 ||
+			list[0].Sequence != 1 || list[0].Key.RevisionID != "REV-Z-FIRST" ||
+			list[1].Sequence != 2 || list[1].Key.RevisionID != "REV-A-SECOND" {
 			t.Errorf("ListByArtifact must return entries sorted by sequence ascending, got %v", list)
 		}
 		return nil
@@ -584,6 +667,45 @@ func testFeatureCardRequiresProject(t *testing.T, uow application.UnitOfWork) {
 	})
 	if !errors.Is(err, application.ErrReferencedValueMissing) {
 		t.Errorf("err = %v, want ErrReferencedValueMissing", err)
+	}
+}
+
+func testCapabilityLinkRequiresFeatureCard(t *testing.T, uow application.UnitOfWork) {
+	ctx := context.Background()
+	cardID := mustFeatureCardID(t, "FC-LINK-GHOST")
+	err := uow.Do(ctx, func(r application.Repositories) error {
+		return r.FeatureCards.LinkCapability(ctx, cardID, "CAP-GHOST")
+	})
+	if !errors.Is(err, application.ErrReferencedValueMissing) {
+		t.Fatalf("missing-card link err = %v, want ErrReferencedValueMissing", err)
+	}
+
+	project := mustProject(t, "PRJ-LINK-GHOST")
+	card, err := domain.NewFeatureCard(cardID, project.ID(), "Created after failed link", "", fixedContractTime())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = uow.Do(ctx, func(r application.Repositories) error {
+		if err := r.Projects.Put(ctx, project); err != nil {
+			return err
+		}
+		if err := r.FeatureCards.Put(ctx, card); err != nil {
+			return err
+		}
+		stored, found, err := r.FeatureCards.Get(ctx, cardID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			t.Fatal("FeatureCard not found after creation")
+		}
+		if linked, found := stored.CapabilityArtifactID(); found || linked != "" {
+			t.Fatalf("failed missing-card link leaked into later FeatureCard: (%q, %v)", linked, found)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

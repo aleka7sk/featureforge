@@ -101,8 +101,8 @@ type TimelineInput struct {
 // requirement's Subject is (FF-016 §3.2) -- is capabilityArtifactID,
 // returning their artifact IDs (AD-025, FF-016 §9). It is the
 // TimelineInput.PlanArtifactID counterpart to DiscoverRequirementArtifactIDs.
-func DiscoverValidationPlanArtifactIDs(ctx context.Context, repos Repositories, capabilityArtifactID string) ([]string, error) {
-	return discoverArtifactIDsBySubject(ctx, repos, engineering.RevisionFamilyValidationPlan, capabilityArtifactID)
+func DiscoverValidationPlanArtifactIDs(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, capabilityArtifactID string) ([]string, error) {
+	return discoverArtifactIDsBySubject(ctx, repos, inspector, engineering.RevisionFamilyValidationPlan, capabilityArtifactID)
 }
 
 // ResolveApplicableValidationPlanID applies the exactly-one contract
@@ -110,13 +110,14 @@ func DiscoverValidationPlanArtifactIDs(ctx context.Context, repos Repositories, 
 // zero is legal and yields an empty PlanArtifactID -- a young feature has
 // no plan events yet, which GetFeatureTimeline already treats as a normal
 // input; exactly one is used; more than one is ErrValidationPlanAmbiguous,
-// because the model defines no acceptance or order metadata for plans and
-// therefore no mechanism to rank two. Sort order never selects a plan --
+// because order and acceptance rank revisions within one plan Artifact but
+// no contract ranks two distinct plan Artifacts. Every discovered Artifact is
+// integrity-checked before this cardinality decision. Sort order never selects a plan --
 // DiscoverValidationPlanArtifactIDs sorts only for deterministic discovery
 // output, and this function fails identically for two plans regardless of
 // the order they were discovered or recorded in.
-func ResolveApplicableValidationPlanID(ctx context.Context, repos Repositories, capabilityArtifactID string) (string, error) {
-	plans, err := DiscoverValidationPlanArtifactIDs(ctx, repos, capabilityArtifactID)
+func ResolveApplicableValidationPlanID(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, capabilityArtifactID string) (string, error) {
+	plans, err := DiscoverValidationPlanArtifactIDs(ctx, repos, inspector, capabilityArtifactID)
 	if err != nil {
 		return "", err
 	}

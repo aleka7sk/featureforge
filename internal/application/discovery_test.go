@@ -25,12 +25,12 @@ func seedCapability(t *testing.T, f commandFixture) {
 	if _, err := (application.EstablishCapabilitySpecificationCommand{
 		FeatureCardID: "FC-1", ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-1",
 		Content: mustContent(t, "Homework after a lesson"),
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (application.AcceptCapabilityRevisionCommand{
 		RecordID: "ACC-1", ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-1", State: engineering.AcceptanceStateAccepted,
-	}).Execute(ctx, f.uow, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -39,15 +39,34 @@ func seedCapability(t *testing.T, f commandFixture) {
 // §6.6 plan-selection tests below.
 func establishPlan(t *testing.T, f commandFixture, artifactID, revisionID string) {
 	t.Helper()
+	ctx := context.Background()
+	requirementExists := false
+	if err := f.uow.Do(ctx, func(r application.Repositories) error {
+		var err error
+		_, requirementExists, err = r.Revisions.Get(ctx, mustRevKey(t, "REQ-1", "REQ-1-REV-1"))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !requirementExists {
+		if _, err := (application.EstablishRequirementCommand{
+			ArtifactID: "REQ-1", RevisionID: "REQ-1-REV-1",
+			Statement: "The system SHALL do X.", SubjectArtifactID: "CAP-1",
+			AcceptanceRecordID: memberID("MEM-REQ-1"),
+		}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err := (application.EstablishValidationPlanCommand{
 		ArtifactID: artifactID, RevisionID: revisionID, ScopeArtifactID: "CAP-1",
+		AcceptanceRecordID: memberID("MEM-" + artifactID + "-PLAN"),
 		Activities: []application.PlanActivityCommandInput{{
 			Key: "A-1", SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1",
 			Method: "manual-review", OutcomeInterpretation: "Satisfied when reviewed.",
 			RequirementArtifactID: "REQ-1", RequirementRevisionID: "REQ-1-REV-1",
 			ExpectedEvidence: []string{"reviewer note"},
 		}},
-	}).Execute(context.Background(), f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -87,13 +106,15 @@ func TestDiscoverDecisionIDs(t *testing.T) {
 	f := newCommandFixture()
 	seedCapability(t, f)
 	ctx := context.Background()
+	seedEvidenceRevision(t, f, "EV-1", "EV-1-REV-1")
+	seedEvidenceRevision(t, f, "EV-2", "EV-2-REV-1")
 
 	for _, id := range []string{"DEC-2", "DEC-1"} { // reversed insertion order
 		if _, err := (application.RecordArchitectureDecisionCommand{
 			DecisionID: id, SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1",
 			Question: "Should X?", OutcomeStatement: "X, because Y.",
 			EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1",
-		}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+		}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -105,14 +126,14 @@ func TestDiscoverDecisionIDs(t *testing.T) {
 	if _, err := (application.EstablishCapabilitySpecificationCommand{
 		FeatureCardID: "FC-2", ArtifactID: "CAP-2", RevisionID: "CAP-2-REV-1",
 		Content: mustContent(t, "Unrelated capability"),
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (application.RecordArchitectureDecisionCommand{
 		DecisionID: "DEC-UNRELATED", SubjectArtifactID: "CAP-2", SubjectRevisionID: "CAP-2-REV-1",
 		Question: "Should Z?", OutcomeStatement: "Z, because W.",
 		EvidenceArtifactID: "EV-2", EvidenceRevisionID: "EV-2-REV-1",
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 
@@ -125,12 +146,12 @@ func TestDiscoverDecisionIDs(t *testing.T) {
 	// must not make DEC-1/DEC-2 (recorded against revision 1) disappear.
 	if _, err := (application.ReviseCapabilitySpecificationCommand{
 		ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-2", Content: mustContent(t, "Homework after a lesson, revised"),
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (application.AcceptCapabilityRevisionCommand{
 		RecordID: "ACC-2", ArtifactID: "CAP-1", RevisionID: "CAP-1-REV-2", State: engineering.AcceptanceStateAccepted,
-	}).Execute(ctx, f.uow, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	gotAfterRevision := doDiscovery(t, f.uow, func(r application.Repositories) ([]string, error) {
@@ -144,6 +165,7 @@ func TestDiscoverDecisionIDs(t *testing.T) {
 func TestDiscoverExecutionAndClaimIDs(t *testing.T) {
 	f := newCommandFixture()
 	seedCapability(t, f)
+	establishPlan(t, f, "VP-1", "VP-1-REV-1")
 	ctx := context.Background()
 
 	if _, err := (application.RecordValidationRunCommand{
@@ -151,7 +173,7 @@ func TestDiscoverExecutionAndClaimIDs(t *testing.T) {
 		SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1",
 		Method: "manual-review", Outcome: "completed",
 		EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1", EvidenceLocator: "https://evidence.example/EV-1",
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (application.RecordValidationClaimCommand{
@@ -161,7 +183,7 @@ func TestDiscoverExecutionAndClaimIDs(t *testing.T) {
 		Outcome: "satisfied", Method: "manual-review",
 		EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1", ExecutionID: "ER-1",
 		Reasoning: "The specification states it explicitly.",
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 
@@ -184,6 +206,7 @@ func TestDiscoverExecutionAndClaimIDs(t *testing.T) {
 func TestDiscoverEvidenceArtifactIDs(t *testing.T) {
 	f := newCommandFixture()
 	seedCapability(t, f)
+	establishPlan(t, f, "VP-1", "VP-1-REV-1")
 	ctx := context.Background()
 
 	if _, err := (application.RecordValidationRunCommand{
@@ -191,7 +214,7 @@ func TestDiscoverEvidenceArtifactIDs(t *testing.T) {
 		SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1",
 		Method: "manual-review", Outcome: "completed",
 		EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1", EvidenceLocator: "https://evidence.example/EV-1",
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (application.RecordValidationClaimCommand{
@@ -201,7 +224,7 @@ func TestDiscoverEvidenceArtifactIDs(t *testing.T) {
 		Outcome: "satisfied", Method: "manual-review",
 		EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1", ExecutionID: "ER-1",
 		Reasoning: "The specification states it explicitly.",
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 
@@ -224,9 +247,19 @@ func TestDiscoverRequirementArtifactIDsIsIndependentOfClaims(t *testing.T) {
 	for _, id := range []string{"REQ-1", "REQ-2"} {
 		if _, err := (application.EstablishRequirementCommand{
 			ArtifactID: id, RevisionID: id + "-REV-1", Statement: "Statement.", SubjectArtifactID: "CAP-1",
-		}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+			AcceptanceRecordID: memberID("MEM-" + id),
+		}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 			t.Fatal(err)
 		}
+	}
+	establishPlan(t, f, "VP-1", "VP-1-REV-1")
+	if _, err := (application.RecordValidationRunCommand{
+		ExecutionID: "ER-1", PlanArtifactID: "VP-1", PlanRevisionID: "VP-1-REV-1", ActivityKey: "A-1",
+		SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1",
+		Method: "manual-review", Outcome: "completed",
+		EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1", EvidenceLocator: "https://evidence.example/EV-1",
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
+		t.Fatal(err)
 	}
 	// REQ-2 is never claimed.
 	if _, err := (application.RecordValidationClaimCommand{
@@ -236,12 +269,12 @@ func TestDiscoverRequirementArtifactIDsIsIndependentOfClaims(t *testing.T) {
 		Outcome: "satisfied", Method: "manual-review",
 		EvidenceArtifactID: "EV-1", EvidenceRevisionID: "EV-1-REV-1", ExecutionID: "ER-1",
 		Reasoning: "The specification states it explicitly.",
-	}).Execute(ctx, f.uow, f.rec, f.clock); err != nil {
+	}).Execute(ctx, f.uow, f.rec, f.rec, f.clock); err != nil {
 		t.Fatal(err)
 	}
 
 	got := doDiscovery(t, f.uow, func(r application.Repositories) ([]string, error) {
-		return application.DiscoverRequirementArtifactIDs(ctx, r, "CAP-1")
+		return application.DiscoverRequirementArtifactIDs(ctx, r, f.rec, "CAP-1")
 	})
 	assertStringsEqual(t, got, []string{"REQ-1", "REQ-2"})
 }
@@ -254,7 +287,7 @@ func TestResolveApplicableValidationPlanIDZero(t *testing.T) {
 	ctx := context.Background()
 
 	got := doDiscovery(t, f.uow, func(r application.Repositories) (string, error) {
-		return application.ResolveApplicableValidationPlanID(ctx, r, "CAP-1")
+		return application.ResolveApplicableValidationPlanID(ctx, r, f.rec, "CAP-1")
 	})
 	if got != "" {
 		t.Errorf("planID = %q, want empty", got)
@@ -270,7 +303,7 @@ func TestResolveApplicableValidationPlanIDOne(t *testing.T) {
 	ctx := context.Background()
 
 	got := doDiscovery(t, f.uow, func(r application.Repositories) (string, error) {
-		return application.ResolveApplicableValidationPlanID(ctx, r, "CAP-1")
+		return application.ResolveApplicableValidationPlanID(ctx, r, f.rec, "CAP-1")
 	})
 	if got != "VP-1" {
 		t.Errorf("planID = %q, want VP-1", got)
@@ -288,7 +321,7 @@ func TestResolveApplicableValidationPlanIDMany(t *testing.T) {
 	ctx := context.Background()
 
 	err := f.uow.Do(ctx, func(r application.Repositories) error {
-		got, err := application.ResolveApplicableValidationPlanID(ctx, r, "CAP-1")
+		got, err := application.ResolveApplicableValidationPlanID(ctx, r, f.rec, "CAP-1")
 		if got != "" {
 			t.Errorf("planID = %q, want empty (no plan selected on ambiguity)", got)
 		}
@@ -318,11 +351,11 @@ func TestResolveApplicableValidationPlanIDOrderingDoesNotResolveAmbiguity(t *tes
 
 	var errA, errB error
 	_ = fA.uow.Do(ctx, func(r application.Repositories) error {
-		_, errA = application.ResolveApplicableValidationPlanID(ctx, r, "CAP-1")
+		_, errA = application.ResolveApplicableValidationPlanID(ctx, r, fA.rec, "CAP-1")
 		return nil
 	})
 	_ = fB.uow.Do(ctx, func(r application.Repositories) error {
-		_, errB = application.ResolveApplicableValidationPlanID(ctx, r, "CAP-1")
+		_, errB = application.ResolveApplicableValidationPlanID(ctx, r, fB.rec, "CAP-1")
 		return nil
 	})
 

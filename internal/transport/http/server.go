@@ -18,6 +18,7 @@ import (
 type Dependencies struct {
 	UOW       application.UnitOfWork
 	Recorder  application.EngineeringRecorder
+	Inspector application.EngineeringReplayInspector
 	Projector application.EngineeringProjector
 	Clock     application.Clock
 	Logger    *slog.Logger

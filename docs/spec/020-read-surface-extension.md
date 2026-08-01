@@ -24,6 +24,14 @@ PEOS-000 through PEOS-009 remain authoritative for every PEOS concept.
 renames none, redefines none, and adds no repository method, no migration,
 and no dependency. PEOS v1.0.0 is used unchanged.
 
+**Forward correction (AD-030, FF-022).** §6's implemented assumption that a
+Validation Plan Artifact has exactly one Revision and needs no current-state
+resolution is superseded. Plan Artifact discovery still allows zero, selects
+one, and fails on more than one. Within the selected Artifact, FF-004 now
+resolves the greatest accepted sequence and supplies its rationale; activities
+are decoded from that current Revision. The projector boundary and the
+payload-on-read decision this document introduced remain unchanged.
+
 ## 1. Why this document exists
 
 Phase B (Minimal UI) planning was stopped on a blocking finding, confirmed by
@@ -137,11 +145,12 @@ instead of re-derived.
   `Detail engineering.DecisionDetail`; `EngineeringStateResult` gains
   `ValidationPlan ValidationPlanResult` (`Found bool; ArtifactID, RevisionID
   string; Activities []engineering.PlanActivityDetail`).
-- `GetFeatureEngineeringState` takes a new `projector EngineeringProjector`
-  parameter: decodes each effective requirement's statement, each applicable
-  decision's detail, and — when `PlanArtifactID != ""` — the plan's one
-  revision's activities (a plan artifact carries exactly one revision; no
-  command revises a validation plan). A `decorateReadinessReasoning` pass
+- `GetFeatureEngineeringState` takes a `projector EngineeringProjector` and,
+  after AD-030/FF-022, an `EngineeringReplayInspector`: it validates complete,
+  stable-subject Requirement and stable-scope Validation Plan histories,
+  resolves the plan's current accepted revision, and decodes each effective
+  requirement's statement, each applicable decision's detail, and the selected
+  plan revision's activities. A `decorateReadinessReasoning` pass
   fills in the current claim's and every rejected claim's reasoning after
   `ResolveReadiness` returns, since `ResolveReadiness` itself has no
   projector and many existing tests call it directly.
@@ -149,8 +158,8 @@ instead of re-derived.
   `Reasoning`. `ResolveCurrentClaim`'s existing correction-edge computation
   already had everything needed for `Outcome`/`CorrectedBy`; no decode
   required there.
-- `GetFeatureOverview`/`GetFeatureEngineeringStateForCard` take the new
-  projector parameter and thread it through `resolveFeatureCardAndState`,
+- `GetFeatureOverview`/`GetFeatureEngineeringStateForCard` take the projector
+  and inspector parameters and thread them through `resolveFeatureCardAndState`,
   which also stops discarding `components.planArtifactID`.
 - `RevisionWithContent{Revision, Content, HasContent}` replaces the bare
   `engineering.RevisionEnvelope` `GetCapabilityRevisions`/`GetCapabilityRevision`

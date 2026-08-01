@@ -21,6 +21,7 @@ func newTestHandler() http.Handler {
 	api := transporthttp.NewHandler(transporthttp.Dependencies{
 		UOW:       memory.NewUnitOfWork(memory.NewStore()),
 		Recorder:  peos.NewRecorder(),
+		Inspector: peos.NewRecorder(),
 		Projector: peos.NewRecorder(),
 		Clock:     application.SystemClock{},
 	})
@@ -91,6 +92,7 @@ func TestProjectsPageListsRealProject(t *testing.T) {
 	api := transporthttp.NewHandler(transporthttp.Dependencies{
 		UOW:       memory.NewUnitOfWork(memory.NewStore()),
 		Recorder:  peos.NewRecorder(),
+		Inspector: peos.NewRecorder(),
 		Projector: peos.NewRecorder(),
 		Clock:     application.SystemClock{},
 	})

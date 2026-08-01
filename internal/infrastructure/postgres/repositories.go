@@ -82,6 +82,16 @@ func parseDigest(hex string) (engineering.Digest, error) {
 	return engineering.NewDigest(hex)
 }
 
+// storedRowIntegrity classifies failures that occur after PostgreSQL has
+// successfully returned and scanned a row. At that point constructor and
+// parser failures describe persisted data that the adapter cannot
+// materialize, not a bad request. Driver/query errors deliberately bypass
+// this helper so serialization, connection, cancellation, and SQL failures
+// retain their original classification in UnitOfWork.Do.
+func storedRowIntegrity(kind string, err error) error {
+	return fmt.Errorf("%w: cannot materialize stored %s: %v", application.ErrStoredStateIntegrity, kind, err)
+}
+
 // --- Projects ---
 
 type projectRepo struct{ tx pgx.Tx }
@@ -125,7 +135,7 @@ func (r projectRepo) Get(ctx context.Context, id domain.ProjectID) (domain.Proje
 	}
 	p, err := domain.NewProject(id, name, createdAt.UTC())
 	if err != nil {
-		return domain.Project{}, false, err
+		return domain.Project{}, false, storedRowIntegrity("project", err)
 	}
 	return p, true, nil
 }
@@ -146,11 +156,11 @@ func (r projectRepo) List(ctx context.Context) ([]domain.Project, error) {
 		}
 		id, err := domain.NewProjectID(idStr)
 		if err != nil {
-			return nil, err
+			return nil, storedRowIntegrity("project", err)
 		}
 		p, err := domain.NewProject(id, name, createdAt.UTC())
 		if err != nil {
-			return nil, err
+			return nil, storedRowIntegrity("project", err)
 		}
 		out = append(out, p)
 	}
@@ -217,16 +227,16 @@ func (r featureCardRepo) Get(ctx context.Context, id domain.FeatureCardID) (doma
 func buildCard(id domain.FeatureCardID, projectID, title, description string, createdAt time.Time, link *string) (domain.FeatureCard, bool, error) {
 	pid, err := domain.NewProjectID(projectID)
 	if err != nil {
-		return domain.FeatureCard{}, false, err
+		return domain.FeatureCard{}, false, storedRowIntegrity("feature card", err)
 	}
 	card, err := domain.NewFeatureCard(id, pid, title, description, createdAt.UTC())
 	if err != nil {
-		return domain.FeatureCard{}, false, err
+		return domain.FeatureCard{}, false, storedRowIntegrity("feature card", err)
 	}
 	if artifactID, linked := stringOrEmpty(link); linked {
 		card, err = card.WithCapabilityArtifactID(artifactID)
 		if err != nil {
-			return domain.FeatureCard{}, false, err
+			return domain.FeatureCard{}, false, storedRowIntegrity("feature card", err)
 		}
 	}
 	return card, true, nil
@@ -254,7 +264,7 @@ func (r featureCardRepo) ListByProject(ctx context.Context, projectID domain.Pro
 		}
 		id, err := domain.NewFeatureCardID(idStr)
 		if err != nil {
-			return nil, err
+			return nil, storedRowIntegrity("feature card", err)
 		}
 		card, _, err := buildCard(id, pidStr, title, description, createdAt, link)
 		if err != nil {
@@ -266,6 +276,11 @@ func (r featureCardRepo) ListByProject(ctx context.Context, projectID domain.Pro
 }
 
 func (r featureCardRepo) LinkCapability(ctx context.Context, id domain.FeatureCardID, artifactID string) error {
+	if _, found, err := r.Get(ctx, id); err != nil {
+		return err
+	} else if !found {
+		return fmt.Errorf("%w: feature card %s", application.ErrReferencedValueMissing, id)
+	}
 	tag, err := r.tx.Exec(ctx, `
         INSERT INTO feature_card_capability_links (feature_card_id, artifact_id) VALUES ($1, $2)
         ON CONFLICT (feature_card_id) DO NOTHING`, id.String(), artifactID)
@@ -329,11 +344,11 @@ func (r artifactRepo) Get(ctx context.Context, key engineering.ArtifactKey) (eng
 	}
 	payloadDigest, err := parseDigest(digest)
 	if err != nil {
-		return engineering.ArtifactEnvelope{}, false, err
+		return engineering.ArtifactEnvelope{}, false, storedRowIntegrity("artifact envelope", err)
 	}
 	env, err := engineering.NewArtifactEnvelope(key, artifactType, payload, payloadDigest, recordedAt.UTC())
 	if err != nil {
-		return engineering.ArtifactEnvelope{}, false, err
+		return engineering.ArtifactEnvelope{}, false, storedRowIntegrity("artifact envelope", err)
 	}
 	return env, true, nil
 }
@@ -464,21 +479,21 @@ func scanRevision(rows pgx.Rows) (engineering.RevisionEnvelope, error) {
 	}
 	key, err := engineering.NewRevisionKey(artifactID, revisionID)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, err
+		return engineering.RevisionEnvelope{}, storedRowIntegrity("revision envelope", err)
 	}
 	actorValue, hasActor := stringOrEmpty(actor)
 	provenanceValue, hasProvenance := timeOrZero(provenanceAt)
 	contentValue, _ := stringOrEmpty(contentDigest)
 	contentParsed, err := parseDigest(contentValue)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, err
+		return engineering.RevisionEnvelope{}, storedRowIntegrity("revision envelope", err)
 	}
 	subjectValue, _ := stringOrEmpty(subjectKey)
 	payloadDigest, err := parseDigest(digest)
 	if err != nil {
-		return engineering.RevisionEnvelope{}, err
+		return engineering.RevisionEnvelope{}, storedRowIntegrity("revision envelope", err)
 	}
-	return engineering.NewRevisionEnvelope(engineering.RevisionEnvelopeInput{
+	env, err := engineering.NewRevisionEnvelope(engineering.RevisionEnvelopeInput{
 		Key:                  key,
 		RevisionFamily:       engineering.RevisionFamily(family),
 		ArtifactType:         artifactType,
@@ -493,6 +508,10 @@ func scanRevision(rows pgx.Rows) (engineering.RevisionEnvelope, error) {
 		PayloadDigest:        payloadDigest,
 		RecordedAt:           recordedAt.UTC(),
 	})
+	if err != nil {
+		return engineering.RevisionEnvelope{}, storedRowIntegrity("revision envelope", err)
+	}
+	return env, nil
 }
 
 // --- Structured content ---
@@ -537,7 +556,7 @@ func (r contentRepo) Get(ctx context.Context, key engineering.RevisionKey) (engi
 	}
 	content, err := engineering.ParseCapabilitySpecificationContent(encoded)
 	if err != nil {
-		return engineering.CapabilitySpecificationContent{}, false, err
+		return engineering.CapabilitySpecificationContent{}, false, storedRowIntegrity("structured content", err)
 	}
 	return content, true, nil
 }
@@ -699,14 +718,14 @@ func scanRecord(rows pgx.Rows) (engineering.RecordEnvelope, error) {
 	}
 	key, err := engineering.NewRecordKey(engineering.RecordKind(kind), id)
 	if err != nil {
-		return engineering.RecordEnvelope{}, err
+		return engineering.RecordEnvelope{}, storedRowIntegrity("record envelope", err)
 	}
 	occurred, hasOccurred := timeOrZero(occurredAt)
 	payloadDigest, err := parseDigest(digest)
 	if err != nil {
-		return engineering.RecordEnvelope{}, err
+		return engineering.RecordEnvelope{}, storedRowIntegrity("record envelope", err)
 	}
-	return engineering.NewRecordEnvelope(engineering.RecordEnvelopeInput{
+	env, err := engineering.NewRecordEnvelope(engineering.RecordEnvelopeInput{
 		Key:                key,
 		SubjectKey:         subjectKey,
 		Scope:              scope,
@@ -723,6 +742,10 @@ func scanRecord(rows pgx.Rows) (engineering.RecordEnvelope, error) {
 		PayloadDigest:      payloadDigest,
 		RecordedAt:         recordedAt.UTC(),
 	})
+	if err != nil {
+		return engineering.RecordEnvelope{}, storedRowIntegrity("record envelope", err)
+	}
+	return env, nil
 }
 
 // --- Revision order metadata ---
@@ -768,7 +791,7 @@ func (r orderRepo) Get(ctx context.Context, key engineering.RevisionKey) (engine
 	}
 	order, err := engineering.NewRevisionOrderMetadata(key, sequence, recordedAt.UTC())
 	if err != nil {
-		return engineering.RevisionOrderMetadata{}, false, err
+		return engineering.RevisionOrderMetadata{}, false, storedRowIntegrity("revision order metadata", err)
 	}
 	return order, true, nil
 }
@@ -777,7 +800,7 @@ func (r orderRepo) ListByArtifact(ctx context.Context, artifactID string) ([]eng
 	rows, err := r.tx.Query(ctx, `
         SELECT artifact_id, revision_id, sequence, recorded_at
         FROM revision_order WHERE artifact_id = $1
-        ORDER BY artifact_id, revision_id`, artifactID)
+        ORDER BY sequence`, artifactID)
 	if err != nil {
 		return nil, err
 	}
@@ -793,11 +816,11 @@ func (r orderRepo) ListByArtifact(ctx context.Context, artifactID string) ([]eng
 		}
 		key, err := engineering.NewRevisionKey(aID, rID)
 		if err != nil {
-			return nil, err
+			return nil, storedRowIntegrity("revision order metadata", err)
 		}
 		order, err := engineering.NewRevisionOrderMetadata(key, sequence, recordedAt.UTC())
 		if err != nil {
-			return nil, err
+			return nil, storedRowIntegrity("revision order metadata", err)
 		}
 		out = append(out, order)
 	}
@@ -823,7 +846,7 @@ func (r acceptanceRepo) Append(ctx context.Context, record engineering.RevisionA
 	if tag.RowsAffected() == 1 {
 		return nil
 	}
-	existing, found, err := r.getByRecordID(ctx, record.RecordID)
+	existing, found, err := r.GetByRecordID(ctx, record.RecordID)
 	if err != nil {
 		return err
 	}
@@ -838,7 +861,7 @@ func sameAcceptance(a, b engineering.RevisionAcceptanceRecord) bool {
 		a.EffectiveAt.Equal(b.EffectiveAt) && a.Actor == b.Actor && a.Reason == b.Reason
 }
 
-func (r acceptanceRepo) getByRecordID(ctx context.Context, recordID string) (engineering.RevisionAcceptanceRecord, bool, error) {
+func (r acceptanceRepo) GetByRecordID(ctx context.Context, recordID string) (engineering.RevisionAcceptanceRecord, bool, error) {
 	rows, err := r.tx.Query(ctx, acceptanceSelect+` WHERE record_id = $1`, recordID)
 	if err != nil {
 		return engineering.RevisionAcceptanceRecord{}, false, err
@@ -851,7 +874,14 @@ func (r acceptanceRepo) getByRecordID(ctx context.Context, recordID string) (eng
 	if err != nil {
 		return engineering.RevisionAcceptanceRecord{}, false, err
 	}
-	return rec, true, rows.Err()
+	if rows.Next() {
+		return engineering.RevisionAcceptanceRecord{}, false,
+			fmt.Errorf("%w: acceptance record id %q appears more than once", application.ErrStoredStateIntegrity, recordID)
+	}
+	if err := rows.Err(); err != nil {
+		return engineering.RevisionAcceptanceRecord{}, false, err
+	}
+	return rec, true, nil
 }
 
 func (r acceptanceRepo) ListByRevision(ctx context.Context, key engineering.RevisionKey) ([]engineering.RevisionAcceptanceRecord, error) {
@@ -899,8 +929,12 @@ func scanAcceptance(rows pgx.Rows) (engineering.RevisionAcceptanceRecord, error)
 	}
 	key, err := engineering.NewRevisionKey(artifactID, revisionID)
 	if err != nil {
-		return engineering.RevisionAcceptanceRecord{}, err
+		return engineering.RevisionAcceptanceRecord{}, storedRowIntegrity("revision acceptance record", err)
 	}
-	return engineering.NewRevisionAcceptanceRecord(
+	record, err := engineering.NewRevisionAcceptanceRecord(
 		recordID, key, engineering.AcceptanceState(state), effectiveAt.UTC(), actor, reason)
+	if err != nil {
+		return engineering.RevisionAcceptanceRecord{}, storedRowIntegrity("revision acceptance record", err)
+	}
+	return record, nil
 }

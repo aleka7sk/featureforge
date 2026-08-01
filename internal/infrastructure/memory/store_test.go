@@ -59,6 +59,52 @@ func TestRepositoryContractSuite(t *testing.T) {
 	})
 }
 
+func TestAcceptanceLookupRejectsDuplicateStoredRecordIDs(t *testing.T) {
+	store := NewStore()
+	keyA, err := engineering.NewRevisionKey("CAP-DUP-ID-A", "REV-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyB, err := engineering.NewRevisionKey("CAP-DUP-ID-B", "REV-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordA, err := engineering.NewRevisionAcceptanceRecord(
+		"ACC-DUP-STORED", keyA, engineering.AcceptanceStateAccepted,
+		fixedContractTime(), "featureforge:local-user", "",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordB, err := engineering.NewRevisionAcceptanceRecord(
+		"ACC-DUP-STORED", keyB, engineering.AcceptanceStateAccepted,
+		fixedContractTime(), "featureforge:local-user", "",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Public writes cannot produce this state. Install it directly to prove
+	// lookup treats a violated uniqueness invariant as corruption, rather than
+	// choosing whichever map entry happens to be visited first.
+	store.committed.acceptance[keyA] = []engineering.RevisionAcceptanceRecord{recordA}
+	store.committed.acceptance[keyB] = []engineering.RevisionAcceptanceRecord{recordB}
+
+	err = NewUnitOfWork(store).Do(context.Background(), func(r application.Repositories) error {
+		got, found, err := r.RevisionAcceptance.GetByRecordID(context.Background(), "ACC-DUP-STORED")
+		if !errors.Is(err, application.ErrStoredStateIntegrity) {
+			t.Errorf("GetByRecordID = (%+v, %v, %v), want ErrStoredStateIntegrity", got, found, err)
+		}
+		if found {
+			t.Errorf("GetByRecordID found an arbitrary duplicate: %+v", got)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRollbackOnInjectedFailure(t *testing.T) {
 	store := NewStore()
 	store.SetFailureHook(func(kind string, n int) error {

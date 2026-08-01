@@ -140,10 +140,10 @@ type FeatureOverviewResult struct {
 // GetFeatureOverview composes FeatureOverviewResult for a caller holding
 // only a FeatureCardID (FF-018 §6.4, Q3). projector decodes the FF-020
 // display content GetFeatureEngineeringState now renders.
-func GetFeatureOverview(ctx context.Context, uow UnitOfWork, projector EngineeringProjector, featureCardID domain.FeatureCardID) (FeatureOverviewResult, error) {
+func GetFeatureOverview(ctx context.Context, uow UnitOfWork, projector EngineeringProjector, inspector EngineeringReplayInspector, featureCardID domain.FeatureCardID) (FeatureOverviewResult, error) {
 	var result FeatureOverviewResult
 	err := uow.Do(ctx, func(r Repositories) error {
-		card, state, err := resolveFeatureCardAndState(ctx, r, projector, featureCardID)
+		card, state, err := resolveFeatureCardAndState(ctx, r, projector, inspector, featureCardID)
 		if err != nil {
 			return err
 		}
@@ -162,10 +162,10 @@ func GetFeatureOverview(ctx context.Context, uow UnitOfWork, projector Engineeri
 // an error -- the same fallback GetFeatureEngineeringState already applies
 // when no current revision is found. projector decodes the FF-020 display
 // content GetFeatureEngineeringState now renders.
-func GetFeatureEngineeringStateForCard(ctx context.Context, uow UnitOfWork, projector EngineeringProjector, featureCardID domain.FeatureCardID) (EngineeringStateResult, error) {
+func GetFeatureEngineeringStateForCard(ctx context.Context, uow UnitOfWork, projector EngineeringProjector, inspector EngineeringReplayInspector, featureCardID domain.FeatureCardID) (EngineeringStateResult, error) {
 	var result EngineeringStateResult
 	err := uow.Do(ctx, func(r Repositories) error {
-		_, state, err := resolveFeatureCardAndState(ctx, r, projector, featureCardID)
+		_, state, err := resolveFeatureCardAndState(ctx, r, projector, inspector, featureCardID)
 		if err != nil {
 			return err
 		}
@@ -186,7 +186,7 @@ func GetFeatureEngineeringStateForCard(ctx context.Context, uow UnitOfWork, proj
 // (no linked capability) yields no execution/claim/evidence population,
 // matching discoverEngineeringStateComponents's own empty-but-well-formed
 // rule for that case.
-func GetFeatureTimelineForCard(ctx context.Context, uow UnitOfWork, featureCardID domain.FeatureCardID) (TimelineResult, error) {
+func GetFeatureTimelineForCard(ctx context.Context, uow UnitOfWork, inspector EngineeringReplayInspector, featureCardID domain.FeatureCardID) (TimelineResult, error) {
 	var result TimelineResult
 	err := uow.Do(ctx, func(r Repositories) error {
 		project, card, err := resolveProjectAndCard(ctx, r, featureCardID)
@@ -194,7 +194,7 @@ func GetFeatureTimelineForCard(ctx context.Context, uow UnitOfWork, featureCardI
 			return err
 		}
 		artifactID, _ := card.CapabilityArtifactID()
-		components, err := discoverEngineeringStateComponents(ctx, r, artifactID)
+		components, err := discoverEngineeringStateComponents(ctx, r, inspector, artifactID)
 		if err != nil {
 			return err
 		}
@@ -234,7 +234,7 @@ func GetFeatureTimelineForCard(ctx context.Context, uow UnitOfWork, featureCardI
 // resolveFeatureCardAndState is shared by GetFeatureOverview and
 // GetFeatureEngineeringStateForCard so the card lookup and discovery
 // sequence exists exactly once (FF-018 §6.4 steps 1-7).
-func resolveFeatureCardAndState(ctx context.Context, repos Repositories, projector EngineeringProjector, featureCardID domain.FeatureCardID) (domain.FeatureCard, EngineeringStateResult, error) {
+func resolveFeatureCardAndState(ctx context.Context, repos Repositories, projector EngineeringProjector, inspector EngineeringReplayInspector, featureCardID domain.FeatureCardID) (domain.FeatureCard, EngineeringStateResult, error) {
 	card, found, err := repos.FeatureCards.Get(ctx, featureCardID)
 	if err != nil {
 		return domain.FeatureCard{}, EngineeringStateResult{}, err
@@ -244,11 +244,11 @@ func resolveFeatureCardAndState(ctx context.Context, repos Repositories, project
 	}
 	artifactID, _ := card.CapabilityArtifactID()
 
-	components, err := discoverEngineeringStateComponents(ctx, repos, artifactID)
+	components, err := discoverEngineeringStateComponents(ctx, repos, inspector, artifactID)
 	if err != nil {
 		return domain.FeatureCard{}, EngineeringStateResult{}, err
 	}
-	state, err := GetFeatureEngineeringState(ctx, repos, projector, EngineeringStateInput{
+	state, err := GetFeatureEngineeringState(ctx, repos, projector, inspector, EngineeringStateInput{
 		CapabilityArtifactID:   artifactID,
 		RequirementArtifactIDs: components.requirementArtifactIDs,
 		DecisionIDs:            components.decisionIDs,
@@ -298,13 +298,13 @@ type engineeringStateComponents struct {
 // capabilityArtifactID (a feature card with no linked capability) returns
 // the zero value without error, matching step 2's "empty-but-well-formed
 // state" rule.
-func discoverEngineeringStateComponents(ctx context.Context, repos Repositories, capabilityArtifactID string) (engineeringStateComponents, error) {
+func discoverEngineeringStateComponents(ctx context.Context, repos Repositories, inspector EngineeringReplayInspector, capabilityArtifactID string) (engineeringStateComponents, error) {
 	var c engineeringStateComponents
 	if capabilityArtifactID == "" {
 		return c, nil
 	}
 
-	requirementIDs, err := DiscoverRequirementArtifactIDs(ctx, repos, capabilityArtifactID)
+	requirementIDs, err := DiscoverRequirementArtifactIDs(ctx, repos, inspector, capabilityArtifactID)
 	if err != nil {
 		return engineeringStateComponents{}, err
 	}
@@ -316,7 +316,7 @@ func discoverEngineeringStateComponents(ctx context.Context, repos Repositories,
 	}
 	c.decisionIDs = decisionIDs
 
-	planID, err := ResolveApplicableValidationPlanID(ctx, repos, capabilityArtifactID)
+	planID, err := ResolveApplicableValidationPlanID(ctx, repos, inspector, capabilityArtifactID)
 	if err != nil {
 		return engineeringStateComponents{}, err
 	}

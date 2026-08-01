@@ -44,6 +44,20 @@ prose. Where verification contradicted a planning input, the repository wins
 and the discrepancy is recorded (see §11 on the sentinel count, and §10 on
 `ParseEvidenceKey`).
 
+**Forward correction (AD-030, FF-022).** Later replay and aggregate-integrity
+evidence found three Phase A conclusions incomplete: §3.1's C7/C9 DTOs omit
+the acceptance identity their corrected complete acts create; §6.6 mistakes
+missing Validation Plan order/acceptance implementation for a governing model
+rule; and §11 infers whole-command replay from repository equality. The route
+count, paths, success statuses, response bodies, and create-only character of
+the commands remain. FF-022 governs the added C7/C9 field, FF-004 plan-current
+resolution, and application-level replay recognition. Original implementation
+history below remains visible rather than being rewritten retrospectively.
+The same correction threads the read inspector through Q3/Q4/Q5 discovery:
+subject projection enumerates candidates, while complete Requirement/Plan
+history validation authorizes their use and rejects mixed subject/scope state
+as `500 internal_error` before plan ambiguity.
+
 ---
 
 ## 1. Scope
@@ -597,6 +611,13 @@ ceremony.
 
 ### 6.6 Validation-plan selection — the exactly-one contract
 
+**AD-030 correction.** The zero/one/many Artifact-discovery contract in this
+section remains. Candidate rule 2's “disproven” verdict is superseded: FF-004
+always governed order/current state within a Validation Plan Artifact, and C9
+now writes A + R + O + immediate accepted M. Exactly-one discovery chooses an
+Artifact; `ResolveCurrentRevision` then chooses its current Revision. Neither
+step ranks two distinct plan Artifacts.
+
 `TimelineInput.PlanArtifactID` is a single string. Discovery returns a slice.
 Something must bridge them, and **sort order must not be that bridge**:
 deterministic ordering makes a choice reproducible, it does not make the chosen
@@ -1027,6 +1048,12 @@ derived. `404` when absent.
 ---
 
 ## 11. Create-only idempotency
+
+**AD-030 correction.** The outcomes in this section remain, but the mechanism
+does not. Every command now recognizes a complete persisted semantic act
+inside the application UOW before reconstructing time-bearing values. C7 and
+C9 include `acceptance_record_id`; C10 includes its evidence pair. Repository
+`Equal` remains a final write guard, not the replay witness. See FF-022 §§4–8.
 
 ### 11.1 Classification
 

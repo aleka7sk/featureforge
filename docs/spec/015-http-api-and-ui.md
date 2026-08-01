@@ -458,6 +458,16 @@ field is a request the client believes it made and the server did not.
 
 ## 10. Idempotency expectations
 
+**Superseded mechanism (AD-030, FF-022).** The outcome promised in this
+section remains: exact re-`POST` succeeds with the original response and an
+immutable difference conflicts. The explanation that follows — that command
+idempotency is a free consequence of repository re-`Put` — is not sufficient
+for time-bearing and multi-member acts. The application now owns replay
+recognition from a fully decoded, integrity-checked persisted semantic act
+before reconstruction. Partial or contradictory occupancy is `500
+internal_error`; a coherent immutable difference is 409; replay and every
+error branch write nothing. No `Idempotency-Key` is introduced.
+
 **Command endpoints are idempotent by construction, with no idempotency-key
 mechanism.** This is a gift from the validated architecture, not a design
 effort:

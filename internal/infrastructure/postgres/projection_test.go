@@ -29,7 +29,7 @@ func TestTypedColumnsAgreeWithAuthoritativePayload(t *testing.T) {
 	clock := application.NewFixedClock(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC))
 	ctx := context.Background()
 
-	seedCapability(t, uow, recorder, clock)
+	seedCapability(t, uow, recorder, recorder, clock)
 
 	// A decision cites evidence in its basis, so the evidence must exist
 	// before the decision that references it.
@@ -38,7 +38,7 @@ func TestTypedColumnsAgreeWithAuthoritativePayload(t *testing.T) {
 		DecisionID: "DEC-1", SubjectArtifactID: "CAP-1", SubjectRevisionID: "CAP-1-REV-1",
 		Question: "Should homework support an audio attachment?", OutcomeStatement: "Yes, by content address.",
 		EvidenceArtifactID: "EV-0", EvidenceRevisionID: "EV-0-REV-1",
-	}).Execute(ctx, uow, recorder, clock); err != nil {
+	}).Execute(ctx, uow, recorder, recorder, clock); err != nil {
 		t.Fatalf("record decision: %v", err)
 	}
 
@@ -126,7 +126,7 @@ func TestPayloadIsStoredByteIdentical(t *testing.T) {
 	clock := application.NewFixedClock(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC))
 	ctx := context.Background()
 
-	seedCapability(t, uow, recorder, clock)
+	seedCapability(t, uow, recorder, recorder, clock)
 
 	var stored []byte
 	var digest string
@@ -151,11 +151,12 @@ func TestRevisionSubjectKeyColumnProjection(t *testing.T) {
 	clock := application.NewFixedClock(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC))
 	ctx := context.Background()
 
-	seedCapability(t, uow, recorder, clock)
+	seedCapability(t, uow, recorder, recorder, clock)
+	acceptanceRecordID := "ACC-REQ-1-REV-1"
 	if _, err := (application.EstablishRequirementCommand{
-		ArtifactID: "REQ-1", RevisionID: "REQ-1-REV-1",
+		ArtifactID: "REQ-1", RevisionID: "REQ-1-REV-1", AcceptanceRecordID: &acceptanceRecordID,
 		Statement: "Published homework SHALL be visible to the student.", SubjectArtifactID: "CAP-1",
-	}).Execute(ctx, uow, recorder, clock); err != nil {
+	}).Execute(ctx, uow, recorder, recorder, clock); err != nil {
 		t.Fatalf("establish requirement: %v", err)
 	}
 

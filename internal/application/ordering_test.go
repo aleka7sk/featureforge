@@ -111,6 +111,65 @@ type revisionSpec struct {
 	state      engineering.AcceptanceState
 }
 
+type resolutionRevisionRepo struct {
+	application.RevisionEnvelopeRepository
+	envelopes []engineering.RevisionEnvelope
+}
+
+func (r resolutionRevisionRepo) ListByArtifact(context.Context, string) ([]engineering.RevisionEnvelope, error) {
+	return append([]engineering.RevisionEnvelope(nil), r.envelopes...), nil
+}
+
+type resolutionOrderRepo struct {
+	application.RevisionOrderRepository
+	order []engineering.RevisionOrderMetadata
+}
+
+func (r resolutionOrderRepo) ListByArtifact(context.Context, string) ([]engineering.RevisionOrderMetadata, error) {
+	return append([]engineering.RevisionOrderMetadata(nil), r.order...), nil
+}
+
+type resolutionAcceptanceRepo struct {
+	application.RevisionAcceptanceRepository
+	journal  []engineering.RevisionAcceptanceRecord
+	identity map[string]engineering.RevisionAcceptanceRecord
+}
+
+func (r resolutionAcceptanceRepo) ListByArtifact(context.Context, string) ([]engineering.RevisionAcceptanceRecord, error) {
+	return append([]engineering.RevisionAcceptanceRecord(nil), r.journal...), nil
+}
+
+func (r resolutionAcceptanceRepo) GetByRecordID(_ context.Context, recordID string) (engineering.RevisionAcceptanceRecord, bool, error) {
+	if r.identity != nil {
+		entry, found := r.identity[recordID]
+		return entry, found, nil
+	}
+	var found engineering.RevisionAcceptanceRecord
+	count := 0
+	for _, entry := range r.journal {
+		if entry.RecordID == recordID {
+			found = entry
+			count++
+		}
+	}
+	if count > 1 {
+		return engineering.RevisionAcceptanceRecord{}, false, application.ErrStoredStateIntegrity
+	}
+	return found, count == 1, nil
+}
+
+func resolutionRepos(
+	envelopes []engineering.RevisionEnvelope,
+	order []engineering.RevisionOrderMetadata,
+	acceptance resolutionAcceptanceRepo,
+) application.Repositories {
+	return application.Repositories{
+		Revisions:          resolutionRevisionRepo{envelopes: envelopes},
+		RevisionOrder:      resolutionOrderRepo{order: order},
+		RevisionAcceptance: acceptance,
+	}
+}
+
 func seedRevisions(t *testing.T, artifactID string, specs []revisionSpec) application.UnitOfWork {
 	t.Helper()
 	uow := newStoreAndUOW()
@@ -203,7 +262,7 @@ func TestIgnoresRevisionIDLexicalOrder(t *testing.T) {
 func TestDraftHigherSequenceRejected(t *testing.T) {
 	uow := seedRevisions(t, "CAP-1", []revisionSpec{
 		{"REV-1", 1, engineering.AcceptanceStateAccepted},
-		{"REV-2", 2, engineering.AcceptanceStateDraft},
+		{"REV-2", 2, ""},
 	})
 	result := resolveCurrent(t, uow, "CAP-1")
 	if !result.Found || result.Sequence != 1 {
@@ -256,7 +315,7 @@ func TestWithdrawnAcceptedFallsBack(t *testing.T) {
 
 func TestNoAcceptedRevision(t *testing.T) {
 	uow := seedRevisions(t, "CAP-1", []revisionSpec{
-		{"REV-1", 1, engineering.AcceptanceStateDraft},
+		{"REV-1", 1, ""},
 	})
 	result := resolveCurrent(t, uow, "CAP-1")
 	if result.Found {
@@ -319,6 +378,131 @@ func TestMissingOrderMetadata(t *testing.T) {
 	})
 	if !errors.Is(err, application.ErrRevisionOrderMissing) {
 		t.Errorf("err = %v, want ErrRevisionOrderMissing", err)
+	}
+}
+
+func TestRevisionSequenceMustBeDense(t *testing.T) {
+	uow := seedRevisions(t, "CAP-1", []revisionSpec{
+		{"REV-1", 1, engineering.AcceptanceStateAccepted},
+		{"REV-2", 3, engineering.AcceptanceStateAccepted},
+	})
+	err := uow.Do(context.Background(), func(r application.Repositories) error {
+		_, err := application.ResolveCurrentRevision(context.Background(), r, "CAP-1")
+		return err
+	})
+	if !errors.Is(err, application.ErrRevisionSequenceInvalid) {
+		t.Fatalf("err = %v, want ErrRevisionSequenceInvalid", err)
+	}
+}
+
+func TestResolveRejectsStructurallyInvalidAcceptanceRecord(t *testing.T) {
+	revision := mustRevEnv(t, "CAP-1", "REV-1")
+	order := mustOrder(t, "CAP-1", "REV-1", 1, fixedTime())
+	invalid := mustAcceptance(t, "A1", "CAP-1", "REV-1", engineering.AcceptanceStateAccepted, fixedTime())
+	invalid.Actor = ""
+
+	repos := resolutionRepos(
+		[]engineering.RevisionEnvelope{revision},
+		[]engineering.RevisionOrderMetadata{order},
+		resolutionAcceptanceRepo{journal: []engineering.RevisionAcceptanceRecord{invalid}},
+	)
+	_, err := application.ResolveCurrentRevision(context.Background(), repos, "CAP-1")
+	if !errors.Is(err, application.ErrStoredStateIntegrity) {
+		t.Fatalf("err = %v, want ErrStoredStateIntegrity", err)
+	}
+}
+
+func TestResolveRejectsDanglingAcceptanceRecord(t *testing.T) {
+	revision := mustRevEnv(t, "CAP-1", "REV-1")
+	order := mustOrder(t, "CAP-1", "REV-1", 1, fixedTime())
+	dangling := mustAcceptance(t, "A2", "CAP-1", "REV-MISSING", engineering.AcceptanceStateAccepted, fixedTime())
+
+	repos := resolutionRepos(
+		[]engineering.RevisionEnvelope{revision},
+		[]engineering.RevisionOrderMetadata{order},
+		resolutionAcceptanceRepo{journal: []engineering.RevisionAcceptanceRecord{dangling}},
+	)
+	_, err := application.ResolveCurrentRevision(context.Background(), repos, "CAP-1")
+	if !errors.Is(err, application.ErrRevisionReferenceMismatch) {
+		t.Fatalf("err = %v, want ErrRevisionReferenceMismatch", err)
+	}
+}
+
+func TestResolveRejectsDuplicateAcceptanceRecordID(t *testing.T) {
+	revisions := []engineering.RevisionEnvelope{
+		mustRevEnv(t, "CAP-1", "REV-1"),
+		mustRevEnv(t, "CAP-1", "REV-2"),
+	}
+	order := []engineering.RevisionOrderMetadata{
+		mustOrder(t, "CAP-1", "REV-1", 1, fixedTime()),
+		mustOrder(t, "CAP-1", "REV-2", 2, fixedTime()),
+	}
+	journal := []engineering.RevisionAcceptanceRecord{
+		mustAcceptance(t, "A-DUP", "CAP-1", "REV-1", engineering.AcceptanceStateAccepted, fixedTime()),
+		mustAcceptance(t, "A-DUP", "CAP-1", "REV-2", engineering.AcceptanceStateAccepted, fixedTime()),
+	}
+
+	repos := resolutionRepos(revisions, order, resolutionAcceptanceRepo{journal: journal})
+	_, err := application.ResolveCurrentRevision(context.Background(), repos, "CAP-1")
+	if !errors.Is(err, application.ErrStoredStateIntegrity) {
+		t.Fatalf("err = %v, want ErrStoredStateIntegrity", err)
+	}
+}
+
+func TestResolveRejectsInvalidAcceptanceTransitionHistory(t *testing.T) {
+	revision := mustRevEnv(t, "CAP-1", "REV-1")
+	order := mustOrder(t, "CAP-1", "REV-1", 1, fixedTime())
+	journal := []engineering.RevisionAcceptanceRecord{
+		mustAcceptance(t, "A1", "CAP-1", "REV-1", engineering.AcceptanceStateAccepted, fixedTime()),
+		mustAcceptance(t, "A2", "CAP-1", "REV-1", engineering.AcceptanceStateAccepted, fixedTime().Add(time.Hour)),
+	}
+
+	repos := resolutionRepos(
+		[]engineering.RevisionEnvelope{revision},
+		[]engineering.RevisionOrderMetadata{order},
+		resolutionAcceptanceRepo{journal: journal},
+	)
+	_, err := application.ResolveCurrentRevision(context.Background(), repos, "CAP-1")
+	if !errors.Is(err, application.ErrStoredStateIntegrity) {
+		t.Fatalf("err = %v, want ErrStoredStateIntegrity", err)
+	}
+}
+
+func TestResolveRejectsZeroAcceptanceEffectiveTimeAsStoredIntegrity(t *testing.T) {
+	revision := mustRevEnv(t, "CAP-1", "REV-1")
+	order := mustOrder(t, "CAP-1", "REV-1", 1, fixedTime())
+	entry := mustAcceptance(t, "A-ZERO-TIME", "CAP-1", "REV-1", engineering.AcceptanceStateAccepted, fixedTime())
+	entry.EffectiveAt = time.Time{}
+
+	repos := resolutionRepos(
+		[]engineering.RevisionEnvelope{revision},
+		[]engineering.RevisionOrderMetadata{order},
+		resolutionAcceptanceRepo{journal: []engineering.RevisionAcceptanceRecord{entry}},
+	)
+	_, err := application.ResolveCurrentRevision(context.Background(), repos, "CAP-1")
+	if !errors.Is(err, application.ErrStoredStateIntegrity) {
+		t.Fatalf("err = %v, want ErrStoredStateIntegrity", err)
+	}
+}
+
+func TestResolveRejectsAcceptanceIdentityIndexMismatch(t *testing.T) {
+	revision := mustRevEnv(t, "CAP-1", "REV-1")
+	order := mustOrder(t, "CAP-1", "REV-1", 1, fixedTime())
+	listed := mustAcceptance(t, "A1", "CAP-1", "REV-1", engineering.AcceptanceStateAccepted, fixedTime())
+	indexed := listed
+	indexed.Reason = "different stored record"
+
+	repos := resolutionRepos(
+		[]engineering.RevisionEnvelope{revision},
+		[]engineering.RevisionOrderMetadata{order},
+		resolutionAcceptanceRepo{
+			journal:  []engineering.RevisionAcceptanceRecord{listed},
+			identity: map[string]engineering.RevisionAcceptanceRecord{"A1": indexed},
+		},
+	)
+	_, err := application.ResolveCurrentRevision(context.Background(), repos, "CAP-1")
+	if !errors.Is(err, application.ErrStoredStateIntegrity) {
+		t.Fatalf("err = %v, want ErrStoredStateIntegrity", err)
 	}
 }
 

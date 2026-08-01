@@ -25,11 +25,11 @@ type Result struct {
 
 // Run executes the canonical "Homework after a lesson" scenario (FF-011)
 // through application commands, in the FF-011 §9 order, against uow and
-// recorder. clock is advanced by the driver between acts so provenance and
-// timeline timestamps are strictly increasing, matching a real sequence of
-// engineering acts.
-func Run(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, clock *application.FixedClock) (Result, error) {
-	return run(ctx, uow, recorder, clock, defaultOrder())
+// recorder and replay inspector. clock is advanced by the driver between acts
+// so provenance and timeline timestamps are strictly increasing, matching a
+// real sequence of engineering acts.
+func Run(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, inspector application.EngineeringReplayInspector, clock *application.FixedClock) (Result, error) {
+	return run(ctx, uow, recorder, inspector, clock, defaultOrder())
 }
 
 // order controls the sequencing of the independent parts of the scenario
@@ -56,14 +56,14 @@ func defaultOrder() order {
 // after the permutable pair but before the plan either way) folded in
 // consistently. It exists solely for
 // TestCanonicalScenarioInsertionOrderIndependence.
-func RunPermuted(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, clock *application.FixedClock) (Result, error) {
-	return run(ctx, uow, recorder, clock, order{
+func RunPermuted(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, inspector application.EngineeringReplayInspector, clock *application.FixedClock) (Result, error) {
+	return run(ctx, uow, recorder, inspector, clock, order{
 		requirements: []string{"REQ-2", "REQ-1"},
 		activities:   [][]string{{"A-3"}, {"A-1"}, {"A-2"}},
 	})
 }
 
-func run(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, clock *application.FixedClock, ord order) (Result, error) {
+func run(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, inspector application.EngineeringReplayInspector, clock *application.FixedClock, ord order) (Result, error) {
 	tick := func() { clock.Advance(time.Hour) }
 
 	// 1. Project.
@@ -88,7 +88,7 @@ func run(ctx context.Context, uow application.UnitOfWork, recorder application.E
 	}
 	if _, err := (application.EstablishCapabilitySpecificationCommand{
 		FeatureCardID: FeatureCardID, ArtifactID: CapabilityArtifactID, RevisionID: CapabilityRevision1, Content: rev1Content,
-	}).Execute(ctx, uow, recorder, clock); err != nil {
+	}).Execute(ctx, uow, recorder, inspector, clock); err != nil {
 		return Result{}, fmt.Errorf("establish capability specification: %w", err)
 	}
 	tick()
@@ -96,7 +96,7 @@ func run(ctx context.Context, uow application.UnitOfWork, recorder application.E
 	// 4. Accept Revision 1.
 	if _, err := (application.AcceptCapabilityRevisionCommand{
 		RecordID: "ACC-1", ArtifactID: CapabilityArtifactID, RevisionID: CapabilityRevision1, State: engineering.AcceptanceStateAccepted,
-	}).Execute(ctx, uow, clock); err != nil {
+	}).Execute(ctx, uow, inspector, clock); err != nil {
 		return Result{}, fmt.Errorf("accept revision 1: %w", err)
 	}
 	tick()
@@ -105,20 +105,20 @@ func run(ctx context.Context, uow application.UnitOfWork, recorder application.E
 	if _, err := (application.AssignLifecycleStateCommand{
 		AssignmentID: EntryAssignmentID, SubjectArtifactID: CapabilityArtifactID, State: "drafting", IsEntry: true,
 		TransitionRecordArtifactID: TransitionRecordArtifactID, TransitionRecordRevisionID: EntryTransitionRevisionID,
-	}).Execute(ctx, uow, recorder, clock); err != nil {
+	}).Execute(ctx, uow, recorder, inspector, clock); err != nil {
 		return Result{}, fmt.Errorf("assign entry lifecycle state: %w", err)
 	}
 	tick()
 
 	// 6. Requirements REQ-1, REQ-2 (permutable), then REQ-3, REQ-4.
 	for _, artifactID := range ord.requirements {
-		if err := establishRequirement(ctx, uow, recorder, clock, artifactID); err != nil {
+		if err := establishRequirement(ctx, uow, recorder, inspector, clock, artifactID); err != nil {
 			return Result{}, err
 		}
 		tick()
 	}
 	for _, artifactID := range []string{"REQ-3", "REQ-4"} {
-		if err := establishRequirement(ctx, uow, recorder, clock, artifactID); err != nil {
+		if err := establishRequirement(ctx, uow, recorder, inspector, clock, artifactID); err != nil {
 			return Result{}, err
 		}
 		tick()
@@ -131,7 +131,7 @@ func run(ctx context.Context, uow application.UnitOfWork, recorder application.E
 	// record -- so the scenario driver records it directly through the
 	// recorder, exactly as RecordValidationRunCommand does internally,
 	// without introducing an eleventh command beyond FF-010 §3's ten.
-	if err := recordEvidenceOnly(ctx, uow, recorder, clock, DecisionEvidenceID, "https://evidence.example/"+DecisionEvidenceID); err != nil {
+	if err := recordEvidenceOnly(ctx, uow, recorder, inspector, clock, DecisionEvidenceID, "https://evidence.example/"+DecisionEvidenceID); err != nil {
 		return Result{}, fmt.Errorf("record decision evidence: %w", err)
 	}
 	tick()
@@ -150,7 +150,7 @@ func run(ctx context.Context, uow application.UnitOfWork, recorder application.E
 		Constraints:   []string{"No binary storage in the first release."},
 		Uncertainties: []string{"Interview sample was 4 teachers."},
 		Rationale:     "Referencing by content address avoids introducing binary storage into the first release; 5 seconds is the longest delay the pilot teachers described as acceptable.",
-	}).Execute(ctx, uow, recorder, clock); err != nil {
+	}).Execute(ctx, uow, recorder, inspector, clock); err != nil {
 		return Result{}, fmt.Errorf("record decision: %w", err)
 	}
 	tick()
@@ -162,13 +162,13 @@ func run(ctx context.Context, uow application.UnitOfWork, recorder application.E
 	}
 	if _, err := (application.ReviseCapabilitySpecificationCommand{
 		ArtifactID: CapabilityArtifactID, RevisionID: CapabilityRevision2, Content: rev2Content,
-	}).Execute(ctx, uow, recorder, clock); err != nil {
+	}).Execute(ctx, uow, recorder, inspector, clock); err != nil {
 		return Result{}, fmt.Errorf("revise capability specification: %w", err)
 	}
 	tick()
 	if _, err := (application.AcceptCapabilityRevisionCommand{
 		RecordID: "ACC-2", ArtifactID: CapabilityArtifactID, RevisionID: CapabilityRevision2, State: engineering.AcceptanceStateAccepted,
-	}).Execute(ctx, uow, clock); err != nil {
+	}).Execute(ctx, uow, inspector, clock); err != nil {
 		return Result{}, fmt.Errorf("accept revision 2: %w", err)
 	}
 	tick()
@@ -176,12 +176,13 @@ func run(ctx context.Context, uow application.UnitOfWork, recorder application.E
 	// 9. Validation plan: activities A-1, A-2, A-3 (REQ-4 has none).
 	if _, err := (application.EstablishValidationPlanCommand{
 		ArtifactID: PlanArtifactID, RevisionID: PlanRevisionID, ScopeArtifactID: CapabilityArtifactID,
+		AcceptanceRecordID: stringPointer("ACC-VP-1"),
 		Activities: []application.PlanActivityCommandInput{
 			planActivity("A-1", "REQ-1", "manual-review", "Satisfied when the reviewer confirms student visibility is specified and traceable.", "Reviewer note confirming student visibility is specified"),
 			planActivity("A-2", "REQ-2", "manual-review", "Satisfied when the reviewer confirms non-student access is excluded.", "Reviewer note confirming non-student access is excluded"),
 			planActivity("A-3", "REQ-3", "manual-inspection", "Satisfied when the inspector confirms the attachment representation is specified as resolvable.", "Inspection note confirming the attachment representation is resolvable"),
 		},
-	}).Execute(ctx, uow, recorder, clock); err != nil {
+	}).Execute(ctx, uow, recorder, inspector, clock); err != nil {
 		return Result{}, fmt.Errorf("establish validation plan: %w", err)
 	}
 	tick()
@@ -191,7 +192,7 @@ func run(ctx context.Context, uow application.UnitOfWork, recorder application.E
 		AssignmentID: FirstAssignmentID, SubjectArtifactID: CapabilityArtifactID, State: "under-validation",
 		TransitionRecordArtifactID: TransitionRecordArtifactID, TransitionRecordRevisionID: FirstTransitionRevisionID,
 		TransitionKey: "begin-validation", FromAssignmentID: EntryAssignmentID,
-	}).Execute(ctx, uow, recorder, clock); err != nil {
+	}).Execute(ctx, uow, recorder, inspector, clock); err != nil {
 		return Result{}, fmt.Errorf("assign under-validation lifecycle state: %w", err)
 	}
 	tick()
@@ -202,19 +203,19 @@ func run(ctx context.Context, uow application.UnitOfWork, recorder application.E
 	for _, group := range ord.activities {
 		for _, key := range group {
 			if key == "A-2" {
-				if err := runActivity(ctx, uow, recorder, clock, key, ClaimIncorrect, "satisfied"); err != nil {
+				if err := runActivity(ctx, uow, recorder, inspector, clock, key, ClaimIncorrect, "satisfied"); err != nil {
 					return Result{}, err
 				}
 				continue
 			}
-			if err := runActivity(ctx, uow, recorder, clock, key, claimByRequirement[key], "satisfied"); err != nil {
+			if err := runActivity(ctx, uow, recorder, inspector, clock, key, claimByRequirement[key], "satisfied"); err != nil {
 				return Result{}, err
 			}
 		}
 	}
 
 	// 12. Correct CLM-2.
-	if err := runCorrection(ctx, uow, recorder, clock); err != nil {
+	if err := runCorrection(ctx, uow, recorder, inspector, clock); err != nil {
 		return Result{}, err
 	}
 
@@ -229,11 +230,93 @@ func run(ctx context.Context, uow application.UnitOfWork, recorder application.E
 	}, nil
 }
 
-func recordEvidenceOnly(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, clock *application.FixedClock, evidenceID, locator string) error {
+func recordEvidenceOnly(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, inspector application.EngineeringReplayInspector, clock *application.FixedClock, evidenceID, locator string) error {
 	now := clock.Now()
 	return uow.Do(ctx, func(r application.Repositories) error {
+		artifactKey := engineering.ArtifactKey{ArtifactID: evidenceID}
+		revisionKey := engineering.RevisionKey{ArtifactID: evidenceID, RevisionID: evidenceRevisionID(evidenceID)}
+		storedArtifact, artifactFound, err := r.Artifacts.Get(ctx, artifactKey)
+		if err != nil {
+			return err
+		}
+		storedRevision, revisionFound, err := r.Revisions.Get(ctx, revisionKey)
+		if err != nil {
+			return err
+		}
+		if artifactFound != revisionFound {
+			return fmt.Errorf("%w: direct decision evidence is only partially persisted", application.ErrStoredStateIntegrity)
+		}
+		if artifactFound {
+			if inspector == nil {
+				return fmt.Errorf("%w: replay inspector is unavailable", application.ErrStoredStateIntegrity)
+			}
+			if err := inspector.ValidateEvidenceArtifact(storedArtifact); err != nil {
+				return fmt.Errorf("%w: invalid direct decision-evidence artifact: %v", application.ErrStoredStateIntegrity, err)
+			}
+			if err := inspector.ValidateRevision(storedRevision); err != nil {
+				return fmt.Errorf("%w: invalid direct decision-evidence revision: %v", application.ErrStoredStateIntegrity, err)
+			}
+			if storedRevision.RevisionFamily != engineering.RevisionFamilyEvidence || storedArtifact.ArtifactType != storedRevision.ArtifactType {
+				return fmt.Errorf("%w: direct decision-evidence members disagree on family", application.ErrStoredStateIntegrity)
+			}
+			if !storedArtifact.RecordedAt.Equal(storedRevision.RecordedAt) {
+				return fmt.Errorf("%w: direct decision-evidence members disagree on recorded time", application.ErrStoredStateIntegrity)
+			}
+			revisions, err := r.Revisions.ListByArtifact(ctx, evidenceID)
+			if err != nil {
+				return err
+			}
+			if len(revisions) != 1 || revisions[0].Key != revisionKey {
+				return fmt.Errorf("%w: direct decision evidence must own exactly one revision", application.ErrStoredStateIntegrity)
+			}
+			if _, found, err := r.StructuredContent.Get(ctx, revisionKey); err != nil {
+				return err
+			} else if found {
+				return fmt.Errorf("%w: direct decision evidence carries capability content", application.ErrStoredStateIntegrity)
+			}
+			orders, err := r.RevisionOrder.ListByArtifact(ctx, evidenceID)
+			if err != nil {
+				return err
+			}
+			acceptance, err := r.RevisionAcceptance.ListByArtifact(ctx, evidenceID)
+			if err != nil {
+				return err
+			}
+			if len(orders) != 0 || len(acceptance) != 0 {
+				return fmt.Errorf("%w: direct decision evidence carries managed revision metadata", application.ErrStoredStateIntegrity)
+			}
+			executions, err := r.Records.ListByKind(ctx, engineering.RecordKindExecution)
+			if err != nil {
+				return err
+			}
+			for _, execution := range executions {
+				if err := inspector.ValidateRecord(execution); err != nil {
+					return fmt.Errorf("%w: invalid execution while checking direct decision evidence: %v", application.ErrStoredStateIntegrity, err)
+				}
+				for _, rawEvidenceKey := range execution.EvidenceKeys {
+					artifactID, revisionID, err := engineering.ParseEvidenceKey(rawEvidenceKey)
+					if err != nil {
+						return fmt.Errorf("%w: malformed execution evidence key: %v", application.ErrStoredStateIntegrity, err)
+					}
+					if artifactID == evidenceID && revisionID == revisionKey.RevisionID {
+						return fmt.Errorf("%w: direct decision evidence is also owned by a validation execution", application.ErrStoredStateIntegrity)
+					}
+				}
+			}
+			expectedArtifact, expectedRevision, err := recorder.RecordEvidence(engineering.EvidenceInput{
+				ArtifactID: evidenceID, RevisionID: revisionKey.RevisionID, Locator: locator, RecordedAt: storedRevision.RecordedAt,
+			})
+			if err != nil {
+				return fmt.Errorf("%w: rebuild direct decision evidence: %v", application.ErrInvalidCommand, err)
+			}
+			if !storedArtifact.Equal(expectedArtifact) || !storedRevision.Equal(expectedRevision) {
+				return fmt.Errorf("%w: direct decision-evidence identity has different immutable semantics", application.ErrImmutableValueConflict)
+			}
+			return nil
+		}
+
 		artEnv, revEnv, err := recorder.RecordEvidence(engineering.EvidenceInput{
-			ArtifactID: evidenceID, RevisionID: evidenceRevisionID(evidenceID), Locator: locator, RecordedAt: now,
+			ArtifactID: evidenceID, RevisionID: revisionKey.RevisionID, Locator: locator, RecordedAt: now,
 		})
 		if err != nil {
 			return err
@@ -245,11 +328,12 @@ func recordEvidenceOnly(ctx context.Context, uow application.UnitOfWork, recorde
 	})
 }
 
-func establishRequirement(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, clock *application.FixedClock, artifactID string) error {
+func establishRequirement(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, inspector application.EngineeringReplayInspector, clock *application.FixedClock, artifactID string) error {
 	_, err := (application.EstablishRequirementCommand{
 		ArtifactID: artifactID, RevisionID: requirementRevisionID(artifactID),
 		Statement: requirementStatements[artifactID], SubjectArtifactID: CapabilityArtifactID,
-	}).Execute(ctx, uow, recorder, clock)
+		AcceptanceRecordID: stringPointer("ACC-" + artifactID),
+	}).Execute(ctx, uow, recorder, inspector, clock)
 	if err != nil {
 		return fmt.Errorf("establish requirement %s: %w", artifactID, err)
 	}
@@ -265,7 +349,7 @@ func planActivity(key, requirementArtifactID, method, interpretation, expectedEv
 	}
 }
 
-func runActivity(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, clock *application.FixedClock, activityKey, claimID, outcome string) error {
+func runActivity(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, inspector application.EngineeringReplayInspector, clock *application.FixedClock, activityKey, claimID, outcome string) error {
 	requirementID := activityRequirement(activityKey)
 	method := activityMethod(activityKey)
 	executionID := ExecutionIDs[activityKey]
@@ -277,7 +361,7 @@ func runActivity(ctx context.Context, uow application.UnitOfWork, recorder appli
 		Method: method, Outcome: "completed",
 		EvidenceArtifactID: evidenceID, EvidenceRevisionID: evidenceRevisionID(evidenceID),
 		EvidenceLocator: "https://evidence.example/" + evidenceID,
-	}).Execute(ctx, uow, recorder, clock); err != nil {
+	}).Execute(ctx, uow, recorder, inspector, clock); err != nil {
 		return fmt.Errorf("record validation run %s: %w", activityKey, err)
 	}
 	clock.Advance(time.Hour)
@@ -289,14 +373,14 @@ func runActivity(ctx context.Context, uow application.UnitOfWork, recorder appli
 		Outcome: outcome, Method: method,
 		EvidenceArtifactID: evidenceID, EvidenceRevisionID: evidenceRevisionID(evidenceID), ExecutionID: executionID,
 		Reasoning: claimReasoning(activityKey),
-	}).Execute(ctx, uow, recorder, clock); err != nil {
+	}).Execute(ctx, uow, recorder, inspector, clock); err != nil {
 		return fmt.Errorf("record claim for %s: %w", activityKey, err)
 	}
 	clock.Advance(time.Hour)
 	return nil
 }
 
-func runCorrection(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, clock *application.FixedClock) error {
+func runCorrection(ctx context.Context, uow application.UnitOfWork, recorder application.EngineeringRecorder, inspector application.EngineeringReplayInspector, clock *application.FixedClock) error {
 	rerunEvidenceID := EvidenceIDs["A-2-rerun"]
 	rerunExecutionID := ExecutionIDs["A-2-rerun"]
 	if _, err := (application.RecordValidationRunCommand{
@@ -305,7 +389,7 @@ func runCorrection(ctx context.Context, uow application.UnitOfWork, recorder app
 		Method: "manual-review", Outcome: "completed",
 		EvidenceArtifactID: rerunEvidenceID, EvidenceRevisionID: evidenceRevisionID(rerunEvidenceID),
 		EvidenceLocator: "https://evidence.example/" + rerunEvidenceID,
-	}).Execute(ctx, uow, recorder, clock); err != nil {
+	}).Execute(ctx, uow, recorder, inspector, clock); err != nil {
 		return fmt.Errorf("record re-run validation run: %w", err)
 	}
 	clock.Advance(time.Hour)
@@ -317,12 +401,14 @@ func runCorrection(ctx context.Context, uow application.UnitOfWork, recorder app
 		Outcome: "not-satisfied", Method: "manual-review",
 		EvidenceArtifactID: rerunEvidenceID, EvidenceRevisionID: evidenceRevisionID(rerunEvidenceID), ExecutionID: rerunExecutionID,
 		Reasoning: "Revision 2 specifies who may view homework but does not state that other users are excluded. The original review treated the positive statement as implying the exclusion. It does not.",
-	}).Execute(ctx, uow, recorder, clock); err != nil {
+	}).Execute(ctx, uow, recorder, inspector, clock); err != nil {
 		return fmt.Errorf("correct claim: %w", err)
 	}
 	clock.Advance(time.Hour)
 	return nil
 }
+
+func stringPointer(value string) *string { return &value }
 
 func activityRequirement(activityKey string) string {
 	switch activityKey {

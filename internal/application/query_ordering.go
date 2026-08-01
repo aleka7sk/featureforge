@@ -70,6 +70,12 @@ func ResolveCurrentRevision(ctx context.Context, repos Repositories, artifactID 
 
 	envelopeByKey := make(map[engineering.RevisionKey]engineering.RevisionEnvelope, len(envelopes))
 	for _, e := range envelopes {
+		if e.Key.ArtifactID != artifactID {
+			return CurrentRevisionResult{}, fmt.Errorf("%w: revision %s was returned for artifact %s", ErrRevisionReferenceMismatch, e.Key, artifactID)
+		}
+		if _, dup := envelopeByKey[e.Key]; dup {
+			return CurrentRevisionResult{}, fmt.Errorf("%w: revision %s was returned more than once", ErrStoredStateIntegrity, e.Key)
+		}
 		envelopeByKey[e.Key] = e
 	}
 
@@ -99,11 +105,23 @@ func ResolveCurrentRevision(ctx context.Context, repos Repositories, artifactID 
 		}
 		bySequence[o.Sequence] = o.Key
 	}
+	// The governed sequence is dense, not merely positive and unique:
+	// N stored revisions must occupy exactly 1..N.  Otherwise a missing
+	// predecessor could make the same persisted history resolve differently
+	// after an unrelated repair.
+	for expected := 1; expected <= len(order); expected++ {
+		if _, ok := bySequence[expected]; !ok {
+			return CurrentRevisionResult{}, fmt.Errorf("%w: artifact %s has no revision at sequence %d in the required dense range 1..%d",
+				ErrRevisionSequenceInvalid, artifactID, expected, len(order))
+		}
+	}
 
-	// Step 8: resolve each revision's acceptance state from the journal.
-	acceptanceByKey := make(map[engineering.RevisionKey]engineering.AcceptanceState, len(envelopes))
-	for _, e := range envelopes {
-		acceptanceByKey[e.Key] = resolveAcceptanceState(journal, e.Key)
+	// Step 8: validate the complete journal before using any entry to derive
+	// current state.  Draft remains represented by absence; an explicit
+	// draft entry is not a permitted transition.
+	acceptanceByKey, err := validateAcceptanceJournal(ctx, repos.RevisionAcceptance, artifactID, envelopeByKey, journal)
+	if err != nil {
+		return CurrentRevisionResult{}, err
 	}
 
 	rationale := ResolutionRationale{Rule: "greatest sequence among accepted revisions"}
@@ -184,6 +202,88 @@ func ResolveCurrentRevision(ctx context.Context, repos Repositories, artifactID 
 		Sequence:  top,
 		Rationale: rationale,
 	}, nil
+}
+
+func validateAcceptanceJournal(
+	ctx context.Context,
+	repo RevisionAcceptanceRepository,
+	artifactID string,
+	envelopeByKey map[engineering.RevisionKey]engineering.RevisionEnvelope,
+	journal []engineering.RevisionAcceptanceRecord,
+) (map[engineering.RevisionKey]engineering.AcceptanceState, error) {
+	historyByKey := make(map[engineering.RevisionKey][]engineering.RevisionAcceptanceRecord, len(envelopeByKey))
+	seenRecordIDs := make(map[string]engineering.RevisionKey, len(journal))
+
+	for _, entry := range journal {
+		if entry.EffectiveAt.IsZero() {
+			return nil, fmt.Errorf("%w: acceptance record %q has no effective time", ErrStoredStateIntegrity, entry.RecordID)
+		}
+		if _, err := engineering.NewRevisionAcceptanceRecord(
+			entry.RecordID, entry.Key, entry.State, entry.EffectiveAt, entry.Actor, entry.Reason,
+		); err != nil {
+			return nil, fmt.Errorf("%w: invalid acceptance record %q: %v", ErrStoredStateIntegrity, entry.RecordID, err)
+		}
+		if entry.Key.ArtifactID != artifactID {
+			return nil, fmt.Errorf("%w: acceptance record %s targets artifact %s, want %s",
+				ErrRevisionReferenceMismatch, entry.RecordID, entry.Key.ArtifactID, artifactID)
+		}
+		if _, ok := envelopeByKey[entry.Key]; !ok {
+			return nil, fmt.Errorf("%w: acceptance record %s names revision %s, which is not stored",
+				ErrRevisionReferenceMismatch, entry.RecordID, entry.Key)
+		}
+		if other, dup := seenRecordIDs[entry.RecordID]; dup {
+			return nil, fmt.Errorf("%w: acceptance record id %q is shared by revisions %s and %s",
+				ErrStoredStateIntegrity, entry.RecordID, other, entry.Key)
+		}
+		seenRecordIDs[entry.RecordID] = entry.Key
+
+		// RecordID is globally unique, not merely unique within this artifact.
+		// The identity lookup also detects an adapter whose artifact listing and
+		// global identity index disagree.
+		stored, found, err := repo.GetByRecordID(ctx, entry.RecordID)
+		if err != nil {
+			return nil, err
+		}
+		if !found || !sameAcceptanceRecord(stored, entry) {
+			return nil, fmt.Errorf("%w: acceptance record id %q does not resolve to its listed journal entry",
+				ErrStoredStateIntegrity, entry.RecordID)
+		}
+
+		historyByKey[entry.Key] = append(historyByKey[entry.Key], entry)
+	}
+
+	states := make(map[engineering.RevisionKey]engineering.AcceptanceState, len(envelopeByKey))
+	for key := range envelopeByKey {
+		entries := historyByKey[key]
+		sort.Slice(entries, func(i, j int) bool {
+			if !entries[i].EffectiveAt.Equal(entries[j].EffectiveAt) {
+				return entries[i].EffectiveAt.Before(entries[j].EffectiveAt)
+			}
+			return entries[i].RecordID < entries[j].RecordID
+		})
+
+		from := engineering.AcceptanceState("")
+		for _, entry := range entries {
+			if !engineering.ValidTransition(from, entry.State) {
+				if from == "" {
+					from = engineering.AcceptanceStateDraft
+				}
+				return nil, fmt.Errorf("%w: invalid persisted acceptance transition %s -> %s for revision %s at record %s",
+					ErrStoredStateIntegrity, from, entry.State, key, entry.RecordID)
+			}
+			from = entry.State
+		}
+		if from == "" {
+			from = engineering.AcceptanceStateDraft
+		}
+		states[key] = from
+	}
+	return states, nil
+}
+
+func sameAcceptanceRecord(a, b engineering.RevisionAcceptanceRecord) bool {
+	return a.RecordID == b.RecordID && a.Key == b.Key && a.State == b.State &&
+		a.EffectiveAt.Equal(b.EffectiveAt) && a.Actor == b.Actor && a.Reason == b.Reason
 }
 
 // resolveAcceptanceState returns the state of the latest entry for key in

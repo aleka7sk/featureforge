@@ -57,7 +57,7 @@ func handleGetFeature(deps Dependencies) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		overview, err := application.GetFeatureOverview(r.Context(), deps.UOW, deps.Projector, featureCardID)
+		overview, err := application.GetFeatureOverview(r.Context(), deps.UOW, deps.Projector, deps.Inspector, featureCardID)
 		if err != nil {
 			writeAppError(w, r, deps, err)
 			return
@@ -76,7 +76,7 @@ func handleGetFeatureState(deps Dependencies) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		state, err := application.GetFeatureEngineeringStateForCard(r.Context(), deps.UOW, deps.Projector, featureCardID)
+		state, err := application.GetFeatureEngineeringStateForCard(r.Context(), deps.UOW, deps.Projector, deps.Inspector, featureCardID)
 		if err != nil {
 			writeAppError(w, r, deps, err)
 			return
@@ -96,7 +96,7 @@ func handleGetFeatureTimeline(deps Dependencies) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		timeline, err := application.GetFeatureTimelineForCard(r.Context(), deps.UOW, featureCardID)
+		timeline, err := application.GetFeatureTimelineForCard(r.Context(), deps.UOW, deps.Inspector, featureCardID)
 		if err != nil {
 			writeAppError(w, r, deps, err)
 			return
